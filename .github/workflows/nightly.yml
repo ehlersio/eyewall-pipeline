@@ -1,0 +1,36 @@
+name: EyeWall Nightly Pipeline
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 3:00 AM ET (UTC-5) — after overnight games finish
+  workflow_dispatch:        # manual trigger from GitHub Actions UI
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .   # adjust if pipeline files are in a subdirectory
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python run.py
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Pipeline failed — check logs above"
