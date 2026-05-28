@@ -39,17 +39,10 @@ def get_already_processed(client, season: int) -> set:
 
 def process_game(game: dict, season: int) -> list:
     game_id  = game['id']
-    is_home  = game.get('homeTeam', {}).get('id') == CAR_TEAM_ID
     car_id   = CAR_TEAM_ID
 
     pbp = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
     if not pbp or not pbp.get('plays'): return []
-
-    # Build player name map
-    player_map = {}
-    for p in pbp.get('rosterSpots', []):
-        if p.get('playerId'):
-            player_map[p['playerId']] = p.get('playerId')
 
     is_playoff = game.get('gameType') == 3
     shots = []
@@ -58,24 +51,47 @@ def process_game(game: dict, season: int) -> list:
         if play.get('typeDescKey') not in SHOT_TYPES: continue
         d = play.get('details', {})
         if d.get('xCoord') is None: continue
-        if d.get('eventOwnerTeamId') != car_id: continue  # CAR shots only
 
-        shooter_id = d.get('scoringPlayerId') or d.get('shootingPlayerId')
-        if not shooter_id: continue
+        owner_team_id = d.get('eventOwnerTeamId')
+        goalie_id     = d.get('goalieInNetId')  # present on all shot events
 
-        shots.append({
-            'player_id':      shooter_id,
-            'season':         season,
-            'game_id':        game_id,
-            'team':           'CAR',
-            'period':         play.get('periodDescriptor', {}).get('number'),
-            'time_in_period': play.get('timeInPeriod'),
-            'x':              d['xCoord'],
-            'y':              d.get('yCoord'),
-            'shot_type':      d.get('shotType'),
-            'event_type':     play['typeDescKey'],
-            'is_playoff':     is_playoff,
-        })
+        if owner_team_id == car_id:
+            # CAR shot — record shooter, opposing goalie in net
+            shooter_id = d.get('scoringPlayerId') or d.get('shootingPlayerId')
+            if not shooter_id: continue
+            shots.append({
+                'player_id':      shooter_id,
+                'goalie_id':      goalie_id,
+                'season':         season,
+                'game_id':        game_id,
+                'team':           'CAR',
+                'period':         play.get('periodDescriptor', {}).get('number'),
+                'time_in_period': play.get('timeInPeriod'),
+                'x':              d['xCoord'],
+                'y':              d.get('yCoord'),
+                'shot_type':      d.get('shotType'),
+                'event_type':     play['typeDescKey'],
+                'is_playoff':     is_playoff,
+            })
+        else:
+            # Shot against CAR — record shooter, CAR goalie in net
+            if not goalie_id: continue  # skip empty net situations
+            shooter_id = d.get('scoringPlayerId') or d.get('shootingPlayerId')
+            if not shooter_id: continue
+            shots.append({
+                'player_id':      shooter_id,
+                'goalie_id':      goalie_id,
+                'season':         season,
+                'game_id':        game_id,
+                'team':           'OPP',
+                'period':         play.get('periodDescriptor', {}).get('number'),
+                'time_in_period': play.get('timeInPeriod'),
+                'x':              d['xCoord'],
+                'y':              d.get('yCoord'),
+                'shot_type':      d.get('shotType'),
+                'event_type':     play['typeDescKey'],
+                'is_playoff':     is_playoff,
+            })
 
     return shots
 
