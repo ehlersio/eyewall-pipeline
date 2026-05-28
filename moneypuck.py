@@ -10,16 +10,19 @@ import math
 import requests
 from db import get_client, NHL_SEASON
 
-MP_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
+MP_SKATERS_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
+MP_GOALIES_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/goalies.csv'
 HEADERS = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)', 'Referer': 'https://moneypuck.com/data.htm'}
+
+LEAGUE_AVG_SV_PCT = 0.900  # approximate NHL league average
 
 MIN_GP         = 10    # minimum games for percentile pool
 GOALS_PER_WIN  = 5.4   # NHL goals per win approximation
 PEN_MIN_VALUE  = 0.11  # goals per penalty minute (TopDownHockey methodology)
 
-def fetch_csv() -> list[dict]:
-    print("  Fetching MoneyPuck CSV...")
-    r = requests.get(MP_URL, headers=HEADERS, timeout=60)
+def fetch_csv(url: str) -> list[dict]:
+    print(f"  Fetching {url.split('/')[-1]}...")
+    r = requests.get(url, headers=HEADERS, timeout=60)
     r.raise_for_status()
     reader = csv.DictReader(io.StringIO(r.text))
     rows = list(reader)
@@ -53,8 +56,7 @@ def run(season: int = NHL_SEASON):
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
-    rows = fetch_csv()
-
+    rows = fetch_csv(MP_SKATERS_URL)
     # Split by situation
     by_situation = {}
     for r in rows:
@@ -249,7 +251,130 @@ def run(season: int = NHL_SEASON):
             on_conflict='player_id,season,team,game_type'
         ).execute()
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
-    print("\n✅ MoneyPuck analytics pipeline complete")
+    print("\n✅ MoneyPuck skater analytics pipeline complete")
+
+    # Also run goalie analytics
+    run_goalies(season)
+
+def run_goalies(season: int = NHL_SEASON):
+    client = get_client()
+    print(f"\n=== MoneyPuck Goalie Analytics — Season {season} ===")
+
+    rows = fetch_csv(MP_GOALIES_URL)
+
+    # Split by situation
+    by_situation = {}
+    for r in rows:
+        sit = r.get('situation', '')
+        by_situation.setdefault(sit, {})[r['playerId']] = r
+
+    all_map  = by_situation.get('all',         {})
+    ev_map   = by_situation.get('5on5',        {})
+    pk_map   = by_situation.get('4on5',        {})  # goalie's PK = 4on5 (skater down)
+
+    MIN_GOALIE_GP = 10
+
+    qualified = [r for r in all_map.values()
+                 if n(r.get('games_played', 0)) >= MIN_GOALIE_GP]
+    print(f"  Pool: {len(qualified)} goalies (min {MIN_GOALIE_GP} GP)")
+
+    # ── Metric functions ───────────────────────────────────────────
+
+    def gsax(row):
+        """Goals saved above expected (all situations, flurry-adjusted)."""
+        xg  = n(row.get('flurryAdjustedxGoals', 0)) or n(row.get('xGoals', 0))
+        ga  = n(row.get('goals', 0))
+        return xg - ga  # positive = better than expected
+
+    def gsax_per60(row):
+        it = n(row.get('icetime', 0))
+        if it < 60: return None
+        return (gsax(row) / it) * 3600
+
+    def ev_sv_pct(row):
+        """5on5 save percentage."""
+        ev = ev_map.get(row['playerId'])
+        if not ev: return None
+        shots = n(ev.get('ongoal', 0))
+        goals = n(ev.get('goals', 0))
+        if shots < 10: return None
+        return (shots - goals) / shots
+
+    def hd_sv_pct(row):
+        """High danger save percentage (all situations)."""
+        hd_shots = n(row.get('highDangerShots', 0))
+        hd_goals = n(row.get('highDangerGoals', 0))
+        if hd_shots < 5: return None
+        return (hd_shots - hd_goals) / hd_shots
+
+    def md_sv_pct(row):
+        """Medium danger save percentage."""
+        md_shots = n(row.get('mediumDangerShots', 0))
+        md_goals = n(row.get('mediumDangerGoals', 0))
+        if md_shots < 5: return None
+        return (md_shots - md_goals) / md_shots
+
+    def pk_sv_pct(row):
+        """Penalty kill (4on5) save percentage."""
+        pk = pk_map.get(row['playerId'])
+        if not pk: return None
+        shots = n(pk.get('ongoal', 0))
+        goals = n(pk.get('goals', 0))
+        if shots < 5: return None
+        return (shots - goals) / shots
+
+    # ── Percentile pools ───────────────────────────────────────────
+    print("  Building goalie percentile pools...")
+    pools = {
+        'gsax':       build_sorted_pool(qualified, gsax),
+        'gsax60':     build_sorted_pool(qualified, gsax_per60),
+        'ev_sv_pct':  build_sorted_pool(qualified, ev_sv_pct),
+        'hd_sv_pct':  build_sorted_pool(qualified, hd_sv_pct),
+        'md_sv_pct':  build_sorted_pool(qualified, md_sv_pct),
+        'pk_sv_pct':  build_sorted_pool(qualified, pk_sv_pct),
+    }
+
+    # ── Compute and upsert ─────────────────────────────────────────
+    print("  Computing goalie analytics...")
+    updates = []
+    for pid, row in all_map.items():
+        gsax_val    = gsax(row)
+        gsax60_val  = gsax_per60(row)
+        ev_sv_val   = ev_sv_pct(row)
+        hd_sv_val   = hd_sv_pct(row)
+        md_sv_val   = md_sv_pct(row)
+        pk_sv_val   = pk_sv_pct(row)
+
+        updates.append({
+            'player_id':        int(pid),
+            'season':           season,
+            'team':             row.get('team', ''),
+            'game_type':        2,
+            # Analytics
+            'gsax':             round(gsax_val, 2),
+            'gsax_per60':       round(gsax60_val, 3) if gsax60_val is not None else None,
+            'ev_sv_pct':        round(ev_sv_val, 4) if ev_sv_val is not None else None,
+            'hd_sv_pct':        round(hd_sv_val, 4) if hd_sv_val is not None else None,
+            'md_sv_pct':        round(md_sv_val, 4) if md_sv_val is not None else None,
+            'pk_sv_pct':        round(pk_sv_val, 4) if pk_sv_val is not None else None,
+            # Percentiles
+            'pct_gsax':         percentile_rank(gsax_val, pools['gsax']),
+            'pct_gsax60':       percentile_rank(gsax60_val, pools['gsax60']),
+            'pct_ev_sv':        percentile_rank(ev_sv_val, pools['ev_sv_pct']),
+            'pct_hd_sv':        percentile_rank(hd_sv_val, pools['hd_sv_pct']),
+            'pct_md_sv':        percentile_rank(md_sv_val, pools['md_sv_pct']),
+            'pct_pk_sv':        percentile_rank(pk_sv_val, pools['pk_sv_pct']),
+        })
+
+    print(f"  Upserting {len(updates)} goalie analytics records...")
+    for i in range(0, len(updates), 200):
+        batch = updates[i:i+200]
+        client.table('goalie_seasons').upsert(
+            batch,
+            on_conflict='player_id,season,team,game_type'
+        ).execute()
+    print(f"  ✓ goalie_seasons: {len(updates)} analytics rows upserted")
+    print("\n✅ MoneyPuck goalie analytics pipeline complete")
 
 if __name__ == '__main__':
     run()
