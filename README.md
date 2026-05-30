@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytics, and shot event data.
+Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, and RAPM-derived WAR.
 
 ## Setup
 
@@ -9,8 +9,9 @@ Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytic
 pip install -r requirements.txt
 ```
 
+Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`
+
 ### 2. Create your .env file
-Copy `.env.example` to `.env` and fill in your credentials:
 ```bash
 cp .env.example .env
 ```
@@ -22,56 +23,139 @@ SUPABASE_SERVICE_KEY=your_service_role_key_here
 NHL_SEASON=20252026
 ```
 
-The `SUPABASE_SERVICE_KEY` is in your Supabase dashboard under **Settings → API → service_role**.
-
 ### 3. Run the pipeline
 ```bash
-# Run everything
+# Run everything (nightly order)
 python run.py
 
 # Run individual modules
-python run.py nhl          # NHL stats only (rosters, skater/goalie stats, team stats, game log)
-python run.py moneypuck    # MoneyPuck WAR + percentiles only
-python run.py shots        # Shot coordinates only (incremental — skips already processed games)
+python run.py nhl              # NHL stats only
+python run.py shots            # Shot events (incremental)
+python run.py shifts           # Shift charts (incremental)
+python run.py shifts 20242025  # Shift charts backfill for a specific season
+python run.py zones            # Zone starts (incremental)
+python run.py rapm             # RAPM regression only
+python run.py moneypuck        # MoneyPuck WAR + percentiles only
+python run.py validate         # Internal RAPM sanity checks (run after rapm.py)
+python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV (quarterly)
 ```
 
-## What each module does
+## Pipeline modules
+
+### Run order (dependencies matter)
+
+```
+nhl_stats -> shot_events -> shift_data -> zone_starts -> rapm -> moneypuck
+```
 
 ### `nhl_stats.py`
 - Fetches rosters for all 32 NHL teams
-- Fetches skater stats (summary + primary/secondary assist split)
-- Fetches goalie stats
-- Fetches team stats
+- Fetches skater, goalie, and team stats
 - Fetches CAR game log
-- Runs time: ~2-3 minutes
+- Runtime: ~2-3 minutes
 
-### `moneypuck.py`
-- Downloads MoneyPuck season summary CSV (~500KB)
-- Computes WAR (simplified xGoals-based)
+### `shot_events.py` *(league-wide)*
+- Fetches PBP for all 32 teams' completed games
+- Extracts shot coordinates, event type, situation code, goalie in net
+- Stores real team abbreviations (e.g. `BOS`, `TBL`) + `car_game` flag
+- Incremental — skips already processed games
+- Runtime: ~10-15 minutes per season (one-time backfill), ~2 min nightly
+
+### `shift_data.py` *(league-wide)*
+- Fetches shift charts from NHL Stats API for all league games
+- Stores per-player shift start/end times for both teams
+- Used by `rapm.py` to determine on-ice players per shot event
+- Incremental — skips already processed games
+- Runtime: ~10-15 minutes per season (one-time backfill), ~2 min nightly
+
+### `zone_starts.py` *(league-wide)*
+- Fetches PBP faceoff data for all league games
+- Records offensive/defensive/neutral zone start counts per player per game
+- Away team zones flipped (NHL API reports from home team perspective)
+- Used by `rapm.py` for zone-start adjustment
+- Incremental — skips already processed games
+- Runtime: ~15-20 minutes per season (one-time backfill), ~3 min nightly
+
+### `rapm.py`
+- Builds 3-year rolling ridge regression RAPM (current + 2 prior seasons)
+- 5v5 only — uses `situation_code='1551'` filter on shot events
+- Zone-start adjusted (players with DZ-heavy deployment upweighted)
+- Signed xG formulation — measures xG differential, not raw xG
+- Writes `rapm` column to `player_seasons` for current season
+- **Beta model** — zone-start adjustment in development, score-state adjustment pending
+- Runtime: ~8-10 minutes (dominated by loading 2.8M shift rows)
+
+### `validate_rapm.py`
+- **Internal checks** (no external data): distribution mean, position balance, known elite player rankings, year-over-year stability
+- **EH comparison** (manual, quarterly): loads a manually exported Evolving Hockey RAPM CSV, computes Pearson correlation, identifies outliers
+- Writes results to `rapm_validation` Supabase table
+- Pass threshold: r ≥ 0.85 vs EH; Warn: r ≥ 0.75; Fail: r < 0.75
+- Not included in nightly `run.py` — run manually after full-season pipeline runs
+- See `VALIDATION_STEPS.md` for step-by-step instructions
+- Computes WAR using RAPM as the EV component (falls back to xGoals if RAPM unavailable)
 - Computes percentile rankings vs all NHL forwards/defensemen
-- Writes analytics columns to existing `player_seasons` rows
-- Runs time: ~30-60 seconds
+- Computes goalie GSAX, danger-zone SV%, percentiles
+- Writes analytics columns to `player_seasons` and `goalie_seasons`
+- Runtime: ~30-60 seconds
 
-### `shot_events.py`
-- Fetches play-by-play for each completed CAR game
-- Extracts shot coordinates (x, y, type, period, time)
-- Incremental — skips games already processed
-- Runs time: ~1-2 minutes for a full season
+## RAPM methodology
 
-## Scheduling (after development)
+True Regularized Adjusted Plus-Minus via ridge regression (alpha=2500):
 
-Deploy to Vercel as a cron job running nightly at 4am ET (after games finish):
+- **Pool:** 3-year rolling window (current + 2 prior seasons)
+- **Events:** ~420k 5v5 shot attempts across all 32 teams
+- **Matrix:** (n_shots × n_players), +1 for shooting team, -1 for defending team
+- **Outcome y:** Signed xG — positive for alphabetically-first team, negative for the other. This measures xG *differential* so forwards and defensemen are treated symmetrically.
+- **Zone-start adjustment:** Players with low OZS% (DZ-heavy) get upward weight per shot event. Weight = 1.0 + (0.50 - OZS%) × 0.5
+- **Score-state adjustment:** Pending — requires `home_team` in `shot_events` table for non-CAR games
+- **Minimum sample:** 150 minutes EV ice time across 3-season pool
+- **Validation:** Periodic correlation check vs Evolving Hockey public RAPM (target r ≥ 0.85)
 
-```json
-// vercel.json
-{
-  "crons": [{
-    "path": "/api/pipeline",
-    "schedule": "0 9 * * *"
-  }]
-}
+## One-time backfill (first run)
+
+Run these before the first nightly run to populate historical data:
+
+```bash
+# Shot events (league-wide, all 4 seasons)
+python shot_events.py 20222023
+python shot_events.py 20232024
+python shot_events.py 20242025
+python shot_events.py 20252026
+
+# Shift charts (league-wide, all 4 seasons)
+python shift_data.py 20222023
+python shift_data.py 20232024
+python shift_data.py 20242025
+python shift_data.py 20252026
+
+# Zone starts (all 4 seasons)
+python zone_starts.py 20222023
+python zone_starts.py 20232024
+python zone_starts.py 20242025
+python zone_starts.py 20252026
+
+# Then run RAPM + MoneyPuck
+python rapm.py
+python moneypuck.py
 ```
 
 ## Database schema
 
-See `../eyewall-supabase/schema.sql` for the full Supabase schema.
+| Table | Description |
+|-------|-------------|
+| `players` | Player master (id, name, position) |
+| `player_seasons` | Per-player per-season stats + analytics (war, rapm, percentiles) |
+| `goalie_seasons` | Per-goalie per-season stats + analytics (gsax, sv%, percentiles) |
+| `team_seasons` | Per-team per-season stats |
+| `game_log` | CAR game-by-game results |
+| `shot_events` | League-wide shot coordinates (car_game flag for CAR-specific queries) |
+| `shift_events` | League-wide per-player shift start/end times |
+| `zone_starts` | Per-player OZ/DZ/NZ start counts per game |
+| `rapm_validation` | RAPM validation run history (internal checks + EH correlation) |
+| `rapm_validation` | Quarterly RAPM correlation vs Evolving Hockey |
+
+See `schema.sql` for full definitions.
+
+## Scheduling
+
+GitHub Actions nightly cron runs at 3AM ET (8AM UTC) via `.github/workflows/nightly.yml`. The nightly run is incremental — only new completed games are processed by `shot_events.py`, `shift_data.py`, and `zone_starts.py`. Full runtime after backfill: ~6-10 minutes.

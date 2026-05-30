@@ -1,18 +1,43 @@
 """
-shot_events.py — Aggregate shot coordinates from NHL PBP for all CAR games.
+shot_events.py — Aggregate shot coordinates from NHL PBP for ALL league games.
                  Writes to shot_events table in Supabase.
 
-Designed to be run incrementally — skips games already processed.
+League-wide coverage is required for RAPM — CAR-only shots (~25k)
+don't give the ridge regression enough variance to separate individual
+contributions from linemate quality. League-wide gives ~800k events.
+
+Key changes from CAR-only version:
+  - Fetches all 32 teams' schedules to get every game
+  - team column = real abbreviation (e.g. 'BOS', 'TBL') not 'CAR'/'OPP'
+  - car_game = True for games involving CAR (used by frontend heat maps)
+  - Frontend filters: heat maps use car_game=True, team='CAR'/'OPP'-equivalent
+    by checking if team == 'CAR' or (car_game and team != 'CAR')
+
+Frontend compatibility:
+  - Skater heat maps:  car_game=True AND team='CAR'
+  - Goalie heat maps:  car_game=True AND team!='CAR' AND goalie_id=<id>
+  - RAPM:             situation_code='1551' (all teams, no car_game filter)
+
+Usage:
+  python shot_events.py              # current season
+  python shot_events.py 20242025     # backfill a prior season
 """
 import requests
 import time
-from db import get_client, upsert, NHL_SEASON
+from db import get_client, NHL_SEASON
 
 NHL_BASE = 'https://api-web.nhle.com/v1'
-CAR_TEAM_ID = 12
-HEADERS = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)'}
+CAR_ABBR = 'CAR'
+HEADERS  = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)'}
 
 SHOT_TYPES = {'shot-on-goal', 'missed-shot', 'blocked-shot', 'goal'}
+
+ALL_TEAMS = [
+    'ANA','BOS','BUF','CAR','CBJ','CGY','CHI','COL','DAL','DET',
+    'EDM','FLA','LAK','MIN','MTL','NJD','NSH','NYI','NYR','OTT',
+    'PHI','PIT','SEA','SJS','STL','TBL','TOR','UTA','VAN','VGK',
+    'WPG','WSH'
+]
 
 def nhl_get(url):
     try:
@@ -20,109 +45,145 @@ def nhl_get(url):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  ✗ {url} — {e}")
+        print(f"  ERROR {url} -- {e}")
         return None
 
-def get_completed_games(team: str, season: int) -> list:
-    data = nhl_get(f'{NHL_BASE}/club-schedule-season/{team}/{season}')
-    if not data: return []
-    return [g for g in data.get('games', [])
-            if g.get('gameState') in ('OFF', 'FINAL')]
+def get_all_completed_games(season):
+    """Get all unique completed games across all 32 teams."""
+    seen  = set()
+    games = []
+    for team in ALL_TEAMS:
+        data = nhl_get(f'{NHL_BASE}/club-schedule-season/{team}/{season}')
+        if not data:
+            continue
+        for g in data.get('games', []):
+            gid = g.get('id')
+            if gid and gid not in seen and g.get('gameState') in ('OFF', 'FINAL', 'F'):
+                seen.add(gid)
+                games.append(g)
+        time.sleep(0.1)
+    return sorted(games, key=lambda g: g['id'])
 
-def get_already_processed(client, season: int) -> set:
-    """Get game IDs already in shot_events table."""
-    result = client.table('shot_events')\
-        .select('game_id')\
-        .eq('season', season)\
-        .execute()
-    return {r['game_id'] for r in result.data}
+def get_already_processed(client, season):
+    """Get game IDs already in shot_events (paginated)."""
+    all_ids = set()
+    offset  = 0
+    while True:
+        rows = client.table('shot_events') \
+            .select('game_id') \
+            .eq('season', season) \
+            .range(offset, offset + 999) \
+            .execute().data
+        if not rows:
+            break
+        all_ids.update(r['game_id'] for r in rows)
+        offset += 1000
+    return all_ids
 
-def process_game(game: dict, season: int) -> list:
-    game_id  = game['id']
-    car_id   = CAR_TEAM_ID
+def process_game(game, season):
+    game_id    = game['id']
+    home_abbr  = game.get('homeTeam', {}).get('abbrev', '')
+    away_abbr  = game.get('awayTeam', {}).get('abbrev', '')
+    is_car_game = (home_abbr == CAR_ABBR or away_abbr == CAR_ABBR)
+    is_playoff  = game.get('gameType') == 3
 
     pbp = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
-    if not pbp or not pbp.get('plays'): return []
+    if not pbp or not pbp.get('plays'):
+        return []
 
-    is_playoff = game.get('gameType') == 3
+    # Build team ID -> abbrev map from PBP roster
+    home_id = pbp.get('homeTeam', {}).get('id')
+    away_id = pbp.get('awayTeam', {}).get('id')
+    home_abbr_pbp = pbp.get('homeTeam', {}).get('abbrev', home_abbr)
+    away_abbr_pbp = pbp.get('awayTeam', {}).get('abbrev', away_abbr)
+
+    def team_abbr(team_id):
+        if team_id == home_id:
+            return home_abbr_pbp
+        if team_id == away_id:
+            return away_abbr_pbp
+        return ''
+
     shots = []
-
     for play in pbp['plays']:
-        if play.get('typeDescKey') not in SHOT_TYPES: continue
+        if play.get('typeDescKey') not in SHOT_TYPES:
+            continue
         d = play.get('details', {})
-        if d.get('xCoord') is None: continue
+        if d.get('xCoord') is None:
+            continue
 
-        owner_team_id = d.get('eventOwnerTeamId')
-        goalie_id     = d.get('goalieInNetId')  # present on all shot events
+        owner_team_id  = d.get('eventOwnerTeamId')
+        shooter_id     = d.get('scoringPlayerId') or d.get('shootingPlayerId')
+        goalie_id      = d.get('goalieInNetId')
+        situation_code = play.get('situationCode')
 
-        if owner_team_id == car_id:
-            # CAR shot — record shooter, opposing goalie in net
-            shooter_id = d.get('scoringPlayerId') or d.get('shootingPlayerId')
-            if not shooter_id: continue
-            shots.append({
-                'player_id':      shooter_id,
-                'goalie_id':      goalie_id,
-                'season':         season,
-                'game_id':        game_id,
-                'team':           'CAR',
-                'period':         play.get('periodDescriptor', {}).get('number'),
-                'time_in_period': play.get('timeInPeriod'),
-                'x':              d['xCoord'],
-                'y':              d.get('yCoord'),
-                'shot_type':      d.get('shotType'),
-                'event_type':     play['typeDescKey'],
-                'is_playoff':     is_playoff,
-            })
-        else:
-            # Shot against CAR — record shooter, CAR goalie in net
-            if not goalie_id: continue  # skip empty net situations
-            shooter_id = d.get('scoringPlayerId') or d.get('shootingPlayerId')
-            if not shooter_id: continue
-            shots.append({
-                'player_id':      shooter_id,
-                'goalie_id':      goalie_id,
-                'season':         season,
-                'game_id':        game_id,
-                'team':           'OPP',
-                'period':         play.get('periodDescriptor', {}).get('number'),
-                'time_in_period': play.get('timeInPeriod'),
-                'x':              d['xCoord'],
-                'y':              d.get('yCoord'),
-                'shot_type':      d.get('shotType'),
-                'event_type':     play['typeDescKey'],
-                'is_playoff':     is_playoff,
-            })
+        if not shooter_id:
+            continue
+
+        shooter_team = team_abbr(owner_team_id)
+
+        shots.append({
+            'player_id':      shooter_id,
+            'goalie_id':      goalie_id,
+            'season':         season,
+            'game_id':        game_id,
+            'team':           shooter_team,    # real abbrev e.g. 'BOS'
+            'car_game':       is_car_game,     # True if CAR played in this game
+            'period':         play.get('periodDescriptor', {}).get('number'),
+            'time_in_period': play.get('timeInPeriod'),
+            'x':              d['xCoord'],
+            'y':              d.get('yCoord'),
+            'shot_type':      d.get('shotType'),
+            'event_type':     play['typeDescKey'],
+            'is_playoff':     is_playoff,
+            'situation_code': situation_code,
+        })
 
     return shots
 
-def run(season: int = NHL_SEASON, team: str = 'CAR'):
+def run(season=NHL_SEASON):
     client = get_client()
-    print(f"\n=== Shot Events Pipeline — {team} Season {season} ===")
+    print(f"\n=== Shot Events Pipeline (league-wide) -- Season {season} ===")
 
-    games = get_completed_games(team, season)
-    print(f"  Found {len(games)} completed games")
+    print("  Fetching all league game IDs...")
+    games = get_all_completed_games(season)
+    print(f"  Found {len(games):,} completed games across all 32 teams")
 
     already_done = get_already_processed(client, season)
     pending = [g for g in games if g['id'] not in already_done]
-    print(f"  {len(already_done)} already processed, {len(pending)} pending")
+    print(f"  {len(already_done):,} already processed, {len(pending):,} pending")
+
+    if not pending:
+        print("  All games already processed")
+        return
 
     total_shots = 0
+    errors      = 0
+
     for i, game in enumerate(pending):
         shots = process_game(game, season)
         if shots:
-            # Insert (not upsert) — game_id not unique in shot_events
-            # Delete existing first to handle reruns
-            client.table('shot_events')\
-                .delete()\
-                .eq('game_id', game['id'])\
+            client.table('shot_events') \
+                .delete() \
+                .eq('game_id', game['id']) \
                 .execute()
             for j in range(0, len(shots), 500):
                 client.table('shot_events').insert(shots[j:j+500]).execute()
             total_shots += len(shots)
-        print(f"  [{i+1}/{len(pending)}] Game {game['id']}: {len(shots)} shots")
-        time.sleep(0.3)  # be polite to NHL API
+        else:
+            errors += 1
 
-    print(f"\n✅ Shot events pipeline complete — {total_shots} shots inserted")
+        if (i + 1) % 100 == 0 or (i + 1) == len(pending):
+            print(f"  [{i+1}/{len(pending)}] {total_shots:,} shots inserted so far")
+
+        time.sleep(0.3)
+
+    print(f"\nShot events pipeline complete")
+    print(f"   Shots inserted: {total_shots:,}")
+    if errors:
+        print(f"   Games with no data: {errors}")
 
 if __name__ == '__main__':
-    run()
+    import sys
+    season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
+    run(season=season_arg)

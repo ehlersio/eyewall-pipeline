@@ -10,19 +10,16 @@ import math
 import requests
 from db import get_client, NHL_SEASON
 
-MP_SKATERS_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
-MP_GOALIES_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/goalies.csv'
+MP_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
 HEADERS = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)', 'Referer': 'https://moneypuck.com/data.htm'}
-
-LEAGUE_AVG_SV_PCT = 0.900  # approximate NHL league average
 
 MIN_GP         = 10    # minimum games for percentile pool
 GOALS_PER_WIN  = 5.4   # NHL goals per win approximation
 PEN_MIN_VALUE  = 0.11  # goals per penalty minute (TopDownHockey methodology)
 
-def fetch_csv(url: str) -> list[dict]:
-    print(f"  Fetching {url.split('/')[-1]}...")
-    r = requests.get(url, headers=HEADERS, timeout=60)
+def fetch_csv() -> list[dict]:
+    print("  Fetching MoneyPuck CSV...")
+    r = requests.get(MP_URL, headers=HEADERS, timeout=60)
     r.raise_for_status()
     reader = csv.DictReader(io.StringIO(r.text))
     rows = list(reader)
@@ -56,7 +53,8 @@ def run(season: int = NHL_SEASON):
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
-    rows = fetch_csv(MP_SKATERS_URL)
+    rows = fetch_csv()
+
     # Split by situation
     by_situation = {}
     for r in rows:
@@ -149,20 +147,33 @@ def run(season: int = NHL_SEASON):
         'teammates':  build_sorted_pool(defs, teammates),
     }
 
-    # ── League averages for WAR ────────────────────────────────────
+    # ── Load RAPM values written by rapm.py ──────────────────────────
+    # rapm.py runs before moneypuck.py in the pipeline so values are fresh.
+    # RAPM is a beta model — clearly labeled in the frontend tooltip.
+    print("  Loading RAPM values from Supabase...")
+    rapm_map = {}  # player_id -> rapm coefficient (marginal xG/60 at 5v5 EV)
+    try:
+        offset = 0
+        while True:
+            rows = client.table('player_seasons') \
+                .select('player_id,rapm') \
+                .eq('season', season) \
+                .eq('game_type', 2) \
+                .not_.is_('rapm', 'null') \
+                .range(offset, offset + 999) \
+                .execute().data
+            if not rows:
+                break
+            for r in rows:
+                rapm_map[r['player_id']] = r['rapm']
+            offset += 1000
+        print(f"  Loaded RAPM for {len(rapm_map)} players")
+    except Exception as e:
+        print(f"  WARNING: Could not load RAPM values: {e}")
+
+    # ── League averages for WAR fallback ─────────────────────────────
     def avg(pool): return sum(pool) / len(pool) if pool else 0.0
 
-    def avg_xgf60(group):
-        vals = [per60(r.get('OnIce_F_xGoals', 0), n(ev_map.get(r['playerId'], {}).get('icetime', 1)))
-                for r in group if ev_map.get(r['playerId'])]
-        return avg([v for v in vals if v > 0])
-
-    def avg_xga60(group):
-        vals = [per60(r.get('OnIce_A_xGoals', 0), n(ev_map.get(r['playerId'], {}).get('icetime', 1)))
-                for r in group if ev_map.get(r['playerId'])]
-        return avg([v for v in vals if v > 0])
-
-    # Use the ev_map rows for fwds/defs averages
     fwd_ev = [ev_map[r['playerId']] for r in fwds if r['playerId'] in ev_map]
     def_ev = [ev_map[r['playerId']] for r in defs if r['playerId'] in ev_map]
     fwd_avg_xgf60 = avg([per60(r.get('OnIce_F_xGoals', 0), n(r.get('icetime', 1))) for r in fwd_ev if n(r.get('icetime', 0)) > 300])
@@ -176,18 +187,24 @@ def run(season: int = NHL_SEASON):
         it = n(ev.get('icetime', 0)) / 3600  # hours of EV ice
         if it < 0.1: return None
 
-        avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
-        avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
+        pen = n(row.get('I_F_penalityMinutes', 0)) * PEN_MIN_VALUE * -1
+        fin = n(row.get('I_F_goals', 0)) - n(row.get('I_F_xGoals', 0))
 
-        xgf60 = per60(ev.get('OnIce_F_xGoals', 0), n(ev['icetime']))
-        xga60 = per60(ev.get('OnIce_A_xGoals', 0), n(ev['icetime']))
+        rapm = rapm_map.get(int(row['playerId']))
+        if rapm is not None:
+            # RAPM-derived WAR (beta):
+            # Convert RAPM coefficient (marginal xG/60) to goals above average
+            # then to wins. PP/PK/finishing/penalty components unchanged.
+            ev_gaa = float(rapm) * it  # xG above average from EV RAPM
+        else:
+            # Fallback: xGoals-above-average method (original approach)
+            avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
+            avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
+            xgf60   = per60(ev.get('OnIce_F_xGoals', 0), n(ev['icetime']))
+            xga60   = per60(ev.get('OnIce_A_xGoals', 0), n(ev['icetime']))
+            ev_gaa  = (xgf60 - avg_xgf) * it + (avg_xga - xga60) * it
 
-        off_gaa = (xgf60 - avg_xgf) * it
-        def_gaa = (avg_xga - xga60) * it
-        pen     = n(row.get('I_F_penalityMinutes', 0)) * PEN_MIN_VALUE * -1
-        fin     = n(row.get('I_F_goals', 0)) - n(row.get('I_F_xGoals', 0))
-
-        gaa = off_gaa + def_gaa + pen * 0.3 + fin * 0.3
+        gaa = ev_gaa + pen * 0.3 + fin * 0.3
         war = gaa / GOALS_PER_WIN + 0.5
         return round(war, 3)
 
@@ -251,130 +268,7 @@ def run(season: int = NHL_SEASON):
             on_conflict='player_id,season,team,game_type'
         ).execute()
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
-    print("\n✅ MoneyPuck skater analytics pipeline complete")
-
-    # Also run goalie analytics
-    run_goalies(season)
-
-def run_goalies(season: int = NHL_SEASON):
-    client = get_client()
-    print(f"\n=== MoneyPuck Goalie Analytics — Season {season} ===")
-
-    rows = fetch_csv(MP_GOALIES_URL)
-
-    # Split by situation
-    by_situation = {}
-    for r in rows:
-        sit = r.get('situation', '')
-        by_situation.setdefault(sit, {})[r['playerId']] = r
-
-    all_map  = by_situation.get('all',         {})
-    ev_map   = by_situation.get('5on5',        {})
-    pk_map   = by_situation.get('4on5',        {})  # goalie's PK = 4on5 (skater down)
-
-    MIN_GOALIE_GP = 10
-
-    qualified = [r for r in all_map.values()
-                 if n(r.get('games_played', 0)) >= MIN_GOALIE_GP]
-    print(f"  Pool: {len(qualified)} goalies (min {MIN_GOALIE_GP} GP)")
-
-    # ── Metric functions ───────────────────────────────────────────
-
-    def gsax(row):
-        """Goals saved above expected (all situations, flurry-adjusted)."""
-        xg  = n(row.get('flurryAdjustedxGoals', 0)) or n(row.get('xGoals', 0))
-        ga  = n(row.get('goals', 0))
-        return xg - ga  # positive = better than expected
-
-    def gsax_per60(row):
-        it = n(row.get('icetime', 0))
-        if it < 60: return None
-        return (gsax(row) / it) * 3600
-
-    def ev_sv_pct(row):
-        """5on5 save percentage."""
-        ev = ev_map.get(row['playerId'])
-        if not ev: return None
-        shots = n(ev.get('ongoal', 0))
-        goals = n(ev.get('goals', 0))
-        if shots < 10: return None
-        return (shots - goals) / shots
-
-    def hd_sv_pct(row):
-        """High danger save percentage (all situations)."""
-        hd_shots = n(row.get('highDangerShots', 0))
-        hd_goals = n(row.get('highDangerGoals', 0))
-        if hd_shots < 5: return None
-        return (hd_shots - hd_goals) / hd_shots
-
-    def md_sv_pct(row):
-        """Medium danger save percentage."""
-        md_shots = n(row.get('mediumDangerShots', 0))
-        md_goals = n(row.get('mediumDangerGoals', 0))
-        if md_shots < 5: return None
-        return (md_shots - md_goals) / md_shots
-
-    def pk_sv_pct(row):
-        """Penalty kill (4on5) save percentage."""
-        pk = pk_map.get(row['playerId'])
-        if not pk: return None
-        shots = n(pk.get('ongoal', 0))
-        goals = n(pk.get('goals', 0))
-        if shots < 5: return None
-        return (shots - goals) / shots
-
-    # ── Percentile pools ───────────────────────────────────────────
-    print("  Building goalie percentile pools...")
-    pools = {
-        'gsax':       build_sorted_pool(qualified, gsax),
-        'gsax60':     build_sorted_pool(qualified, gsax_per60),
-        'ev_sv_pct':  build_sorted_pool(qualified, ev_sv_pct),
-        'hd_sv_pct':  build_sorted_pool(qualified, hd_sv_pct),
-        'md_sv_pct':  build_sorted_pool(qualified, md_sv_pct),
-        'pk_sv_pct':  build_sorted_pool(qualified, pk_sv_pct),
-    }
-
-    # ── Compute and upsert ─────────────────────────────────────────
-    print("  Computing goalie analytics...")
-    updates = []
-    for pid, row in all_map.items():
-        gsax_val    = gsax(row)
-        gsax60_val  = gsax_per60(row)
-        ev_sv_val   = ev_sv_pct(row)
-        hd_sv_val   = hd_sv_pct(row)
-        md_sv_val   = md_sv_pct(row)
-        pk_sv_val   = pk_sv_pct(row)
-
-        updates.append({
-            'player_id':        int(pid),
-            'season':           season,
-            'team':             row.get('team', ''),
-            'game_type':        2,
-            # Analytics
-            'gsax':             round(gsax_val, 2),
-            'gsax_per60':       round(gsax60_val, 3) if gsax60_val is not None else None,
-            'ev_sv_pct':        round(ev_sv_val, 4) if ev_sv_val is not None else None,
-            'hd_sv_pct':        round(hd_sv_val, 4) if hd_sv_val is not None else None,
-            'md_sv_pct':        round(md_sv_val, 4) if md_sv_val is not None else None,
-            'pk_sv_pct':        round(pk_sv_val, 4) if pk_sv_val is not None else None,
-            # Percentiles
-            'pct_gsax':         percentile_rank(gsax_val, pools['gsax']),
-            'pct_gsax60':       percentile_rank(gsax60_val, pools['gsax60']),
-            'pct_ev_sv':        percentile_rank(ev_sv_val, pools['ev_sv_pct']),
-            'pct_hd_sv':        percentile_rank(hd_sv_val, pools['hd_sv_pct']),
-            'pct_md_sv':        percentile_rank(md_sv_val, pools['md_sv_pct']),
-            'pct_pk_sv':        percentile_rank(pk_sv_val, pools['pk_sv_pct']),
-        })
-
-    print(f"  Upserting {len(updates)} goalie analytics records...")
-    for i in range(0, len(updates), 200):
-        batch = updates[i:i+200]
-        client.table('goalie_seasons').upsert(
-            batch,
-            on_conflict='player_id,season,team,game_type'
-        ).execute()
-    print(f"  ✓ goalie_seasons: {len(updates)} analytics rows upserted")
-    print("\n✅ MoneyPuck goalie analytics pipeline complete")
+    print("\n✅ MoneyPuck analytics pipeline complete")
 
 if __name__ == '__main__':
     run()
