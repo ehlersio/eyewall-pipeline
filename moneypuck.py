@@ -61,10 +61,10 @@ def run(season: int = NHL_SEASON):
         sit = r.get('situation', '')
         by_situation.setdefault(sit, {})[r['playerId']] = r
 
-    all_map = by_situation.get('all',         {})
-    ev_map  = by_situation.get('5on5',        {})
-    pp_map  = by_situation.get('powerPlay',   {})
-    pk_map  = by_situation.get('penaltyKill', {})
+    all_map = by_situation.get('all',   {})
+    ev_map  = by_situation.get('5on5',  {})
+    pp_map  = by_situation.get('5on4',  {})  # MoneyPuck uses 5on4, not powerPlay
+    pk_map  = by_situation.get('4on5',  {})  # MoneyPuck uses 4on5, not penaltyKill
 
     # Qualified players for percentile pools
     qualified = [r for r in all_map.values()
@@ -86,12 +86,12 @@ def run(season: int = NHL_SEASON):
 
     def pp_off(row):
         pp = pp_map.get(row['playerId'])
-        if not pp or n(pp.get('icetime', 0)) < 60: return None
+        if not pp or n(pp.get('icetime', 0)) < 300: return None  # min 5 min PP ice
         return per60(pp.get('OnIce_F_xGoals', 0), n(pp['icetime']))
 
     def pk_def(row):
         pk = pk_map.get(row['playerId'])
-        if not pk or n(pk.get('icetime', 0)) < 60: return None
+        if not pk or n(pk.get('icetime', 0)) < 300: return None  # min 5 min PK ice
         xga60 = per60(pk.get('OnIce_A_xGoals', 0), n(pk['icetime']))
         return 1.0 / xga60 if xga60 > 0 else None
 
