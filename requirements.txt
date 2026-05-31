@@ -7,3 +7,5 @@ postgrest==0.10.8
 storage3==0.5.3
 realtime==1.0.2
 supafunc==0.3.1
+scikit-learn
+scipy

@@ -107,7 +107,7 @@ def run_game_xg(client, season: int):
     print(f"  ✓ game_xg: {len(upserts)} rows upserted")
 
 
-
+def run(season: int = NHL_SEASON):
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
