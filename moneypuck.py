@@ -11,6 +11,7 @@ import requests
 from db import get_client, NHL_SEASON
 
 MP_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
+MP_TEAM_GAMES_URL = 'https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv'
 HEADERS = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)', 'Referer': 'https://moneypuck.com/data.htm'}
 
 MIN_GP         = 10    # minimum games for percentile pool
@@ -49,7 +50,64 @@ def build_sorted_pool(players: list, fn) -> list:
     vals = [v for v in vals if v is not None and not math.isnan(v)]
     return sorted(vals)
 
-def run(season: int = NHL_SEASON):
+def fetch_team_games_csv(season: int) -> list[dict]:
+    print("  Fetching MoneyPuck all-teams game-by-game CSV...")
+    r = requests.get(MP_TEAM_GAMES_URL, headers=HEADERS, timeout=120)
+    r.raise_for_status()
+    reader = csv.DictReader(io.StringIO(r.text))
+    # Filter to current season and 5on5 only — keeps memory reasonable
+    rows = [
+        row for row in reader
+        if row.get('situation') == '5on5' and row.get('season') == str(season)[:4]
+    ]
+    print(f"  Parsed {len(rows)} 5v5 team-game rows for season {season}")
+    return rows
+
+
+def run_game_xg(client, season: int):
+    """Fetch MoneyPuck game-by-game team xG and write to game_xg table.
+
+    MoneyPuck data typically available 2-4 hours post-game, so this runs
+    nightly and populates completed games. Live xG falls back to the
+    coordinate-estimate model in the frontend.
+    """
+    print("\n--- Game-level xG (MoneyPuck) ---")
+    try:
+        rows = fetch_team_games_csv(season)
+    except Exception as e:
+        print(f"  WARNING: Could not fetch team game CSV: {e}")
+        return
+
+    upserts = []
+    for row in rows:
+        game_id = row.get('gameId')
+        if not game_id:
+            continue
+        upserts.append({
+            'game_id':   int(game_id),
+            'season':    season,
+            'team':      row.get('team', ''),
+            'situation': '5on5',
+            'xgf':       round(n(row.get('xGoalsFor', 0)), 3),
+            'xga':       round(n(row.get('xGoalsAgainst', 0)), 3),
+            'xgf_pct':   round(n(row.get('xGoalsPercentage', 0)), 4),
+        })
+
+    if not upserts:
+        print("  No rows to upsert — skipping")
+        return
+
+    print(f"  Upserting {len(upserts)} game xG rows...")
+    for i in range(0, len(upserts), 500):
+        batch = upserts[i:i + 500]
+        client.table('game_xg').upsert(
+            batch,
+            on_conflict='game_id,team,situation'
+        ).execute()
+    print(f"  ✓ game_xg: {len(upserts)} rows upserted")
+
+
+
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
@@ -268,6 +326,9 @@ def run(season: int = NHL_SEASON):
             on_conflict='player_id,season,team,game_type'
         ).execute()
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
+
+    run_game_xg(client, season)
+
     print("\n✅ MoneyPuck analytics pipeline complete")
 
 if __name__ == '__main__':
