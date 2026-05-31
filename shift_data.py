@@ -16,6 +16,7 @@ One-time backfill of 3 seasons takes ~30-45 minutes.
 """
 import requests
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_client, NHL_SEASON
 
 NHL_BASE   = 'https://api-web.nhle.com/v1'
@@ -84,7 +85,35 @@ def get_processed_games(client, season):
         offset += 1000
     return all_ids
 
-def fetch_shift_chart(game_id):
+def get_skipped_games(client, season):
+    """Get game IDs previously marked as having no shift data."""
+    all_ids = set()
+    offset = 0
+    while True:
+        result = client.table('skipped_games') \
+            .select('game_id') \
+            .eq('season', season) \
+            .eq('pipeline', 'shifts') \
+            .range(offset, offset + 999) \
+            .execute()
+        rows = result.data
+        if not rows:
+            break
+        all_ids.update(r['game_id'] for r in rows)
+        offset += 1000
+    return all_ids
+
+def mark_skipped(client, game_id, season, reason='no_data'):
+    """Mark a game as having no shift data so it won't be retried."""
+    try:
+        client.table('skipped_games').upsert({
+            'game_id':  game_id,
+            'season':   season,
+            'pipeline': 'shifts',
+            'reason':   reason,
+        }, on_conflict='game_id,pipeline').execute()
+    except Exception:
+        pass  # non-critical
     data = nhl_get(
         f'{STATS_BASE}/shiftcharts',
         params={'cayenneExp': f'gameId={game_id}'}
@@ -139,50 +168,59 @@ def run(season=NHL_SEASON):
     print(f"  Found {len(games):,} completed games")
 
     already_done = get_processed_games(client, season)
-    pending = [g for g in games if g['id'] not in already_done]
-    print(f"  {len(already_done):,} already processed, {len(pending):,} pending")
+    skipped      = get_skipped_games(client, season)
+    excluded     = already_done | skipped
+    pending      = [g for g in games if g['id'] not in excluded]
+    print(f"  {len(already_done):,} already processed, {len(skipped):,} skipped, {len(pending):,} pending")
 
     if not pending:
         print("  All games already processed")
         return
 
     total_shifts = 0
-    errors = 0
+    errors       = 0
+    completed    = 0
+    WORKERS      = 10
 
-    for i, game in enumerate(pending):
+    def process_one(game):
         game_id = game['id']
         try:
             raw = fetch_shift_chart(game_id)
             if not raw:
-                errors += 1
-                time.sleep(0.3)
-                continue
-
+                return game_id, [], 'no_data'
             rows = process_shifts(game_id, season, raw)
             if not rows:
-                time.sleep(0.3)
-                continue
-
-            client.table('shift_events').delete().eq('game_id', game_id).execute()
-
-            for j in range(0, len(rows), 500):
-                client.table('shift_events').insert(rows[j:j+500]).execute()
-
-            total_shifts += len(rows)
-
-            if (i + 1) % 100 == 0 or (i + 1) == len(pending):
-                print(f"  [{i+1}/{len(pending)}] {total_shifts:,} shifts inserted so far")
-
+                return game_id, [], 'no_rows'
+            return game_id, rows, None
         except Exception as e:
-            print(f"  Game {game_id}: ERROR — {e}")
-            errors += 1
+            return game_id, [], str(e)
 
-        time.sleep(0.3)
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {executor.submit(process_one, g): g for g in pending}
+        for future in as_completed(futures):
+            game_id, rows, error = future.result()
+            completed += 1
+
+            if error or not rows:
+                mark_skipped(client, game_id, season, error or 'no_data')
+                errors += 1
+            else:
+                try:
+                    client.table('shift_events').delete().eq('game_id', game_id).execute()
+                    for j in range(0, len(rows), 500):
+                        client.table('shift_events').insert(rows[j:j+500]).execute()
+                    total_shifts += len(rows)
+                except Exception as e:
+                    print(f"  Game {game_id}: DB error — {e}")
+                    errors += 1
+
+            if completed % 100 == 0 or completed == len(pending):
+                print(f"  [{completed}/{len(pending)}] {total_shifts:,} shifts inserted so far")
 
     print(f"\nShift data pipeline complete")
     print(f"   Shifts inserted: {total_shifts:,}")
     if errors:
-        print(f"   Errors: {errors} games skipped")
+        print(f"   Games skipped/errored: {errors}")
 
 if __name__ == '__main__':
     import sys

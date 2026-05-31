@@ -16,6 +16,7 @@ Usage:
 import requests
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_client, NHL_SEASON
 
 NHL_BASE = 'https://api-web.nhle.com/v1'
@@ -84,6 +85,36 @@ def get_processed_games(client, season):
         all_ids.update(r['game_id'] for r in rows)
         offset += 1000
     return all_ids
+
+def get_skipped_games(client, season):
+    """Get game IDs previously marked as having no zone start data."""
+    all_ids = set()
+    offset = 0
+    while True:
+        result = client.table('skipped_games') \
+            .select('game_id') \
+            .eq('season', season) \
+            .eq('pipeline', 'zone_starts') \
+            .range(offset, offset + 999) \
+            .execute()
+        rows = result.data
+        if not rows:
+            break
+        all_ids.update(r['game_id'] for r in rows)
+        offset += 1000
+    return all_ids
+
+def mark_skipped(client, game_id, season, reason='no_data'):
+    """Mark a game as having no zone start data so it won't be retried."""
+    try:
+        client.table('skipped_games').upsert({
+            'game_id':  game_id,
+            'season':   season,
+            'pipeline': 'zone_starts',
+            'reason':   reason,
+        }, on_conflict='game_id,pipeline').execute()
+    except Exception:
+        pass  # non-critical
 
 def get_shift_chart(game_id):
     data = nhl_get(
@@ -214,8 +245,10 @@ def run(season=NHL_SEASON):
     print(f"  Loaded {len(home_team_map):,} game home teams")
 
     already_done = get_processed_games(client, season)
-    pending = [g for g in games if g['id'] not in already_done]
-    print(f"  {len(already_done):,} already processed, {len(pending):,} pending")
+    skipped      = get_skipped_games(client, season)
+    excluded     = already_done | skipped
+    pending      = [g for g in games if g['id'] not in excluded]
+    print(f"  {len(already_done):,} already processed, {len(skipped):,} skipped, {len(pending):,} pending")
 
     if not pending:
         print("  All games already processed")
@@ -223,35 +256,41 @@ def run(season=NHL_SEASON):
 
     total_rows = 0
     errors     = 0
+    completed  = 0
+    WORKERS    = 8  # zone_starts fetches PBP + shifts per game, slightly heavier
 
-    for i, game in enumerate(pending):
+    def process_one(game):
         game_id   = game['id']
-        # Use game_log home team first, fall back to schedule API field
         home_team = home_team_map.get(game_id) or game.get('homeTeam', {}).get('abbrev', '')
         try:
             rows = process_game(game_id, season, home_team)
             if not rows:
-                errors += 1
-                time.sleep(0.3)
-                continue
-
-            # Delete existing rows for this game (safe re-run)
-            client.table('zone_starts').delete().eq('game_id', game_id).execute()
-
-            # Insert in batches
-            for j in range(0, len(rows), 500):
-                client.table('zone_starts').insert(rows[j:j+500]).execute()
-
-            total_rows += len(rows)
-
-            if (i + 1) % 100 == 0 or (i + 1) == len(pending):
-                print(f"  [{i+1}/{len(pending)}] {total_rows:,} player-game rows inserted")
-
+                return game_id, [], 'no_data'
+            return game_id, rows, None
         except Exception as e:
-            print(f"  Game {game_id}: ERROR -- {e}")
-            errors += 1
+            return game_id, [], str(e)
 
-        time.sleep(0.4)
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        futures = {executor.submit(process_one, g): g for g in pending}
+        for future in as_completed(futures):
+            game_id, rows, error = future.result()
+            completed += 1
+
+            if error or not rows:
+                mark_skipped(client, game_id, season, error or 'no_data')
+                errors += 1
+            else:
+                try:
+                    client.table('zone_starts').delete().eq('game_id', game_id).execute()
+                    for j in range(0, len(rows), 500):
+                        client.table('zone_starts').insert(rows[j:j+500]).execute()
+                    total_rows += len(rows)
+                except Exception as e:
+                    print(f"  Game {game_id}: DB error — {e}")
+                    errors += 1
+
+            if completed % 100 == 0 or completed == len(pending):
+                print(f"  [{completed}/{len(pending)}] {total_rows:,} player-game rows inserted")
 
     print(f"\nZone starts pipeline complete")
     print(f"   Player-game rows inserted: {total_rows:,}")
