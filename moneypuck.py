@@ -107,6 +107,104 @@ def run_game_xg(client, season: int):
     print(f"  ✓ game_xg: {len(upserts)} rows upserted")
 
 
+def run_goalie_qs(client, season: int):
+    """Compute Quality Start % from shot_events in Supabase.
+
+    A quality start is defined as:
+      - SV% >= .917 in any start, OR
+      - SV% >= .885 when facing 20 or fewer shots (light workload game)
+
+    Groups shot_events by (goalie_id, game_id) to get per-game SA/SV,
+    then aggregates per goalie and upserts qs + qs_pct into goalie_seasons.
+    No external CSV needed — uses data already in the DB.
+    """
+    print("\n--- Goalie Quality Start % ---")
+    try:
+        print("  Fetching shot_events for goalie QS computation...")
+        from collections import defaultdict
+        goalie_game_stats = defaultdict(lambda: {'sa': 0, 'sv': 0})
+
+        offset = 0
+        total_rows = 0
+        while True:
+            rows = client.table('shot_events') \
+                .select('goalie_id,game_id,event_type') \
+                .eq('season', season) \
+                .eq('car_game', True) \
+                .in_('event_type', ['goal', 'shot-on-goal']) \
+                .not_.is_('goalie_id', 'null') \
+                .range(offset, offset + 999) \
+                .execute().data
+            if not rows:
+                break
+            for r in rows:
+                key = (r['goalie_id'], r['game_id'])
+                goalie_game_stats[key]['sa'] += 1
+                if r['event_type'] == 'shot-on-goal':
+                    goalie_game_stats[key]['sv'] += 1
+            total_rows += len(rows)
+            if len(rows) < 1000:
+                break
+            offset += 1000
+
+        print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
+
+        if not goalie_game_stats:
+            print("  No shot event data — skipping")
+            return
+
+        # Aggregate QS per goalie
+        goalie_totals = defaultdict(lambda: {'starts': 0, 'qs': 0})
+        for (goalie_id, game_id), stats in goalie_game_stats.items():
+            sa = stats['sa']
+            sv = stats['sv']
+            if sa < 5:
+                continue  # skip garbage time / backup appearances
+            sv_pct = sv / sa
+            is_qs  = sv_pct >= 0.917 or (sa <= 20 and sv_pct >= 0.885)
+            goalie_totals[goalie_id]['starts'] += 1
+            if is_qs:
+                goalie_totals[goalie_id]['qs'] += 1
+
+        # Look up teams for CAR goalies so the conflict key matches nhl_stats.py
+        # (goalie_seasons uses player_id,season,team,game_type as conflict key)
+        team_map = {}
+        try:
+            team_rows = client.table('goalie_seasons') \
+                .select('player_id,team') \
+                .eq('season', season) \
+                .eq('game_type', 2) \
+                .execute().data or []
+            for r in team_rows:
+                team_map[r['player_id']] = r['team']
+        except Exception:
+            pass
+
+        upserts = []
+        for goalie_id, g in goalie_totals.items():
+            if g['starts'] == 0:
+                continue
+            upserts.append({
+                'player_id': int(goalie_id),
+                'season':    season,
+                'team':      team_map.get(int(goalie_id), 'CAR'),
+                'game_type': 2,
+                'qs':        g['qs'],
+                'qs_pct':    round(g['qs'] / g['starts'], 4),
+            })
+
+        print(f"  Upserting QS% for {len(upserts)} goalies...")
+        for i in range(0, len(upserts), 500):
+            client.table('goalie_seasons').upsert(
+                upserts[i:i + 500],
+                on_conflict='player_id,season,team,game_type'
+            ).execute()
+        print(f"  ✓ goalie_seasons: QS% updated for {len(upserts)} goalies")
+
+    except Exception as e:
+        print(f"  WARNING: Could not compute goalie QS%: {e}")
+
+
 def run(season: int = NHL_SEASON):
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
@@ -335,6 +433,7 @@ def run(season: int = NHL_SEASON):
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
 
     run_game_xg(client, season)
+    run_goalie_qs(client, season)
 
     print("\n✅ MoneyPuck analytics pipeline complete")
 
