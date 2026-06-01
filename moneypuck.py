@@ -167,9 +167,6 @@ def run(season: int = NHL_SEASON):
     def xgf_per60(row):
         return per60(row.get('I_F_xGoals', 0), n(row.get('icetime', 0)))
 
-    def xga_per60(row):
-        return per60(row.get('I_A_xGoals', 0), n(row.get('icetime', 0)))
-
     def penalties60(row):
         it = n(row.get('icetime', 0))
         if not it: return None
@@ -287,7 +284,6 @@ def run(season: int = NHL_SEASON):
         goals_val    = goals60(row)
         a1_val       = a1_60(row)
         xgf_val      = xgf_per60(row)
-        xga_val      = xga_per60(row)
         pen_val      = penalties60(row)
         comp_val     = competition(row)
         tm_val       = teammates(row)
@@ -309,7 +305,6 @@ def run(season: int = NHL_SEASON):
             'goals_per60':   round(goals_val, 4),
             'a1_per60':      round(a1_val, 4),
             'xgf_per60':     round(xgf_val, 4),
-            'xga_per60':     round(xga_val, 4),
             'penalties_per60': round(pen_val, 4) if pen_val is not None else None,
             'competition':   round(comp_val, 4) if comp_val is not None else None,
             'teammates':     round(tm_val, 4) if tm_val is not None else None,
