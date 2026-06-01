@@ -264,19 +264,71 @@ def run(season: int = NHL_SEASON):
     for g in games:
         if g.get('gameState') not in ('OFF', 'FINAL'):
             continue
+        home = g.get('homeTeam', {})
+        away = g.get('awayTeam', {})
+        car_is_home = home.get('abbrev') == 'CAR'
+        car_score  = home.get('score') if car_is_home else away.get('score')
+        opp_score  = away.get('score') if car_is_home else home.get('score')
+        opponent   = away.get('abbrev') if car_is_home else home.get('abbrev')
         rows.append({
-            'game_id':      g['id'],
-            'season':       season,
-            'game_date':    g.get('gameDate'),
-            'home_team':    g.get('homeTeam', {}).get('abbrev'),
-            'away_team':    g.get('awayTeam', {}).get('abbrev'),
-            'home_score':   g.get('homeTeam', {}).get('score'),
-            'away_score':   g.get('awayTeam', {}).get('score'),
-            'game_type':    g.get('gameType', 2),
-            'period_end':   g.get('periodDescriptor', {}).get('number', 3),
+            'game_id':         g['id'],
+            'season':          season,
+            'game_date':       g.get('gameDate'),
+            'home_team':       home.get('abbrev'),
+            'away_team':       away.get('abbrev'),
+            'home_score':      home.get('score'),
+            'away_score':      away.get('score'),
+            'car_score':       car_score,
+            'opp_score':       opp_score,
+            'opponent':        opponent,
+            'game_type':       g.get('gameType', 2),
+            'period_end':      g.get('periodDescriptor', {}).get('number', 3),
+            # car_scored_first filled in below via incremental PBP fetch
         })
     upsert(client, 'game_log', rows, 'game_id')
 
+    # ── car_scored_first — incremental PBP fetch ──────────────────
+    # Only fetch PBP for games where car_scored_first is still null
+    print("  Fetching car_scored_first for new games...")
+    try:
+        null_games = client.table('game_log') \
+            .select('game_id,home_team') \
+            .eq('season', season) \
+            .is_('car_scored_first', 'null') \
+            .execute().data or []
+    except Exception:
+        null_games = []
+
+    updated = 0
+    for g in null_games:
+        game_id   = g['game_id']
+        car_home  = g.get('home_team') == 'CAR'
+        pbp = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
+        if not pbp:
+            time.sleep(0.3)
+            continue
+        # Find first goal
+        first_goal = next(
+            (p for p in pbp.get('plays', []) if p.get('typeDescKey') == 'goal'),
+            None
+        )
+        if first_goal is None:
+            time.sleep(0.2)
+            continue
+        car_team_id = pbp.get('homeTeam', {}).get('id') if car_home \
+                      else pbp.get('awayTeam', {}).get('id')
+        scored_first = first_goal.get('details', {}).get('eventOwnerTeamId') == car_team_id
+        client.table('game_log') \
+            .update({'car_scored_first': scored_first}) \
+            .eq('game_id', game_id) \
+            .execute()
+        updated += 1
+        time.sleep(0.2)
+
+    if updated:
+        print(f"  ✓ car_scored_first updated for {updated} games")
+
+    print(f"\n  ✓ game_log: {len(rows)} rows upserted")
     print("\n✅ NHL stats pipeline complete")
 
 if __name__ == '__main__':
