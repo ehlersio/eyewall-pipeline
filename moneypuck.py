@@ -301,6 +301,8 @@ def run(season: int = NHL_SEASON):
             'ev_def_inv':    round(ev_def_val, 5) if ev_def_val is not None else None,
             'pp_xgf60':      round(pp_val, 4) if pp_val is not None else None,
             'pk_xga60_inv':  round(pk_val, 5) if pk_val is not None else None,
+            'pp_icetime':    round(n(pp_map.get(pid, {}).get('icetime', 0)) / 60, 1) if pp_map.get(pid) else None,
+            'pk_icetime':    round(n(pk_map.get(pid, {}).get('icetime', 0)) / 60, 1) if pk_map.get(pid) else None,
             'finishing':     round(fin_val, 4) if fin_val is not None else None,
             'goals_per60':   round(goals_val, 4),
             'a1_per60':      round(a1_val, 4),
