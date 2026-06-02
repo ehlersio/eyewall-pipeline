@@ -240,6 +240,20 @@ def run(season: int = NHL_SEASON):
         xga60 = per60(ev.get('OnIce_A_xGoals', 0), n(ev['icetime']))
         return 1.0 / xga60 if xga60 > 0 else None
 
+    def xga_per60(row):
+        """Raw on-ice xGA/60 at 5v5 — lower is better defensively."""
+        ev = ev_map.get(row['playerId'])
+        if not ev or not n(ev.get('icetime', 0)): return None
+        return round(per60(ev.get('OnIce_A_xGoals', 0), n(ev['icetime'])), 3)
+
+    def hdca_per60(row):
+        """On-ice high-danger chances against per 60 at 5v5 — lower is better."""
+        ev = ev_map.get(row['playerId'])
+        if not ev or not n(ev.get('icetime', 0)): return None
+        # MoneyPuck: OnIce_A_highDangerShots = HD shots on goal against while on ice
+        hdca = n(ev.get('OnIce_A_highDangerShots', 0))
+        return round(per60(hdca, n(ev['icetime'])), 3)
+
     def pp_off(row):
         pp = pp_map.get(row['playerId'])
         if not pp or n(pp.get('icetime', 0)) < 300: return None  # min 5 min PP ice
@@ -386,6 +400,8 @@ def run(season: int = NHL_SEASON):
         comp_val     = competition(row)
         tm_val       = teammates(row)
         war_val      = compute_war(row, is_fwd)
+        xga_val      = xga_per60(row)
+        hdca_val     = hdca_per60(row)
 
         team = row.get('team', '')
         updates.append({
@@ -409,6 +425,8 @@ def run(season: int = NHL_SEASON):
             'competition':   round(comp_val, 4) if comp_val is not None else None,
             'teammates':     round(tm_val, 4) if tm_val is not None else None,
             'game_score':    round(n(row.get('gameScore', 0)), 3),
+            'xga_per60':     xga_val,
+            'hdca_per60':    hdca_val,
             # Percentiles
             'pct_ev_off':    percentile_rank(ev_off_val, pools['ev_off']),
             'pct_ev_def':    percentile_rank(ev_def_val, pools['ev_def']),

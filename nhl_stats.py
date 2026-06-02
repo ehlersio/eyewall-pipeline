@@ -80,6 +80,36 @@ def fetch_skater_scoring(season: int, game_type: int) -> dict:
         return {}
     return {r['playerId']: r for r in data.get('data', [])}
 
+def fetch_skater_realtime(season: int, game_type: int) -> dict:
+    """Fetch hits, blocks, takeaways, giveaways — returns dict keyed by playerId."""
+    exp  = f'seasonId={season} and gameTypeId={game_type}'
+    url  = f'{STATS_BASE}/skater/realtime'
+    params = {
+        'isAggregate': 'false', 'isGame': 'false',
+        'sort': '[{"property":"hits","direction":"DESC"}]',
+        'start': 0, 'limit': -1,
+        'cayenneExp': exp
+    }
+    data = nhl_get(url, params)
+    if not data:
+        return {}
+    return {r['playerId']: r for r in data.get('data', [])}
+
+
+    """Fetch primary/secondary assist breakdown — returns dict keyed by playerId."""
+    sort = '[{"property":"points","direction":"DESC"},{"property":"playerId","direction":"ASC"}]'
+    exp  = f'seasonId={season} and gameTypeId={game_type}'
+    url  = f'{STATS_BASE}/skater/scoringpergame'
+    params = {
+        'isAggregate': 'false', 'isGame': 'false',
+        'sort': sort, 'start': 0, 'limit': -1,
+        'cayenneExp': exp
+    }
+    data = nhl_get(url, params)
+    if not data:
+        return {}
+    return {r['playerId']: r for r in data.get('data', [])}
+
 def fetch_goalie_stats(season: int, game_type: int) -> list:
     exp  = f'seasonId={season} and gameTypeId={game_type}'
     url  = f'{STATS_BASE}/goalie/summary'
@@ -130,11 +160,13 @@ def run(season: int = NHL_SEASON):
         print(f"  {label}...")
         summary = fetch_skater_stats(season, game_type)
         scoring = fetch_skater_scoring(season, game_type)
+        realtime = fetch_skater_realtime(season, game_type)
 
         rows = []
         for s in summary:
             pid  = s['playerId']
             sc   = scoring.get(pid, {})
+            rt   = realtime.get(pid, {})
             rows.append({
                 'player_id':          pid,
                 'season':             season,
@@ -159,6 +191,11 @@ def run(season: int = NHL_SEASON):
                 'ev_goals':           s.get('evGoals'),
                 'ev_points':          s.get('evPoints'),
                 'faceoff_win_pct':    s.get('faceoffWinPct'),
+                # Defensive / physical (from realtime endpoint)
+                'hits':               rt.get('hits'),
+                'blocked_shots':      rt.get('blockedShots'),
+                'takeaways':          rt.get('takeaways'),
+                'giveaways':          rt.get('giveaways'),
             })
         # Ensure all players exist — fetch names from NHL API for any missing
         known_ids = {r['id'] for r in client.table('players').select('id').execute().data}
