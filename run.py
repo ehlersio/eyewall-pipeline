@@ -37,6 +37,7 @@ def run_all():
     import zone_starts
     import rapm
     import moneypuck
+    import line_combinations
 
     nhl_stats.run()
     shot_events.run()
@@ -44,6 +45,7 @@ def run_all():
     zone_starts.run()
     rapm.run()
     moneypuck.run()
+    line_combinations.run()  # must run after shift_data + shot_events
 
     # Validate RAPM after every nightly run — exits non-zero on failure
     # which triggers a GitHub Actions failure email
@@ -77,6 +79,9 @@ if __name__ == '__main__':
         import rapm; rapm.run()
     elif arg == 'moneypuck':
         import moneypuck; moneypuck.run()
+    elif arg == 'lines':
+        import line_combinations
+        line_combinations.run(*([season] if season else []))
     elif arg == 'validate':
         import validate_rapm
         eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
