@@ -130,7 +130,6 @@ def run_goalie_qs(client, season: int):
             rows = client.table('shot_events') \
                 .select('goalie_id,game_id,event_type') \
                 .eq('season', season) \
-                .eq('car_game', True) \
                 .in_('event_type', ['goal', 'shot-on-goal']) \
                 .not_.is_('goalie_id', 'null') \
                 .range(offset, offset + 999) \
@@ -187,7 +186,7 @@ def run_goalie_qs(client, season: int):
             upserts.append({
                 'player_id': int(goalie_id),
                 'season':    season,
-                'team':      team_map.get(int(goalie_id), 'CAR'),
+                'team':      team_map.get(int(goalie_id), ''),
                 'game_type': 2,
                 'qs':        g['qs'],
                 'qs_pct':    round(g['qs'] / g['starts'], 4),

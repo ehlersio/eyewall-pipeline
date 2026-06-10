@@ -10,7 +10,7 @@ Populates:
 """
 import requests
 import time
-from db import get_client, upsert, NHL_SEASON
+from db import get_client, upsert, NHL_SEASON, PRIMARY_TEAM_ABBR
 
 NHL_BASE   = 'https://api-web.nhle.com/v1'
 STATS_BASE = 'https://api.nhle.com/stats/rest/en'
@@ -95,20 +95,6 @@ def fetch_skater_realtime(season: int, game_type: int) -> dict:
         return {}
     return {r['playerId']: r for r in data.get('data', [])}
 
-
-    """Fetch primary/secondary assist breakdown — returns dict keyed by playerId."""
-    sort = '[{"property":"points","direction":"DESC"},{"property":"playerId","direction":"ASC"}]'
-    exp  = f'seasonId={season} and gameTypeId={game_type}'
-    url  = f'{STATS_BASE}/skater/scoringpergame'
-    params = {
-        'isAggregate': 'false', 'isGame': 'false',
-        'sort': sort, 'start': 0, 'limit': -1,
-        'cayenneExp': exp
-    }
-    data = nhl_get(url, params)
-    if not data:
-        return {}
-    return {r['playerId']: r for r in data.get('data', [])}
 
 def fetch_goalie_stats(season: int, game_type: int) -> list:
     exp  = f'seasonId={season} and gameTypeId={game_type}'
@@ -294,136 +280,165 @@ def run(season: int = NHL_SEASON):
                 deduped.append(r)
         upsert(client, 'team_seasons', deduped, 'team,season,game_type')
 
-    # ── 5. Game log (CAR only for now) ────────────────────────────
-    print("\n[5/5] Fetching CAR game log...")
-    games = fetch_schedule('CAR', season)
-    rows = []
-    for g in games:
-        if g.get('gameState') not in ('OFF', 'FINAL'):
-            continue
-        home = g.get('homeTeam', {})
-        away = g.get('awayTeam', {})
-        car_is_home = home.get('abbrev') == 'CAR'
-        car_score  = home.get('score') if car_is_home else away.get('score')
-        opp_score  = away.get('score') if car_is_home else home.get('score')
-        opponent   = away.get('abbrev') if car_is_home else home.get('abbrev')
-        rows.append({
-            'game_id':         g['id'],
-            'season':          season,
-            'game_date':       g.get('gameDate'),
-            'home_team':       home.get('abbrev'),
-            'away_team':       away.get('abbrev'),
-            'home_score':      home.get('score'),
-            'away_score':      away.get('score'),
-            'car_score':       car_score,
-            'opp_score':       opp_score,
-            'opponent':        opponent,
-            'game_type':       g.get('gameType', 2),
-            'period_end':      g.get('periodDescriptor', {}).get('number', 3),
-            # car_scored_first filled in below via incremental PBP fetch
-        })
-    upsert(client, 'game_log', rows, 'game_id')
+    # ── 5. Game log (all 32 teams) ────────────────────────────────
+    # One row per team per game — each team gets its own perspective
+    # (team_score, opp_score, opponent, team_scored_first, PP/PK).
+    print("\n[5/5] Fetching game log for all 32 teams...")
+    total_rows = 0
+    for team in ALL_TEAMS:
+        games = fetch_schedule(team, season)
+        rows = []
+        for g in games:
+            if g.get('gameState') not in ('OFF', 'FINAL'):
+                continue
+            home = g.get('homeTeam', {})
+            away = g.get('awayTeam', {})
+            team_is_home = home.get('abbrev') == team
+            team_score = home.get('score') if team_is_home else away.get('score')
+            opp_score  = away.get('score') if team_is_home else home.get('score')
+            opponent   = away.get('abbrev') if team_is_home else home.get('abbrev')
+            rows.append({
+                'game_id':    g['id'],
+                'season':     season,
+                'team':       team,
+                'game_date':  g.get('gameDate'),
+                'home_team':  home.get('abbrev'),
+                'away_team':  away.get('abbrev'),
+                'home_score': home.get('score'),
+                'away_score': away.get('score'),
+                'team_score': team_score,
+                'opp_score':  opp_score,
+                'opponent':   opponent,
+                'game_type':  g.get('gameType', 2),
+                'period_end': g.get('periodDescriptor', {}).get('number', 3),
+                # team_scored_first + PP/PK filled in below via incremental PBP fetch
+            })
+        if rows:
+            upsert(client, 'game_log', rows, 'game_id,team')
+            total_rows += len(rows)
+        time.sleep(0.1)
 
-    # ── car_scored_first + PP/PK — incremental PBP fetch ─────────
-    # Fetch PBP for games where either car_scored_first or pp_goals is still null.
-    # One PBP call per game covers both fields.
-    print("  Fetching car_scored_first + PP/PK stats for new games...")
+    print(f"  ✓ game_log: {total_rows} rows upserted across all teams")
+
+    # ── team_scored_first + PP/PK — incremental PBP fetch ────────
+    # Fetch PBP only for rows where team_scored_first or pp_goals is null.
+    # Each unique game_id only needs one PBP call regardless of how many
+    # teams are stored for that game — we update all team rows from one fetch.
+    print("  Fetching team_scored_first + PP/PK stats for new games...")
     try:
-        null_games = client.table('game_log') \
-            .select('game_id,home_team') \
+        null_rows = client.table('game_log') \
+            .select('game_id,team,home_team') \
             .eq('season', season) \
-            .or_('car_scored_first.is.null,pp_goals.is.null') \
+            .or_('team_scored_first.is.null,pp_goals.is.null') \
             .execute().data or []
     except Exception:
-        null_games = []
+        null_rows = []
+
+    # Group by game_id so we fetch PBP once per game
+    from collections import defaultdict
+    games_to_fetch = defaultdict(list)  # game_id -> [team_row, ...]
+    for row in null_rows:
+        games_to_fetch[row['game_id']].append(row)
 
     updated = 0
-    for g in null_games:
-        game_id   = g['game_id']
-        car_home  = g.get('home_team') == 'CAR'
+    for game_id, team_rows in games_to_fetch.items():
         pbp = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
         if not pbp:
             time.sleep(0.3)
             continue
 
-        plays       = pbp.get('plays', [])
-        car_team_id = pbp.get('homeTeam', {}).get('id') if car_home \
-                      else pbp.get('awayTeam', {}).get('id')
-        opp_team_id = pbp.get('awayTeam', {}).get('id') if car_home \
-                      else pbp.get('homeTeam', {}).get('id')
+        plays        = pbp.get('plays', [])
+        home_team_id = pbp.get('homeTeam', {}).get('id')
+        away_team_id = pbp.get('awayTeam', {}).get('id')
+        home_abbr    = pbp.get('homeTeam', {}).get('abbrev', '')
+        away_abbr    = pbp.get('awayTeam', {}).get('abbrev', '')
 
-        # ── car_scored_first ──────────────────────────────────────
+        # Build abbrev -> team_id map for this game
+        abbr_to_id = {home_abbr: home_team_id, away_abbr: away_team_id}
+
+        # ── First goal ────────────────────────────────────────────
         first_goal = next(
-            (p for p in plays if p.get('typeDescKey') == 'goal'),
-            None
+            (p for p in plays if p.get('typeDescKey') == 'goal'), None
         )
-        scored_first = None
-        if first_goal is not None:
-            scored_first = first_goal.get('details', {}).get('eventOwnerTeamId') == car_team_id
+        first_goal_team_id = first_goal.get('details', {}).get('eventOwnerTeamId') \
+            if first_goal else None
 
-        # ── PP/PK stats from play events ──────────────────────────
-        # situationCode: 1st digit = away skaters, 2nd digit = home skaters
-        # 5v4 = away PP if away has 5, home has 4; home PP if home has 5, away has 4
-        # We derive CAR PP/PK from whether CAR is home or away.
-        pp_goals       = 0
-        pp_opps        = 0
-        pk_goals_against = 0
-        pk_opps        = 0
-        active_penalties = []  # list of (team_id, expiry_sort_order)
+        # ── PP/PK — computed once from home/away perspective ──────
+        # We'll derive each team's numbers from the raw counts below.
+        # away_pp_goals, home_pp_goals etc. let us serve any team row.
+        home_pp_goals = home_pp_opps = away_pp_goals = away_pp_opps = 0
+        home_pk_ga    = away_pk_ga   = 0
 
         for p in plays:
             key     = p.get('typeDescKey', '')
             details = p.get('details', {})
             sc      = p.get('situationCode', '')
-            sort    = p.get('sortOrder', 0)
 
-            # Count penalties as opportunities
             if key == 'penalty' and details.get('duration', 0) == 2:
-                penalized_team = details.get('eventOwnerTeamId')
-                if penalized_team == opp_team_id:
-                    pp_opps += 1        # CAR gets a PP
-                elif penalized_team == car_team_id:
-                    pk_opps += 1        # CAR goes on PK
+                penalized_id = details.get('eventOwnerTeamId')
+                if penalized_id == away_team_id:
+                    home_pp_opps += 1   # home gets PP
+                elif penalized_id == home_team_id:
+                    away_pp_opps += 1   # away gets PP
 
-            # Count goals during PP/PK situations
-            if key == 'goal':
-                scorer_team = details.get('eventOwnerTeamId')
-                # Use situationCode to detect man-advantage
-                # situationCode format: "{away_skaters}{home_skaters}"
-                # e.g. "1451" = away 1 goalie + 4 skaters, home 5 skaters + 1 goalie
-                if len(sc) == 4:
-                    away_sk = int(sc[1])  # skaters (not counting goalie digit)
-                    home_sk = int(sc[3])
-                    car_sk  = home_sk if car_home else away_sk
-                    opp_sk  = away_sk if car_home else home_sk
-                    car_on_pp = car_sk > opp_sk   # CAR has more skaters
-                    opp_on_pp = opp_sk > car_sk   # OPP has more skaters
+            if key == 'goal' and len(sc) == 4:
+                scorer_id = details.get('eventOwnerTeamId')
+                away_sk   = int(sc[1])
+                home_sk   = int(sc[3])
+                home_on_pp = home_sk > away_sk
+                away_on_pp = away_sk > home_sk
 
-                    if scorer_team == car_team_id and car_on_pp:
-                        pp_goals += 1
-                    elif scorer_team == opp_team_id and opp_on_pp:
-                        pk_goals_against += 1
+                if scorer_id == home_team_id and home_on_pp:
+                    home_pp_goals += 1
+                elif scorer_id == away_team_id and away_on_pp:
+                    away_pp_goals += 1
+                elif scorer_id == home_team_id and away_on_pp:
+                    home_pk_ga += 1    # home allowed PP goal (was on PK)
+                elif scorer_id == away_team_id and home_on_pp:
+                    away_pk_ga += 1    # away allowed PP goal (was on PK)
 
-        update_data = {
-            'pp_goals':         pp_goals,
-            'pp_opps':          pp_opps,
-            'pk_goals_against': pk_goals_against,
-            'pk_opps':          pk_opps,
-        }
-        if scored_first is not None:
-            update_data['car_scored_first'] = scored_first
+        # ── Update each team row for this game ────────────────────
+        for row in team_rows:
+            t        = row['team']
+            team_id  = abbr_to_id.get(t)
+            is_home  = (t == home_abbr)
 
-        client.table('game_log') \
-            .update(update_data) \
-            .eq('game_id', game_id) \
-            .execute()
-        updated += 1
+            scored_first = None
+            if first_goal_team_id is not None and team_id is not None:
+                scored_first = (first_goal_team_id == team_id)
+
+            if is_home:
+                pp_goals_val  = home_pp_goals
+                pp_opps_val   = home_pp_opps
+                pk_ga_val     = home_pk_ga
+                pk_opps_val   = away_pp_opps   # away PPs = home PKs
+            else:
+                pp_goals_val  = away_pp_goals
+                pp_opps_val   = away_pp_opps
+                pk_ga_val     = away_pk_ga
+                pk_opps_val   = home_pp_opps   # home PPs = away PKs
+
+            update_data = {
+                'pp_goals':         pp_goals_val,
+                'pp_opps':          pp_opps_val,
+                'pk_goals_against': pk_ga_val,
+                'pk_opps':          pk_opps_val,
+            }
+            if scored_first is not None:
+                update_data['team_scored_first'] = scored_first
+
+            client.table('game_log') \
+                .update(update_data) \
+                .eq('game_id', game_id) \
+                .eq('team', t) \
+                .execute()
+            updated += 1
+
         time.sleep(0.2)
 
     if updated:
-        print(f"  ✓ car_scored_first + PP/PK updated for {updated} games")
+        print(f"  ✓ team_scored_first + PP/PK updated for {updated} team-game rows")
 
-    print(f"\n  ✓ game_log: {len(rows)} rows upserted")
     print("\n✅ NHL stats pipeline complete")
 
 if __name__ == '__main__':

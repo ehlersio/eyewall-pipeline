@@ -19,11 +19,11 @@ Requirements:
 Scope:
   - 5v5 only (situationCode 1551 = both teams at full strength)
   - Minimum 150 minutes EV icetime across 3-season pool for display
-  - CAR games only (shift_events only has CAR games)
+  - League-wide shots and shifts (all 32 teams)
 """
 import math
 from collections import defaultdict
-from db import get_client, NHL_SEASON
+from db import get_client, NHL_SEASON, PRIMARY_TEAM_ABBR
 
 # -- Score-state adjustment weights (Macdonald 2012) -----------
 # Teams trailing outshooot; teams leading turtle.
@@ -362,25 +362,24 @@ def run(season: int = NHL_SEASON):
 
     print(f"  OK Updated {updates} players, {errors} errors")
 
-    # Print top/bottom 10 for sanity check
-    car_players = [
+    # Print top/bottom 5 for the primary team as a sanity check
+    primary_players = [
         (pid, coefs[idx])
         for pid, idx in player_idx.items()
-        if season_map.get(pid) == 'CAR'
+        if season_map.get(pid) == PRIMARY_TEAM_ABBR
     ]
-    car_players.sort(key=lambda x: x[1], reverse=True)
+    primary_players.sort(key=lambda x: x[1], reverse=True)
 
-    if car_players:
-        print(f"\n  CAR RAPM leaders (top 5):")
-        # Get names
-        pid_list = [str(p[0]) for p in car_players[:5]]
+    if primary_players:
+        print(f"\n  {PRIMARY_TEAM_ABBR} RAPM leaders (top 5):")
+        pid_list = [str(p[0]) for p in primary_players[:5]]
         name_rows = client.table('players').select('id,name').in_('id', pid_list).execute().data
         names = {r['id']: r['name'] for r in name_rows}
-        for pid, val in car_players[:5]:
+        for pid, val in primary_players[:5]:
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
-        print(f"\n  CAR RAPM bottom 5:")
-        for pid, val in car_players[-5:]:
+        print(f"\n  {PRIMARY_TEAM_ABBR} RAPM bottom 5:")
+        for pid, val in primary_players[-5:]:
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
     print("\nDONE RAPM pipeline complete")

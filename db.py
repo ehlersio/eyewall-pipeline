@@ -9,7 +9,8 @@ load_dotenv()
 
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_KEY']
-NHL_SEASON   = int(os.environ.get('NHL_SEASON', '20252026'))
+NHL_SEASON          = int(os.environ.get('NHL_SEASON', '20252026'))
+PRIMARY_TEAM_ABBR   = os.environ.get('PRIMARY_TEAM_ABBR', 'CAR')
 
 def get_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
