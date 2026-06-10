@@ -14,6 +14,7 @@ Usage:
 Performance: ~1,300 games/season x ~750 shifts = ~1M rows per season.
 One-time backfill of 3 seasons takes ~30-45 minutes.
 """
+import re
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -69,19 +70,24 @@ def get_all_completed_games(season):
     return sorted(games, key=lambda g: g['id'])
 
 def get_processed_games(client, season):
-    """Get game IDs already in shift_events (paginated)."""
+    """Get distinct game IDs already in shift_events via RPC.
+    Avoids paginating through ~1M rows by using a DB-side distinct query.
+    Requires the distinct_shift_game_ids function to be created in Supabase.
+    """
     all_ids = set()
     offset = 0
     while True:
-        result = client.table('shift_events') \
-            .select('game_id') \
-            .eq('season', season) \
-            .range(offset, offset + 999) \
-            .execute()
+        result = client.rpc('distinct_shift_game_ids', {
+            'p_season': season,
+            'p_offset': offset,
+            'p_limit':  1000,
+        }).execute()
         rows = result.data
         if not rows:
             break
         all_ids.update(r['game_id'] for r in rows)
+        if len(rows) < 1000:
+            break
         offset += 1000
     return all_ids
 
@@ -103,6 +109,154 @@ def get_skipped_games(client, season):
         offset += 1000
     return all_ids
 
+def fetch_shift_chart(game_id):
+    """Fetch raw shift chart rows from NHL API for a single game."""
+    data = nhl_get(
+        f'{STATS_BASE}/shiftcharts',
+        params={'cayenneExp': f'gameId={game_id}'}
+    )
+    if not data:
+        return []
+    return data.get('data', [])
+
+HTML_REPORTS_BASE = 'https://www.nhl.com/scores/htmlreports'
+
+def fetch_roster(game_id):
+    """Fetch player roster from play-by-play API.
+    Returns dict of (normalized_last, normalized_first) -> (player_id, team_id).
+    Used to match HTML shift report names to player IDs.
+    """
+    data = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
+    if not data:
+        return {}, {}
+    roster = {}
+    team_map = {}  # team_id -> abbrev (populated from awayTeam/homeTeam)
+    for t in ['awayTeam', 'homeTeam']:
+        team = data.get(t, {})
+        tid = team.get('id')
+        abbrev = team.get('abbrev', '')
+        if tid:
+            team_map[tid] = abbrev
+    for spot in data.get('rosterSpots', []):
+        pid   = spot.get('playerId')
+        tid   = spot.get('teamId')
+        first = spot.get('firstName', {}).get('default', '').upper().strip()
+        last  = spot.get('lastName',  {}).get('default', '').upper().strip()
+        pos   = spot.get('positionCode', '')
+        if pid and last:
+            roster[(last, first)] = (pid, team_map.get(tid, ''), pos)
+            # Also index by last name only for fallback matching
+            if last not in roster:
+                roster[last] = (pid, team_map.get(tid, ''), pos)
+    return roster, team_map
+
+def parse_html_shifts(game_id, season, html, roster):
+    """Parse NHL HTML shift report into shift_events rows.
+    HTML structure: player header td contains 'NUMBER LASTNAME, FIRSTNAME',
+    followed by shift rows with period and elapsed/game times.
+    """
+    rows = []
+    # Split into player blocks by playerHeading
+    # Each block starts with the player header and contains shift rows
+    blocks = re.split(r'class="playerHeading \+ border"[^>]*>([^<]+)</td>', html)
+    # blocks: [pre, player1_header, player1_content, player2_header, ...]
+    i = 1
+    while i < len(blocks) - 1:
+        header  = blocks[i].strip()      # e.g. "2 ZUB, ARTEM"
+        content = blocks[i + 1]
+        i += 2
+
+        # Parse sweater number and name
+        m = re.match(r'^(\d+)\s+(.+)$', header)
+        if not m:
+            continue
+        name_part = m.group(2).strip()  # "ZUB, ARTEM" or "ZUB"
+
+        # Normalize name for roster lookup
+        if ',' in name_part:
+            parts = name_part.split(',', 1)
+            last  = parts[0].strip().upper()
+            first = parts[1].strip().upper()
+        else:
+            last  = name_part.strip().upper()
+            first = ''
+
+        # Look up player ID from roster
+        player_info = roster.get((last, first)) or roster.get((last, '')) or roster.get(last)
+        if not player_info:
+            continue
+        player_id, team_abbrev, pos_code = player_info
+
+        # Skip goalies
+        if pos_code == 'G':
+            continue
+
+        # Parse shift rows — each row has: shift#, period, start elapsed, end elapsed, duration
+        # Times are "M:SS / M:SS" (elapsed / game remaining) — we use elapsed
+        shift_rows = re.findall(
+            r'<tr class="[^"]*(?:odd|even)Color[^"]*">\s*'
+            r'<td[^>]*>(\d+)</td>\s*'          # shift number
+            r'<td[^>]*>(\d+)</td>\s*'          # period
+            r'<td[^>]*>([\d:]+)\s*/[^<]*</td>\s*'  # start elapsed
+            r'<td[^>]*>([\d:]+)\s*/[^<]*</td>\s*'  # end elapsed
+            r'<td[^>]*>([\d:]+)</td>',          # duration
+            content
+        )
+
+        for shift_num, period_str, start_str, end_str, duration_str in shift_rows:
+            period     = int(period_str)
+            start_secs = shift_to_abs_secs(start_str, period)
+            end_secs   = shift_to_abs_secs(end_str,   period)
+
+            if end_secs <= start_secs:
+                continue
+
+            rows.append({
+                'game_id':    game_id,
+                'season':     season,
+                'player_id':  player_id,
+                'team':       team_abbrev,
+                'start_secs': start_secs,
+                'end_secs':   end_secs,
+                'period':     period,
+                'situation':  None,
+            })
+
+    return rows
+
+def fetch_shift_chart_html(game_id, season):
+    """Fetch shift data from NHL HTML shift reports (visitor + home).
+    Fallback for games where the JSON API returns no data.
+    Returns list of raw shift dicts in same format as process_shifts output.
+    """
+    # Derive season string and short game ID from game_id
+    # game_id format: 2025020373 -> season 20252026, short 020373
+    year        = game_id // 1000000        # 2025
+    season_str  = f'{year}{year + 1}'       # 20252026
+    short_id    = str(game_id)[-6:]         # 020373
+
+    # Fetch player roster for name->ID mapping
+    roster, team_map = fetch_roster(game_id)
+    if not roster:
+        return []
+
+    all_rows = []
+    for report_type in ['TV', 'TH']:  # visitor, home
+        url = f'{HTML_REPORTS_BASE}/{season_str}/{report_type}{short_id}.HTM'
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if r.status_code != 200:
+                continue
+            rows = parse_html_shifts(game_id, season, r.text, roster)
+            all_rows.extend(rows)
+            # add temporarily to shift_data.py fetch_shift_chart_html, after parse_html_shifts calls
+            print(f"  Game {game_id}: {len(all_rows)} shifts from HTML")
+        except Exception as e:
+            print(f"  HTML fetch error {url}: {e}")
+            continue
+
+    return all_rows
+
 def mark_skipped(client, game_id, season, reason='no_data'):
     """Mark a game as having no shift data so it won't be retried."""
     try:
@@ -114,13 +268,6 @@ def mark_skipped(client, game_id, season, reason='no_data'):
         }, on_conflict='game_id,pipeline').execute()
     except Exception:
         pass  # non-critical
-    data = nhl_get(
-        f'{STATS_BASE}/shiftcharts',
-        params={'cayenneExp': f'gameId={game_id}'}
-    )
-    if not data:
-        return []
-    return data.get('data', [])
 
 def process_shifts(game_id, season, raw_shifts):
     """Convert raw shift chart rows into shift_events rows for both teams."""
@@ -180,17 +327,22 @@ def run(season=NHL_SEASON):
     total_shifts = 0
     errors       = 0
     completed    = 0
-    WORKERS      = 10
+    WORKERS      = 5   # reduced from 10 — HTML fallback makes 3 requests/game
 
     def process_one(game):
         game_id = game['id']
         try:
+            # Try JSON API first (fast, available for early-season games)
             raw = fetch_shift_chart(game_id)
-            if not raw:
-                return game_id, [], 'no_data'
-            rows = process_shifts(game_id, season, raw)
+            if raw:
+                rows = process_shifts(game_id, season, raw)
+                if rows:
+                    return game_id, rows, None
+
+            # Fall back to HTML shift reports (available for all games)
+            rows = fetch_shift_chart_html(game_id, season)
             if not rows:
-                return game_id, [], 'no_rows'
+                return game_id, [], 'no_data'
             return game_id, rows, None
         except Exception as e:
             return game_id, [], str(e)
@@ -202,6 +354,7 @@ def run(season=NHL_SEASON):
             completed += 1
 
             if error or not rows:
+                print(f"  SKIP Game {game_id}: {error or 'no_data'}")
                 mark_skipped(client, game_id, season, error or 'no_data')
                 errors += 1
             else:

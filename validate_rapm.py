@@ -27,19 +27,23 @@ from datetime import datetime, timezone
 from db import get_client, NHL_SEASON
 
 # Known elite players used for sanity checks (player_id -> name)
-# Split into CAR and non-CAR players because the model uses shift_events from
-# CAR games only — non-CAR players appear in at most ~3 games per season,
-# making their RAPM estimates unreliable (high variance, dominated by small samples).
-# CAR players: expected top 40% (60th percentile) — 82 games of reliable data
-# Non-CAR players: expected top 50% (50th percentile) — low bar, just sanity checking
-KNOWN_ELITE_CAR = {
+# All players now have league-wide shift/shot data — same reliability regardless of team.
+# Expected top 40% (60th percentile) for all.
+#
+# Known RAPM limitation: heavily co-deployed linemates (e.g. McDavid + Draisaitl,
+# Makar + his regular partner) can produce inflated estimates for one player and
+# deflated estimates for the other due to collinearity in the design matrix.
+# The ridge penalty helps but does not fully resolve this for dominant top lines.
+# Players with low game counts (e.g. Makar missing ~30 games in 20252026) may also
+# show high-variance estimates due to small sample size.
+# These are accepted model limitations — WARNs for known linemate pairs or
+# injury-shortened seasons should be reviewed manually rather than treated as
+# data or pipeline errors.
+KNOWN_ELITE = {
     8476981: 'Sebastian Aho',
     8480801: 'Andrei Svechnikov',
     8481600: 'Shayne Gostisbehere',
     8482175: 'Jaccob Slavin',
-}
-
-KNOWN_ELITE_OTHER = {
     8478402: 'Connor McDavid',
     8477492: 'Nathan MacKinnon',
     8478483: 'Leon Draisaitl',
@@ -48,9 +52,6 @@ KNOWN_ELITE_OTHER = {
     8481559: 'Auston Matthews',
     8480145: 'Cale Makar',
 }
-
-# Merge for backward compatibility
-KNOWN_ELITE = {**KNOWN_ELITE_CAR, **KNOWN_ELITE_OTHER}
 
 # Thresholds
 R_PASS  = 0.85
@@ -99,8 +100,6 @@ def run_internal_checks(client, season, our_rapm):
     print(f"  Mean:               {mean_val:.4f} (target: 0.00 +/- {MEAN_TOLERANCE})")
     print(f"  Std dev:            {std_val:.4f}")
     print(f"  Range:              [{min(values):.3f}, {max(values):.3f}]")
-    print(f"  Note: model uses shift_events from CAR games only.")
-    print(f"        Non-CAR player rankings are low-sample (2-5 games) and high variance.")
 
     if abs(mean_val) > MEAN_TOLERANCE:
         issues.append(f"Mean RAPM {mean_val:.4f} outside tolerance +/-{MEAN_TOLERANCE}")
@@ -126,29 +125,16 @@ def run_internal_checks(client, season, our_rapm):
     if bot_fwds == 0:
         issues.append("No forwards in bottom quartile — likely position bias")
 
-    # Known elite player check
-    # CAR players: reliable estimates (82 games) — expected top 40% (60th pct)
-    # Non-CAR players: low-sample (2-5 games vs CAR) — just check they're not bottom 25%
+    # Known elite player check — all players have league-wide data, uniform 60th pct threshold
     print(f"\n  Known elite player rankings:")
-    for pid, name in KNOWN_ELITE_CAR.items():
+    for pid, name in KNOWN_ELITE.items():
         if pid in our_rapm:
             rank = sorted_ids.index(pid) + 1
             pct  = round((1 - rank / n) * 100)
             flag = "OK" if pct >= 60 else "WARN"
-            print(f"    [{flag}] {name} (CAR): rank {rank}/{n} ({pct}th pct) RAPM={our_rapm[pid]:.3f}")
-            if pct < 60:
-                issues.append(f"{name} ranked {rank}/{n} — expected top 40% (CAR player)")
-
-    print(f"  Non-CAR elites (low-sample — 2-5 games vs CAR only, high variance expected):")
-    for pid, name in KNOWN_ELITE_OTHER.items():
-        if pid in our_rapm:
-            rank = sorted_ids.index(pid) + 1
-            pct  = round((1 - rank / n) * 100)
-            # Only warn if they're truly in the bottom quartile — likely a data issue
-            flag = "OK" if pct >= 25 else "WARN"
             print(f"    [{flag}] {name}: rank {rank}/{n} ({pct}th pct) RAPM={our_rapm[pid]:.3f}")
-            if pct < 25:
-                issues.append(f"{name} ranked {rank}/{n} (bottom quartile) — possible data issue")
+            if pct < 60:
+                issues.append(f"{name} ranked {rank}/{n} — expected top 40%")
 
     # Season-over-season stability
     prior_season_id = (season // 10000 - 1) * 10000 + (season % 10000 - 1)

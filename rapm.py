@@ -5,7 +5,8 @@ rapm.py -- Build 3-year rolling RAPM from shift_events + shot_events.
 Algorithm:
   1. Load all 5v5 shot events across 3 seasons from Supabase
   2. For each shot, find players on ice via shift_events join
-  3. Apply Macdonald (2012) score-state weight
+  3. Apply Macdonald (2012) score-state weight, normalised per player
+        via player_score_state_dist (computed by score_state.py)
   4. Build sparse design matrix X (n_shots x n_players)
      +1 = CAR player on ice, -1 = OPP player on ice
   5. Target y = score-weighted xGoals (from MoneyPuck xG proxy)
@@ -193,6 +194,29 @@ def run(season: int = NHL_SEASON):
 
     print(f"  Zone starts loaded for {len(player_ozs):,} players")
 
+    # -- 3.6 Load score-state expected weights -------------------
+    # player_id -> expected_weight (pre-computed by score_state.py)
+    # This is the player's average Macdonald weight given their personal
+    # score-state distribution. Dividing the shot weight by this value
+    # normalises for players on consistently strong/weak teams.
+    print("  Loading score state expected weights...")
+    player_expected_sw = {}
+    for s in POOL_SEASONS:
+        rows = fetch_all(client, 'player_score_state_dist',
+            'player_id,expected_weight',
+            {'season': s})
+        for r in rows:
+            pid = r['player_id']
+            ew  = float(r['expected_weight'])
+            # Average across pool seasons (simple mean — pool is weighted
+            # by icetime in the regression itself)
+            if pid in player_expected_sw:
+                player_expected_sw[pid] = (player_expected_sw[pid] + ew) / 2
+            else:
+                player_expected_sw[pid] = ew
+    LEAGUE_AVG_SW = 1.0  # fallback for players without distribution data
+    print(f"  Score state weights loaded for {len(player_expected_sw):,} players")
+
     def zone_start_weight(player_id):
         """
         Adjustment weight based on zone start context.
@@ -265,10 +289,40 @@ def run(season: int = NHL_SEASON):
             skipped_not_5v5 += 1
             continue
 
-        # Score-state adjustment disabled -- game_home only covers CAR games.
-        # Zone-start weight only.
+        # Score-state adjustment (Macdonald 2012), normalised by each player's
+        # expected score-state weight from player_score_state_dist.
+        # Normalisation prevents penalising players on consistently strong teams
+        # (e.g. EDM, COL) who spend more time in positive score states through
+        # skill rather than luck.
+        home_team  = game_home.get(game_id)
+        goals_so_far = [
+            g for g in goal_timeline.get(game_id, [])
+            if g['secs'] < shot_sec
+        ]
+        home_score = sum(1 for g in goals_so_far if g['team'] == home_team)
+        away_score = sum(1 for g in goals_so_far if g['team'] != home_team)
+        if shooting_team == home_team:
+            score_diff = home_score - away_score
+        else:
+            score_diff = away_score - home_score
+        sw = score_weight(score_diff)
+
+        # Normalise: divide raw sw by each shooting player's expected weight,
+        # then average across the unit. Defending team uses their own expected
+        # weights — they experience the same shot from the opposite perspective.
+        def normalised_sw(player_id):
+            exp_w = player_expected_sw.get(player_id, LEAGUE_AVG_SW)
+            return sw / exp_w if exp_w > 0 else sw
+
+        shoot_norm_weights = [normalised_sw(s['player_id']) for s in shoot_skaters]
+        norm_w = (
+            sum(shoot_norm_weights) / len(shoot_norm_weights)
+            if shoot_norm_weights else 1.0
+        )
+
         shoot_ozs_weights = [zone_start_weight(s['player_id']) for s in shoot_skaters]
-        combined_w = sum(shoot_ozs_weights) / len(shoot_ozs_weights) if shoot_ozs_weights else 1.0
+        ozs_w = sum(shoot_ozs_weights) / len(shoot_ozs_weights) if shoot_ozs_weights else 1.0
+        combined_w = norm_w * ozs_w
 
         # Build row: shooting team +1, defending team -1
         row = {}
@@ -371,15 +425,18 @@ def run(season: int = NHL_SEASON):
     primary_players.sort(key=lambda x: x[1], reverse=True)
 
     if primary_players:
-        print(f"\n  {PRIMARY_TEAM_ABBR} RAPM leaders (top 5):")
-        pid_list = [str(p[0]) for p in primary_players[:5]]
+        top5    = primary_players[:5]
+        bottom5 = primary_players[-5:]
+        pid_list = list({str(p[0]) for p in top5 + bottom5})
         name_rows = client.table('players').select('id,name').in_('id', pid_list).execute().data
         names = {r['id']: r['name'] for r in name_rows}
-        for pid, val in primary_players[:5]:
+
+        print(f"\n  {PRIMARY_TEAM_ABBR} RAPM leaders (top 5):")
+        for pid, val in top5:
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
         print(f"\n  {PRIMARY_TEAM_ABBR} RAPM bottom 5:")
-        for pid, val in primary_players[-5:]:
+        for pid, val in bottom5:
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
     print("\nDONE RAPM pipeline complete")
