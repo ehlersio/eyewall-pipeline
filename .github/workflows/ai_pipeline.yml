@@ -1,0 +1,90 @@
+name: AI Pipeline
+
+on:
+  schedule:
+    # Night job — summaries + scouting (8AM UTC = 4AM ET, after nightly finishes)
+    - cron: "0 8 * * *"
+    # Morning job — predictions (2PM UTC = 10AM ET, morning of game day)
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job to run"
+        required: true
+        default: "night"
+        type: choice
+        options:
+          - night
+          - morning
+          - all
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  NHL_SEASON: "20252026"
+  PRIMARY_TEAM_ABBR: "CAR"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # NIGHT JOB — post-game summaries + missing scouting blurbs
+  # Runs: nightly at 8AM UTC (4AM ET)
+  # Manual: workflow_dispatch with job = "night" or "all"
+  # --------------------------------------------------------------------------
+  ai-night:
+    name: "Night — Summaries + Scouting"
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 8 * * *') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.job == 'night' || inputs.job == 'all'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ai_summaries.py
+        run: python ai_summaries.py
+        continue-on-error: false
+
+      - name: Run ai_scouting.py --missing
+        run: python ai_scouting.py --missing
+        continue-on-error: false
+
+  # --------------------------------------------------------------------------
+  # MORNING JOB — pre-game predictions
+  # Runs: daily at 2PM UTC (10AM ET)
+  # Manual: workflow_dispatch with job = "morning" or "all"
+  # --------------------------------------------------------------------------
+  ai-morning:
+    name: "Morning — Predictions"
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.job == 'morning' || inputs.job == 'all'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ai_predictions.py
+        run: python ai_predictions.py
+        continue-on-error: false
