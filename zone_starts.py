@@ -13,15 +13,18 @@ Usage:
   python zone_starts.py              # current season
   python zone_starts.py 20242025     # backfill a prior season
 """
+import re
 import requests
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_client, NHL_SEASON
 
-NHL_BASE = 'https://api-web.nhle.com/v1'
+NHL_BASE   = 'https://api-web.nhle.com/v1'
 STATS_BASE = 'https://api.nhle.com/stats/rest/en'
-HEADERS  = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)'}
+HEADERS    = {'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)'}
+
+HTML_REPORTS_BASE = 'https://www.nhl.com/scores/htmlreports'
 
 # Window in seconds to associate a faceoff with a shift start
 FACEOFF_WINDOW_SECS = 10
@@ -125,6 +128,132 @@ def get_shift_chart(game_id):
         return []
     return data.get('data', [])
 
+# ── HTML shift report fallback ─────────────────────────────────────────────
+# Mirrors the approach in shift_data.py. Used when the JSON shift chart API
+# returns no data (affects some regular season and preseason games).
+#
+# Returns shifts in the same dict format that process_game expects:
+#   { 'playerId': int, 'teamAbbrev': str, 'startTime': 'M:SS',
+#     'period': int, 'detailCode': 0 }
+
+def fetch_roster_for_html(game_id):
+    """Fetch player roster from play-by-play API.
+    Returns dict mapping (LAST, FIRST) and LAST -> (player_id, team_abbrev, pos_code).
+    """
+    data = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
+    if not data:
+        return {}, ''
+
+    team_map = {}
+    for t in ['awayTeam', 'homeTeam']:
+        team = data.get(t, {})
+        tid = team.get('id')
+        abbrev = team.get('abbrev', '')
+        if tid:
+            team_map[tid] = abbrev
+
+    home_team = data.get('homeTeam', {}).get('abbrev', '')
+
+    roster = {}
+    for spot in data.get('rosterSpots', []):
+        pid   = spot.get('playerId')
+        tid   = spot.get('teamId')
+        first = spot.get('firstName', {}).get('default', '').upper().strip()
+        last  = spot.get('lastName',  {}).get('default', '').upper().strip()
+        pos   = spot.get('positionCode', '')
+        if pid and last:
+            roster[(last, first)] = (pid, team_map.get(tid, ''), pos)
+            if last not in roster:
+                roster[last] = (pid, team_map.get(tid, ''), pos)
+
+    return roster, home_team
+
+def parse_html_shifts_for_zone(game_id, season, html, roster):
+    """Parse NHL HTML shift report into the dict format process_game expects.
+    Goalies are excluded (detailCode=1 equivalent — skipped via pos_code check).
+    Returns list of dicts with keys: playerId, teamAbbrev, startTime, period, detailCode.
+    """
+    shifts = []
+    blocks = re.split(r'class="playerHeading \+ border"[^>]*>([^<]+)</td>', html)
+    i = 1
+    while i < len(blocks) - 1:
+        header  = blocks[i].strip()
+        content = blocks[i + 1]
+        i += 2
+
+        m = re.match(r'^(\d+)\s+(.+)$', header)
+        if not m:
+            continue
+        name_part = m.group(2).strip()
+
+        if ',' in name_part:
+            parts = name_part.split(',', 1)
+            last  = parts[0].strip().upper()
+            first = parts[1].strip().upper()
+        else:
+            last  = name_part.strip().upper()
+            first = ''
+
+        player_info = roster.get((last, first)) or roster.get((last, '')) or roster.get(last)
+        if not player_info:
+            continue
+
+        player_id, team_abbrev, pos_code = player_info
+
+        if pos_code == 'G':
+            continue
+
+        shift_rows = re.findall(
+            r'<tr class="[^"]*(?:odd|even)Color[^"]*">\s*'
+            r'<td[^>]*>(\d+)</td>\s*'
+            r'<td[^>]*>(\d+)</td>\s*'
+            r'<td[^>]*>([\d:]+)\s*/[^<]*</td>\s*'
+            r'<td[^>]*>([\d:]+)\s*/[^<]*</td>\s*'
+            r'<td[^>]*>([\d:]+)</td>',
+            content
+        )
+
+        for shift_num, period_str, start_str, end_str, duration_str in shift_rows:
+            shifts.append({
+                'playerId':   player_id,
+                'teamAbbrev': team_abbrev,
+                'startTime':  start_str,
+                'period':     int(period_str),
+                'detailCode': 0,
+            })
+
+    return shifts
+
+def get_shift_chart_html_fallback(game_id, season):
+    """Fetch shifts from NHL HTML shift reports when JSON API returns nothing.
+    Returns shifts in the same format as get_shift_chart() so process_game
+    can use them without modification.
+    """
+    year       = game_id // 1000000        # e.g. 2024
+    season_str = f'{year}{year + 1}'       # e.g. 20242025
+    short_id   = str(game_id)[-6:]         # e.g. 020034
+
+    roster, home_team = fetch_roster_for_html(game_id)
+    if not roster:
+        return []
+
+    all_shifts = []
+    for report_type in ['TV', 'TH']:  # visitor, home
+        url = f'{HTML_REPORTS_BASE}/{season_str}/{report_type}{short_id}.HTM'
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if r.status_code != 200:
+                continue
+            shifts = parse_html_shifts_for_zone(game_id, season, r.text, roster)
+            all_shifts.extend(shifts)
+        except Exception as e:
+            print(f"  HTML fallback error {url}: {e}")
+            continue
+
+    return all_shifts
+
+# ── End HTML fallback ──────────────────────────────────────────────────────
+
 def process_game(game_id, season, home_team):
     """
     For each player shift, find the nearest preceding faceoff
@@ -132,6 +261,9 @@ def process_game(game_id, season, home_team):
 
     IMPORTANT: zoneCode in NHL API is from HOME team perspective.
     Away team players get the flipped zone (O<->D).
+
+    Tries the JSON shift chart API first; falls back to HTML shift
+    reports if the JSON API returns no data.
     """
     pbp = nhl_get(f'{NHL_BASE}/gamecenter/{game_id}/play-by-play')
     if not pbp or not pbp.get('plays'):
@@ -157,7 +289,10 @@ def process_game(game_id, season, home_team):
     if not faceoffs:
         return []
 
+    # Try JSON shift chart first; fall back to HTML reports
     raw_shifts = get_shift_chart(game_id)
+    if not raw_shifts:
+        raw_shifts = get_shift_chart_html_fallback(game_id, season)
     if not raw_shifts:
         return []
 

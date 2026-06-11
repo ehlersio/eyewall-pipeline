@@ -442,4 +442,6 @@ def run(season: int = NHL_SEASON):
     print("\n✅ NHL stats pipeline complete")
 
 if __name__ == '__main__':
-    run()
+    import sys
+    season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
+    run(season_arg)
