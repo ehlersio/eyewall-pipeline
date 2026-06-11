@@ -73,7 +73,7 @@ def generate(prompt: str, system: str = None) -> str | None:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type":  "application/json",
             },
-            json={"messages": messages},
+            json={"messages": messages, "max_tokens": 1024},
             timeout=120,
         )
         r.raise_for_status()

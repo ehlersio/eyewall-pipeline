@@ -266,6 +266,92 @@ def build_prediction_prompt(ctx: dict) -> str:
     )
 
 
+def format_matchup_context(ctx: dict) -> str:
+    """Formats line combo + player scouting context for matchup analysis."""
+    lines = []
+
+    for side in ("home", "away"):
+        team = ctx.get(f"{side}_team", "")
+        combos = ctx.get(f"{side}_lines", {})
+        blurbs = ctx.get(f"{side}_blurbs", {})  # player_id -> scouting_text
+        players = ctx.get(f"{side}_players", [])
+
+        venue = "HOME" if side == "home" else "AWAY"
+        lines.append(f"\n{'='*40}")
+        lines.append(f"{team} ({venue})")
+        lines.append(f"{'='*40}")
+
+        fwd_lines = combos.get("lines", [])
+        d_pairs   = combos.get("pairs", [])
+
+        if fwd_lines:
+            lines.append("Forward lines (inferred from shift data):")
+            for i, unit in enumerate(fwd_lines[:4], 1):
+                xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% —"
+                toi = f"{unit['toiMins']}min" if unit.get("toiMins") else ""
+                player_names = [p["name"] for p in unit.get("players", [])]
+                lines.append(f"  Line {i}: {', '.join(player_names)} | {xgf} | {toi}")
+                for p in unit.get("players", []):
+                    pid = str(p.get("id", ""))
+                    if pid and pid in blurbs:
+                        lines.append(f"    {p['name']}: {blurbs[pid]}")
+
+        if d_pairs:
+            lines.append("Defence pairs:")
+            for i, unit in enumerate(d_pairs[:3], 1):
+                xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% —"
+                player_names = [p["name"] for p in unit.get("players", [])]
+                lines.append(f"  Pair {i}: {', '.join(player_names)} | {xgf}")
+
+        if players:
+            lines.append("Top skaters (regular season RAPM + xGF/60):")
+            for p in players[:6]:
+                rapm = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
+                xgf60 = f"xGF/60 {p['xgf_per60']:.2f}" if p.get("xgf_per60") is not None else ""
+                lines.append(f"  {p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A | {rapm} | {xgf60}")
+
+    return "\n".join(lines)
+
+
+def build_matchup_prompt(ctx: dict) -> str:
+    """Line-by-line and player matchup analysis for the Scouting tab."""
+    formatted = format_matchup_context(ctx)
+    home = ctx.get("home_team", "")
+    away = ctx.get("away_team", "")
+
+    return (
+        f"Here is the line combination and player data for an upcoming NHL game: {away} (AWAY) @ {home} (HOME).\n\n"
+        f"CRITICAL: Each section below is clearly labelled with the team abbreviation. "
+        f"Only attribute players, stats, and lines to the team they are listed under. "
+        f"Do not mix up players between teams.\n\n"
+        f"{formatted}\n\n"
+        f"Write a structured matchup analysis covering:\n"
+        f"1. How the top line matchups look — {home} Line 1 vs {away} Line 1, who has the edge and why\n"
+        f"2. Key individual players to watch from each team and how they match up against their opponents\n"
+        f"3. Defence pair matchups and which team wins the possession battle\n"
+        f"4. Special teams edge if relevant\n"
+        f"5. A directional pick with one sentence of reasoning\n\n"
+        f"Always identify players by their team ({home} or {away}) when you name them. "
+        f"Write in flowing paragraphs, not bullet points. No markdown, no asterisks, no headers. Plain text only. 200-300 words."
+    )
+
+
+def build_game_card_prompt(ctx: dict) -> str:
+    """Short 2-3 sentence card caption for the export image. ~50 words max."""
+    formatted = format_game_context(ctx)
+    game = ctx.get("game", {})
+    team = game.get("primary_team", "CAR")
+    opponent = game.get("opponent", "the opponent")
+
+    return (
+        f"Here is the data for a completed NHL game involving {team}:\n\n"
+        f"{formatted}\n\n"
+        f"Write a 2-3 sentence shareable card caption summarizing this game for {team} fans. "
+        f"Hit the key result, one standout moment or player, and the underlying play if it's telling. "
+        f"Punchy and direct. Under 50 words. Plain text only, no bullet points."
+    )
+
+
 def build_player_scouting_prompt(player: dict, team: str) -> str:
     lines = [f"Player scouting data for {player.get('name')} ({player.get('position')}) — {team}:"]
     for k, v in player.items():

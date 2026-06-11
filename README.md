@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, and RAPM-derived WAR.
+Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, and AI-generated game summaries, predictions, matchup analysis, and player scouting blurbs.
 
 ## Setup
 
@@ -21,6 +21,9 @@ Edit `.env`:
 SUPABASE_URL=https://mqgasjzywoibdgxjjkux.supabase.co
 SUPABASE_SERVICE_KEY=your_service_role_key_here
 NHL_SEASON=20252026
+PRIMARY_TEAM_ABBR=CAR
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+CLOUDFLARE_API_KEY=your_cloudflare_api_key
 ```
 
 ### 3. Run the pipeline
@@ -40,6 +43,18 @@ python run.py rapm 20242025    # RAPM backfill for a specific season
 python run.py moneypuck        # MoneyPuck WAR + percentiles only
 python run.py validate         # Internal RAPM sanity checks (run after rapm.py)
 python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV (quarterly)
+python run.py ai               # Run full AI pipeline (summaries + scouting + predictions)
+
+# AI pipeline — run individually
+python ai_summaries.py                          # Post-game summaries for all unprocessed games
+python ai_summaries.py --game 2025030414        # Single game
+python ai_summaries.py --game 2025030414 --force  # Regenerate even if exists
+python ai_predictions.py                        # Pre-game predictions for today's games
+python ai_predictions.py --game 2025030417 --home CAR --away VGK  # Single game
+python ai_predictions.py --force                # Regenerate all upcoming games
+python ai_scouting.py                           # Player scouting blurbs (all 32 teams)
+python ai_scouting.py --team CAR                # One team only
+python ai_scouting.py --missing                 # Only generate missing blurbs
 
 # Backfill prior seasons — nhl_stats.py and moneypuck.py accept a season argument
 python nhl_stats.py 20242025   # populate player_seasons rows for a prior season
@@ -52,6 +67,12 @@ python moneypuck.py 20242025   # populate WAR/percentiles for a prior season
 
 ```
 nhl_stats -> shot_events -> shift_data -> zone_starts -> score_state -> rapm -> moneypuck
+```
+
+AI pipeline runs independently (no dependency on RAPM pipeline):
+
+```
+ai_summaries -> ai_scouting -> ai_predictions
 ```
 
 ### `nhl_stats.py`
@@ -171,6 +192,38 @@ python rapm.py
 python moneypuck.py
 ```
 
+### `ai_summaries.py`
+- Generates post-game summaries for completed games (both teams)
+- Two Workers AI calls per game: full `summary_text` (250-400 words) + short `card_text` (50 words for export card)
+- Writes to `game_summaries` table
+- Incremental — skips already-generated summaries unless `--force`
+- Runtime: ~2-4 seconds per game
+
+### `ai_predictions.py`
+- Generates pre-game predictions for today's upcoming games
+- Two Workers AI calls per game: `prediction_text` (200-350 words) + `matchup_text` (line-by-line matchup analysis, 200-300 words)
+- Uses standings, recent form, and player stats from Supabase
+- Writes to `game_predictions` table
+- Runtime: ~4-6 seconds per game
+
+### `ai_scouting.py`
+- Generates player scouting blurbs for all 32 teams
+- One Workers AI call per player: `scouting_text` (150-250 words)
+- Uses `player_seasons` RAPM/WAR/percentile data as context
+- Writes to `player_scouting` table
+- `--missing` flag: only generate for players without existing blurbs
+- Runtime: ~1-2 seconds per player; ~30-60 min for all 32 teams
+
+### `ai_persona.py`
+- Defines the Sticks persona (system prompt) and all prompt templates
+- No model calls — pure string formatters
+- Functions: `build_game_summary_prompt`, `build_game_card_prompt`, `build_prediction_prompt`, `build_matchup_prompt`, `build_player_scouting_prompt`
+
+### `ai_context.py`
+- Pulls and structures Supabase data for AI prompt input
+- No model calls — pure data fetchers
+- Functions: `build_game_summary_context`, `build_prediction_context`, `build_matchup_context`, `get_line_combos`, `get_scouting_blurbs`
+
 ## Database schema
 
 | Table | Description |
@@ -186,9 +239,26 @@ python moneypuck.py
 | `player_score_state_dist` | Per-player score state distribution weights (used by rapm.py) |
 | `skipped_games` | Games with no source data, per pipeline, to avoid retrying |
 | `rapm_validation` | RAPM validation run history (internal checks + EH correlation) |
+| `game_summaries` | AI post-game summaries (`summary_text`, `card_text`) per team per game |
+| `game_predictions` | AI pre-game predictions (`prediction_text`, `matchup_text`) per game |
+| `player_scouting` | AI player scouting blurbs (`scouting_text`) per player per season |
+| `game_scoring` | Goal-by-goal scoring data (scorer, assists, situation, score after) |
+| `game_xg` | Per-game expected goals by team and situation |
+| `game_log` | League-wide game results (home/away teams, scores, game type) |
+| `line_combinations` | Inferred forward lines and D pairs (xGF%, TOI) per team per season |
 
 See `schema.sql` for full definitions.
 
 ## Scheduling
 
-GitHub Actions nightly cron runs at 3AM ET (8AM UTC) via `.github/workflows/nightly.yml`. The nightly run is incremental — only new completed games are processed by `shot_events.py`, `shift_data.py`, and `zone_starts.py`. Full runtime after backfill: ~6-10 minutes.
+GitHub Actions runs two workflows:
+
+**`nightly.yml`** — 3AM ET (8AM UTC): Full data pipeline (`nhl_stats`, `shot_events`, `shift_data`, `zone_starts`, `score_state`, `rapm`, `moneypuck`). Incremental — only new completed games processed. Full runtime after backfill: ~6-10 minutes.
+
+**`ai_pipeline.yml`** — Two jobs:
+- **Night job** (8AM UTC / 4AM ET): `ai_summaries.py` (post-game summaries for last night's games) + `ai_scouting.py --missing` (any players without blurbs)
+- **Morning job** (2PM UTC / 10AM ET): `ai_predictions.py` (pre-game predictions for tonight's games)
+- Manual dispatch via `workflow_dispatch` with `job` input (`night`, `morning`, or `all`)
+- Also runnable locally: `python run.py ai`
+
+All AI inference via Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct-fp8-fast`).

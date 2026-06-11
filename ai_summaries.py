@@ -18,7 +18,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 from ai_context import build_game_summary_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_game_summary_prompt
+from ai_persona import STICKS_SYSTEM_PROMPT, build_game_summary_prompt, build_game_card_prompt
 
 load_dotenv()
 
@@ -53,7 +53,7 @@ def generate(prompt: str, system: str = None) -> str | None:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type":  "application/json",
             },
-            json={"messages": messages},
+            json={"messages": messages, "max_tokens": 1024},
             timeout=120,
         )
         r.raise_for_status()
@@ -79,13 +79,14 @@ def already_generated(game_id: int, team: str) -> bool:
     return (result.count or 0) > 0
 
 
-def save_summary(game_id: int, season: int, team: str, summary_text: str):
+def save_summary(game_id: int, season: int, team: str, summary_text: str, card_text: str = None):
     supabase.table("game_summaries").upsert(
         {
             "game_id":      game_id,
             "season":       season,
             "team":         team,
             "summary_text": summary_text,
+            "card_text":    card_text,
             "generated_at": "now()",
         },
         on_conflict="game_id,team"
@@ -155,8 +156,15 @@ def process_game(game_id: int, season: int, home_team: str, away_team: str, forc
             results.append(False)
             continue
 
-        save_summary(game_id, season, team, summary)
-        print(f"  {game_id} {team} — saved ({len(summary)} chars)")
+        # Generate short card caption
+        card_prompt = build_game_card_prompt(ctx)
+        print(f"  {game_id} {team} — generating card caption...")
+        card_text = generate(card_prompt, system=STICKS_SYSTEM_PROMPT)
+        if not card_text:
+            print(f"  {game_id} {team} — card caption failed, saving summary only")
+
+        save_summary(game_id, season, team, summary, card_text=card_text)
+        print(f"  {game_id} {team} — saved ({len(summary)} chars full, {len(card_text) if card_text else 0} chars card)")
         results.append(True)
 
     return tuple(results)

@@ -502,3 +502,94 @@ if __name__ == "__main__":
     print("=== Game context (most recent CAR game) ===")
     ctx = build_game_summary_context(2025030414)
     print(json.dumps(ctx, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# Line combinations context
+# ---------------------------------------------------------------------------
+
+def get_line_combos(team: str, season: int = None) -> dict:
+    """Returns inferred forward lines and D pairs for a team."""
+    season = season or NHL_SEASON
+    rows = (
+        supabase.table("line_combinations")
+        .select("unit_type, rank, name_a, name_b, name_c, pos_a, pos_b, pos_c, toi_secs, xgf_pct")
+        .eq("team", team)
+        .eq("season", season)
+        .order("unit_type")
+        .order("rank")
+        .execute()
+        .data
+    )
+    if not rows:
+        return {"lines": [], "pairs": []}
+
+    lines = []
+    pairs = []
+    for r in rows:
+        players = [
+            {"name": r["name_a"], "pos": r["pos_a"]},
+            {"name": r["name_b"], "pos": r["pos_b"]},
+        ]
+        if r.get("name_c"):
+            players.append({"name": r["name_c"], "pos": r["pos_c"]})
+        players = [p for p in players if p["name"]]
+
+        unit = {
+            "rank":     r["rank"],
+            "players":  players,
+            "toiMins":  round(r["toi_secs"] / 60) if r.get("toi_secs") else None,
+            "xgfPct":   float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
+        }
+        if r["unit_type"] == "F":
+            lines.append(unit)
+        else:
+            pairs.append(unit)
+
+    return {"lines": lines, "pairs": pairs}
+
+
+# ---------------------------------------------------------------------------
+# Scouting blurbs context
+# ---------------------------------------------------------------------------
+
+def get_scouting_blurbs(team: str, season: int = None) -> dict:
+    """Returns player_id -> scouting_text map for a team."""
+    season = season or NHL_SEASON
+    rows = (
+        supabase.table("player_scouting")
+        .select("player_id, scouting_text")
+        .eq("team", team)
+        .eq("season", season)
+        .execute()
+        .data
+    )
+    return {str(r["player_id"]): r["scouting_text"] for r in rows if r.get("scouting_text")}
+
+
+# ---------------------------------------------------------------------------
+# Full matchup context (pre-game, line + player analysis)
+# ---------------------------------------------------------------------------
+
+def build_matchup_context(home_team: str, away_team: str) -> dict:
+    """
+    Assembles line combo + player scouting context for matchup analysis.
+    Extends build_prediction_context with line combos and scouting blurbs.
+    """
+    home_players = get_player_context(team=home_team)
+    away_players = get_player_context(team=away_team)
+    home_lines   = get_line_combos(team=home_team)
+    away_lines   = get_line_combos(team=away_team)
+    home_blurbs  = get_scouting_blurbs(team=home_team)
+    away_blurbs  = get_scouting_blurbs(team=away_team)
+
+    return {
+        "home_team":    home_team,
+        "away_team":    away_team,
+        "home_players": home_players,
+        "away_players": away_players,
+        "home_lines":   home_lines,
+        "away_lines":   away_lines,
+        "home_blurbs":  home_blurbs,
+        "away_blurbs":  away_blurbs,
+    }

@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 from supabase import create_client
 from dotenv import load_dotenv
 
-from ai_context import build_prediction_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_prediction_prompt
+from ai_context import build_prediction_context, build_matchup_context
+from ai_persona import STICKS_SYSTEM_PROMPT, build_prediction_prompt, build_matchup_prompt
 
 load_dotenv()
 
@@ -53,7 +53,7 @@ def generate(prompt: str, system: str = None) -> str | None:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type":  "application/json",
             },
-            json={"messages": messages},
+            json={"messages": messages, "max_tokens": 1024},
             timeout=120,
         )
         r.raise_for_status()
@@ -127,13 +127,14 @@ def already_generated(game_id: int) -> bool:
 
 
 def save_prediction(game_id: int, home_team: str, away_team: str,
-                    prediction_text: str, game_date: str):
+                    prediction_text: str, game_date: str, matchup_text: str = None):
     supabase.table("game_predictions").upsert(
         {
             "game_id":         game_id,
             "home_team":       home_team,
             "away_team":       away_team,
             "prediction_text": prediction_text,
+            "matchup_text":    matchup_text,
             "generated_at":    "now()",
         },
         on_conflict="game_id"
@@ -179,8 +180,21 @@ def process_game(game: dict, force: bool = False) -> bool:
         print(f"  {game_id} — generation failed")
         return False
 
-    save_prediction(game_id, home_team, away_team, prediction, game_date)
-    print(f"  {game_id} — saved ({len(prediction)} chars)")
+    # Generate line/player matchup analysis in a second call
+    print(f"  {game_id} — building matchup context...")
+    try:
+        matchup_ctx = build_matchup_context(home_team, away_team)
+        matchup_prompt = build_matchup_prompt(matchup_ctx)
+        print(f"  {game_id} — generating matchup analysis...")
+        matchup = generate(matchup_prompt, system=STICKS_SYSTEM_PROMPT)
+        if not matchup:
+            print(f"  {game_id} — matchup generation failed, saving prediction only")
+    except Exception as e:
+        print(f"  {game_id} — matchup context error: {e}")
+        matchup = None
+
+    save_prediction(game_id, home_team, away_team, prediction, game_date, matchup_text=matchup)
+    print(f"  {game_id} — saved ({len(prediction)} chars prediction, {len(matchup) if matchup else 0} chars matchup)")
     return True
 
 
