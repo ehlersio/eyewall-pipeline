@@ -1,0 +1,40 @@
+name: MoneyPuck Daily Ingest
+
+on:
+  schedule:
+    # 6:00 AM ET daily (MoneyPuck updates overnight)
+    - cron: '0 10 * * *'
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch MoneyPuck CSV
+        id: fetch
+        run: |
+          curl -fsSL \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "Referer: https://moneypuck.com/" \
+            "https://moneypuck.com/moneypuck/playerData/seasonSummary/2026/regular/skaters.csv" \
+            -o skaters.csv
+          ROWS=$(wc -l < skaters.csv)
+          echo "Fetched $ROWS lines"
+          echo "rows=$ROWS" >> $GITHUB_OUTPUT
+
+      - name: POST to EyeWall worker
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: text/plain" \
+            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            --data-binary @skaters.csv \
+            "https://eyewall-poller.billowing-queen-bf23.workers.dev/moneypuck/ingest")
+          echo "Worker responded: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Ingest failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+      - name: Summary
+        run: echo "MoneyPuck ingest complete — ${{ steps.fetch.outputs.rows }} rows sent to worker"

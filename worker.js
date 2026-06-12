@@ -35,38 +35,40 @@ const STATS_BASE = 'https://api.nhle.com/stats/rest/en';
 const DEFAULT_TEAM_ABBR = 'CAR';
 
 const TEAM_CONFIGS = {
-  ANA: { abbr:'ANA', teamId:24, franchiseId:32, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Anaheim Ducks',         winCopy:"Let's go Ducks! 🦆",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`ANA vs ${o} — puck drop!`, hashtags:['#AnaheimDucks','#LetsGoDucks','#NHL'] },
-  BOS: { abbr:'BOS', teamId:6,  franchiseId:6,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Boston Bruins',          winCopy:"Let's go Bruins! 🐻",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`BOS vs ${o} — puck drop!`, hashtags:['#NHLBruins','#BostonBruins','#NHL'] },
-  BUF: { abbr:'BUF', teamId:7,  franchiseId:7,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Buffalo Sabres',         winCopy:"Let's go Sabres! ⚔️",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`BUF vs ${o} — puck drop!`, hashtags:['#Sabres','#LetsGoBuffalo','#NHL'] },
-  CGY: { abbr:'CGY', teamId:20, franchiseId:27, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Calgary Flames',         winCopy:"Let's go Flames! 🔥",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CGY vs ${o} — puck drop!`, hashtags:['#Flames','#CofRed','#NHL'] },
-  CAR: { abbr:'CAR', teamId:12, franchiseId:26, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Carolina Hurricanes',    winCopy:"Let's go Canes! 🌀",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CAR vs ${o} — puck drop!`, hashtags:['#LetsGoCanes','#Canes','#NHL','#CarolinaHurricanes','#SoundTheSiren'] },
-  CHI: { abbr:'CHI', teamId:16, franchiseId:11, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Chicago Blackhawks',     winCopy:"Let's go Blackhawks! 🪶",  lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CHI vs ${o} — puck drop!`, hashtags:['#Blackhawks','#OneGoal','#NHL'] },
-  COL: { abbr:'COL', teamId:21, franchiseId:27, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Colorado Avalanche',     winCopy:"Let's go Avs! ❄️",         lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`COL vs ${o} — puck drop!`, hashtags:['#GoAvsGo','#Avalanche','#NHL'] },
-  CBJ: { abbr:'CBJ', teamId:29, franchiseId:36, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Columbus Blue Jackets',  winCopy:"Let's go Jackets! 💥",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CBJ vs ${o} — puck drop!`, hashtags:['#CBJ','#NHLJackets','#NHL'] },
-  DAL: { abbr:'DAL', teamId:25, franchiseId:15, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Dallas Stars',           winCopy:"Let's go Stars! ⭐",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`DAL vs ${o} — puck drop!`, hashtags:['#GoStars','#TexasHockey','#NHL'] },
-  DET: { abbr:'DET', teamId:17, franchiseId:12, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Detroit Red Wings',      winCopy:"Let's go Wings! 🐙",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`DET vs ${o} — puck drop!`, hashtags:['#LGRW','#DetroitRedWings','#NHL'] },
-  EDM: { abbr:'EDM', teamId:22, franchiseId:25, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Edmonton Oilers',        winCopy:"Let's go Oilers! 🛢️",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`EDM vs ${o} — puck drop!`, hashtags:['#LetsGoOilers','#Oilers','#NHL'] },
-  FLA: { abbr:'FLA', teamId:13, franchiseId:33, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Florida Panthers',       winCopy:"Let's go Panthers! 🐾",    lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`FLA vs ${o} — puck drop!`, hashtags:['#TimeToHunt','#FlaPanthers','#NHL'] },
-  LAK: { abbr:'LAK', teamId:26, franchiseId:14, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Los Angeles Kings',      winCopy:"Let's go Kings! 👑",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`LAK vs ${o} — puck drop!`, hashtags:['#GoKingsGo','#LAKings','#NHL'] },
-  MIN: { abbr:'MIN', teamId:30, franchiseId:37, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Minnesota Wild',         winCopy:"Let's go Wild! 🌲",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`MIN vs ${o} — puck drop!`, hashtags:['#mnwild','#MNWild','#NHL'] },
-  MTL: { abbr:'MTL', teamId:8,  franchiseId:1,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Montreal Canadiens',     winCopy:"Let's go Habs! 🔵",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`MTL vs ${o} — puck drop!`, hashtags:['#GoHabsGo','#Canadiens','#NHL'] },
-  NSH: { abbr:'NSH', teamId:18, franchiseId:34, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Nashville Predators',    winCopy:"Let's go Preds! 🐯",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NSH vs ${o} — puck drop!`, hashtags:['#Preds','#NashvillePredators','#NHL'] },
-  NJD: { abbr:'NJD', teamId:1,  franchiseId:23, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New Jersey Devils',      winCopy:"Let's go Devils! 😈",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NJD vs ${o} — puck drop!`, hashtags:['#NJDevils','#NJD','#NHL'] },
-  NYI: { abbr:'NYI', teamId:2,  franchiseId:22, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New York Islanders',     winCopy:"Let's go Islanders! 🏝️",  lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NYI vs ${o} — puck drop!`, hashtags:['#Isles','#NYIsles','#NHL'] },
-  NYR: { abbr:'NYR', teamId:3,  franchiseId:10, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New York Rangers',       winCopy:"Let's go Rangers! 🗽",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NYR vs ${o} — puck drop!`, hashtags:['#NYR','#NYRangers','#NHL'] },
-  OTT: { abbr:'OTT', teamId:9,  franchiseId:30, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Ottawa Senators',        winCopy:"Let's go Sens! 🏛️",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`OTT vs ${o} — puck drop!`, hashtags:['#GoSensGo','#Sens','#NHL'] },
-  PHI: { abbr:'PHI', teamId:4,  franchiseId:16, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Philadelphia Flyers',    winCopy:"Let's go Flyers! 🟠",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`PHI vs ${o} — puck drop!`, hashtags:['#Flyers','#PhiladelphiaFlyers','#NHL'] },
-  PIT: { abbr:'PIT', teamId:5,  franchiseId:17, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Pittsburgh Penguins',    winCopy:"Let's go Pens! 🐧",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`PIT vs ${o} — puck drop!`, hashtags:['#LetsGoPens','#Penguins','#NHL'] },
-  SEA: { abbr:'SEA', teamId:55, franchiseId:39, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Seattle Kraken',         winCopy:"Let's go Kraken! 🦑",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`SEA vs ${o} — puck drop!`, hashtags:['#SeattleKraken','#Kraken','#NHL'] },
-  SJS: { abbr:'SJS', teamId:28, franchiseId:29, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'San Jose Sharks',        winCopy:"Let's go Sharks! 🦈",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`SJS vs ${o} — puck drop!`, hashtags:['#SJSharks','#Sharks','#NHL'] },
-  STL: { abbr:'STL', teamId:19, franchiseId:18, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'St. Louis Blues',        winCopy:"Let's go Blues! 🎵",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`STL vs ${o} — puck drop!`, hashtags:['#STLBlues','#Blues','#NHL'] },
-  TBL: { abbr:'TBL', teamId:14, franchiseId:31, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Tampa Bay Lightning',    winCopy:"Let's go Lightning! ⚡",   lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`TBL vs ${o} — puck drop!`, hashtags:['#GoBolts','#TBLightning','#NHL'] },
-  TOR: { abbr:'TOR', teamId:10, franchiseId:5,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Toronto Maple Leafs',   winCopy:"Let's go Leafs! 🍁",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`TOR vs ${o} — puck drop!`, hashtags:['#LeafsForever','#TMLtalk','#NHL'] },
-  UTA: { abbr:'UTA', teamId:59, franchiseId:40, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Utah Mammoth',           winCopy:"Let's go Mammoth! 🦣",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`UTA vs ${o} — puck drop!`, hashtags:['#TusksUp','#UtahMammoth','#Mammoth','#NHL'] },
-  VAN: { abbr:'VAN', teamId:23, franchiseId:20, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Vancouver Canucks',      winCopy:"Let's go Canucks! 🏒",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`VAN vs ${o} — puck drop!`, hashtags:['#Canucks','#VanCIty','#NHL'] },
-  VGK: { abbr:'VGK', teamId:54, franchiseId:38, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Vegas Golden Knights',   winCopy:"Let's go Knights! ⚔️",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`VGK vs ${o} — puck drop!`, hashtags:['#VegasBorn','#GoKnightsGo','#NHL'] },
-  WSH: { abbr:'WSH', teamId:15, franchiseId:24, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Washington Capitals',    winCopy:"Let's go Caps! 🦅",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`WSH vs ${o} — puck drop!`, hashtags:['#ALLCAPS','#Capitals','#NHL'] },
-  WPG: { abbr:'WPG', teamId:52, franchiseId:35, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Winnipeg Jets',          winCopy:"Let's go Jets! ✈️",         lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`WPG vs ${o} — puck drop!`, hashtags:['#GoJetsGo','#NHLJets','#NHL'] },
+  // keywords: short names/nicknames used by beat writers and BR/Athletic article titles.
+  // Used by teamFilterKeywords() to filter league-wide RSS feeds.
+  ANA: { abbr:'ANA', teamId:24, franchiseId:32, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Anaheim Ducks',         keywords:['ducks','anaheim','drysdale','fowler','terry','zegras'],                       winCopy:"Let's go Ducks! 🦆",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`ANA vs ${o} — puck drop!`, hashtags:['#AnaheimDucks','#LetsGoDucks','#NHL'] },
+  BOS: { abbr:'BOS', teamId:6,  franchiseId:6,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Boston Bruins',          keywords:['bruins','boston','pastrnak','mcavoy','swayman'],                               winCopy:"Let's go Bruins! 🐻",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`BOS vs ${o} — puck drop!`, hashtags:['#NHLBruins','#BostonBruins','#NHL'] },
+  BUF: { abbr:'BUF', teamId:7,  franchiseId:7,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Buffalo Sabres',         keywords:['sabres','buffalo','tuch','power','ukko-pekka'],                                winCopy:"Let's go Sabres! ⚔️",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`BUF vs ${o} — puck drop!`, hashtags:['#Sabres','#LetsGoBuffalo','#NHL'] },
+  CGY: { abbr:'CGY', teamId:20, franchiseId:27, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Calgary Flames',         keywords:['flames','calgary','huberdeau','weegar','markstrom'],                          winCopy:"Let's go Flames! 🔥",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CGY vs ${o} — puck drop!`, hashtags:['#Flames','#CofRed','#NHL'] },
+  CAR: { abbr:'CAR', teamId:12, franchiseId:26, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Carolina Hurricanes',    keywords:['canes','hurricanes','carolina','aho','svechnikov','kotkaniemi','kochetkov'],   winCopy:"Let's go Canes! 🌀",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CAR vs ${o} — puck drop!`, hashtags:['#LetsGoCanes','#Canes','#NHL','#CarolinaHurricanes','#SoundTheSiren'] },
+  CHI: { abbr:'CHI', teamId:16, franchiseId:11, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Chicago Blackhawks',     keywords:['blackhawks','chicago','hawks','bedard','dickinson'],                          winCopy:"Let's go Blackhawks! 🪶",  lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CHI vs ${o} — puck drop!`, hashtags:['#Blackhawks','#OneGoal','#NHL'] },
+  COL: { abbr:'COL', teamId:21, franchiseId:27, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Colorado Avalanche',     keywords:['avalanche','colorado','avs','mackinnon','makar','landeskog'],                  winCopy:"Let's go Avs! ❄️",         lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`COL vs ${o} — puck drop!`, hashtags:['#GoAvsGo','#Avalanche','#NHL'] },
+  CBJ: { abbr:'CBJ', teamId:29, franchiseId:36, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Columbus Blue Jackets',  keywords:['blue jackets','columbus','jackets','fantilli','voronkov'],                    winCopy:"Let's go Jackets! 💥",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`CBJ vs ${o} — puck drop!`, hashtags:['#CBJ','#NHLJackets','#NHL'] },
+  DAL: { abbr:'DAL', teamId:25, franchiseId:15, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Dallas Stars',           keywords:['stars','dallas','robertson','seguin','oettinger'],                            winCopy:"Let's go Stars! ⭐",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`DAL vs ${o} — puck drop!`, hashtags:['#GoStars','#TexasHockey','#NHL'] },
+  DET: { abbr:'DET', teamId:17, franchiseId:12, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Detroit Red Wings',      keywords:['red wings','detroit','wings','larkin','raymond','seider'],                    winCopy:"Let's go Wings! 🐙",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`DET vs ${o} — puck drop!`, hashtags:['#LGRW','#DetroitRedWings','#NHL'] },
+  EDM: { abbr:'EDM', teamId:22, franchiseId:25, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Edmonton Oilers',        keywords:['oilers','edmonton','mcdavid','draisaitl','skinner'],                          winCopy:"Let's go Oilers! 🛢️",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`EDM vs ${o} — puck drop!`, hashtags:['#LetsGoOilers','#Oilers','#NHL'] },
+  FLA: { abbr:'FLA', teamId:13, franchiseId:33, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Florida Panthers',       keywords:['panthers','florida','barkov','reinhart','bobrovsky'],                         winCopy:"Let's go Panthers! 🐾",    lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`FLA vs ${o} — puck drop!`, hashtags:['#TimeToHunt','#FlaPanthers','#NHL'] },
+  LAK: { abbr:'LAK', teamId:26, franchiseId:14, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Los Angeles Kings',      keywords:['kings','los angeles','kopitar','doughty','fiala'],                            winCopy:"Let's go Kings! 👑",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`LAK vs ${o} — puck drop!`, hashtags:['#GoKingsGo','#LAKings','#NHL'] },
+  MIN: { abbr:'MIN', teamId:30, franchiseId:37, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Minnesota Wild',         keywords:['wild','minnesota','kirill kaprizov','gustavsson','hartman'],                   winCopy:"Let's go Wild! 🌲",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`MIN vs ${o} — puck drop!`, hashtags:['#mnwild','#MNWild','#NHL'] },
+  MTL: { abbr:'MTL', teamId:8,  franchiseId:1,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Montreal Canadiens',     keywords:['canadiens','montreal','habs','caufield','slafkovsky','montembeault'],         winCopy:"Let's go Habs! 🔵",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`MTL vs ${o} — puck drop!`, hashtags:['#GoHabsGo','#Canadiens','#NHL'] },
+  NSH: { abbr:'NSH', teamId:18, franchiseId:34, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Nashville Predators',    keywords:['predators','nashville','preds','forsberg','juuse saros'],                     winCopy:"Let's go Preds! 🐯",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NSH vs ${o} — puck drop!`, hashtags:['#Preds','#NashvillePredators','#NHL'] },
+  NJD: { abbr:'NJD', teamId:1,  franchiseId:23, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New Jersey Devils',      keywords:['devils','new jersey','hischier','hughes','vanecek'],                          winCopy:"Let's go Devils! 😈",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NJD vs ${o} — puck drop!`, hashtags:['#NJDevils','#NJD','#NHL'] },
+  NYI: { abbr:'NYI', teamId:2,  franchiseId:22, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New York Islanders',     keywords:['islanders','new york','isles','barzal','sorokin'],                            winCopy:"Let's go Islanders! 🏝️",  lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NYI vs ${o} — puck drop!`, hashtags:['#Isles','#NYIsles','#NHL'] },
+  NYR: { abbr:'NYR', teamId:3,  franchiseId:10, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'New York Rangers',       keywords:['rangers','new york','panarin','zibanejad','shesterkin'],                      winCopy:"Let's go Rangers! 🗽",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`NYR vs ${o} — puck drop!`, hashtags:['#NYR','#NYRangers','#NHL'] },
+  OTT: { abbr:'OTT', teamId:9,  franchiseId:30, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Ottawa Senators',        keywords:['senators','ottawa','sens','tkachuk','stutzle','forsberg'],                    winCopy:"Let's go Sens! 🏛️",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`OTT vs ${o} — puck drop!`, hashtags:['#GoSensGo','#Sens','#NHL'] },
+  PHI: { abbr:'PHI', teamId:4,  franchiseId:16, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Philadelphia Flyers',    keywords:['flyers','philadelphia','matvei michkov','cates','fedotov'],                   winCopy:"Let's go Flyers! 🟠",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`PHI vs ${o} — puck drop!`, hashtags:['#Flyers','#PhiladelphiaFlyers','#NHL'] },
+  PIT: { abbr:'PIT', teamId:5,  franchiseId:17, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Pittsburgh Penguins',    keywords:['penguins','pittsburgh','pens','crosby','malkin','jarry'],                     winCopy:"Let's go Pens! 🐧",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`PIT vs ${o} — puck drop!`, hashtags:['#LetsGoPens','#Penguins','#NHL'] },
+  SEA: { abbr:'SEA', teamId:55, franchiseId:39, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Seattle Kraken',         keywords:['kraken','seattle','beniers','tanev','grubauer'],                              winCopy:"Let's go Kraken! 🦑",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`SEA vs ${o} — puck drop!`, hashtags:['#SeattleKraken','#Kraken','#NHL'] },
+  SJS: { abbr:'SJS', teamId:28, franchiseId:29, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'San Jose Sharks',        keywords:['sharks','san jose','celebrini','couture','mackeown'],                         winCopy:"Let's go Sharks! 🦈",      lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`SJS vs ${o} — puck drop!`, hashtags:['#SJSharks','#Sharks','#NHL'] },
+  STL: { abbr:'STL', teamId:19, franchiseId:18, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'St. Louis Blues',        keywords:['blues','st. louis','thomas','kyrou','binnington'],                            winCopy:"Let's go Blues! 🎵",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`STL vs ${o} — puck drop!`, hashtags:['#STLBlues','#Blues','#NHL'] },
+  TBL: { abbr:'TBL', teamId:14, franchiseId:31, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Tampa Bay Lightning',    keywords:['lightning','tampa bay','bolts','stamkos','kucherov','vasilevskiy'],           winCopy:"Let's go Lightning! ⚡",   lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`TBL vs ${o} — puck drop!`, hashtags:['#GoBolts','#TBLightning','#NHL'] },
+  TOR: { abbr:'TOR', teamId:10, franchiseId:5,  season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Toronto Maple Leafs',   keywords:['maple leafs','toronto','leafs','matthews','marner','nylander'],                winCopy:"Let's go Leafs! 🍁",       lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`TOR vs ${o} — puck drop!`, hashtags:['#LeafsForever','#TMLtalk','#NHL'] },
+  UTA: { abbr:'UTA', teamId:59, franchiseId:40, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Utah Mammoth',           keywords:['mammoth','utah','keller','peterka','villalta'],                               winCopy:"Let's go Mammoth! 🦣",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`UTA vs ${o} — puck drop!`, hashtags:['#TusksUp','#UtahMammoth','#Mammoth','#NHL'] },
+  VAN: { abbr:'VAN', teamId:23, franchiseId:20, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Vancouver Canucks',      keywords:['canucks','vancouver','demko','pettersson','hughes'],                          winCopy:"Let's go Canucks! 🏒",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`VAN vs ${o} — puck drop!`, hashtags:['#Canucks','#VanCIty','#NHL'] },
+  VGK: { abbr:'VGK', teamId:54, franchiseId:38, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Vegas Golden Knights',   keywords:['golden knights','vegas','knights','marchessault','stone','hill'],              winCopy:"Let's go Knights! ⚔️",     lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`VGK vs ${o} — puck drop!`, hashtags:['#VegasBorn','#GoKnightsGo','#NHL'] },
+  WSH: { abbr:'WSH', teamId:15, franchiseId:24, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Washington Capitals',    keywords:['capitals','washington','caps','ovechkin','carlson','kuemper'],                winCopy:"Let's go Caps! 🦅",        lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`WSH vs ${o} — puck drop!`, hashtags:['#ALLCAPS','#Capitals','#NHL'] },
+  WPG: { abbr:'WPG', teamId:52, franchiseId:35, season:'20252026', seasonEnd:new Date('2026-07-01'), displayName:'Winnipeg Jets',          keywords:['jets','winnipeg','scheifele','wheeler','hellebuyck'],                          winCopy:"Let's go Jets! ✈️",         lossCopy:'Tough one. Next game.', gameStartBody:(o)=>`WPG vs ${o} — puck drop!`, hashtags:['#GoJetsGo','#NHLJets','#NHL'] },
 };
 
 // Resolve team config from a request's ?team= param; falls back to DEFAULT_TEAM_ABBR.
@@ -331,11 +333,9 @@ async function notifyGameOver(env, game) {
   await kvPut(env, sentKey, true, 24 * 3600);
 
   // Generate AI game summary (once per game, stored in KV)
-  if (env.ANTHROPIC_API_KEY) {
-    await generateGameSummary(env, game).catch(e =>
-      console.error('Summary generation error:', e.message)
-    );
-  }
+  await generateGameSummary(env, game).catch(e =>
+    console.error('Summary generation error:', e.message)
+  );
 
   // Aggregate shot locations for player heat maps
   await aggregatePlayerShots(env, game).catch(e =>
@@ -689,8 +689,9 @@ async function postGameToSocial(env, game, summary) {
 
 // ── MoneyPuck Player Analytics ───────────────────────────────
 
-const MP_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv';
 const MP_SEASON = 20252026;
+const MP_YEAR   = String(MP_SEASON).slice(4); // "2026" — bump MP_SEASON next October
+const MP_URL    = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${MP_YEAR}/regular/skaters.csv`;
 const MIN_GP = 10; // minimum games to include in percentile pool
 
 function parseCSV(text) {
@@ -743,7 +744,12 @@ async function fetchAndComputeMoneyPuck(env, teamAbbr = TEAM_ABBR) {
   if (!rows) {
     console.log('Fetching MoneyPuck skaters CSV...');
     const res = await fetch(MP_URL, {
-      headers: { 'User-Agent': 'EyeWall-Analytics/1.0 (eyewallanalytics.com)' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://moneypuck.com/',
+      }
     });
     if (!res.ok) throw new Error(`MoneyPuck fetch failed: ${res.status}`);
     const text = await res.text();
@@ -989,10 +995,11 @@ async function computeMoneyPuckAnalytics(env, rows, teamAbbr = TEAM_ABBR) {
 
 // ── News fetching ─────────────────────────────────────────────
 
-// Generic NHL news sources — always included regardless of team
+// Generic NHL news sources — always included regardless of team.
+// Sources with filterKey: 'team' have a dynamic per-team filter injected
+// by getNewsSources() so league-wide feeds are narrowed to relevant articles.
 const NHL_NEWS_SOURCES = [
   {
-    // ESPN NHL RSS — confirmed working
     id:    'espn',
     name:  'ESPN',
     color: '#cc0000',
@@ -1000,7 +1007,6 @@ const NHL_NEWS_SOURCES = [
     type:  'espn',
   },
   {
-    // Sportsnet — broadened filter to catch general NHL/playoff coverage
     id:     'sportsnet',
     name:   'Sportsnet',
     color:  '#d4a017',
@@ -1009,34 +1015,186 @@ const NHL_NEWS_SOURCES = [
     filter: 'nhl|hockey|hurricane|carolina|playoff|stanley',
   },
   {
-    // The Score — reliable NHL RSS, no bot detection issues
     id:    'thescore',
     name:  'The Score',
     color: '#e8000d',
     url:   'https://origin-feeds.thescore.com/nhl.rss',
     type:  'rss',
   },
+  {
+    // The Athletic NHL — league-wide feed, filtered per team at runtime
+    id:        'athletic',
+    name:      'The Athletic',
+    color:     '#222222',
+    url:       'https://www.nytimes.com/athletic/rss/nhl/',
+    type:      'rss',
+    filterKey: 'team',
+  },
+  {
+    // Bleacher Report — league-wide feed, filtered per team at runtime
+    id:        'bleacherreport',
+    name:      'Bleacher Report',
+    color:     '#f5a623',
+    url:       'https://feeds.bleacherreport.com/articles',
+    type:      'rss',
+    filterKey: 'team',
+  },
 ];
 
-// Team-specific news sources — keyed by team abbrev
+// Team-specific news sources — keyed by team abbrev.
+// Each team: one beat/fan-blog + one Reddit. UTA Reddit only (no blog yet).
 const TEAM_NEWS_SOURCES = {
+  ANA: [
+    { id: 'anaheimcalling',    name: 'Anaheim Calling',        color: '#f47a38', url: 'https://www.anaheimcalling.com/rss/current.xml',        type: 'atom'   },
+    { id: 'reddit-ana',        name: 'r/AnaheimDucks',         color: '#f47a38', url: 'https://www.reddit.com/r/AnaheimDucks/new.json',         type: 'reddit' },
+  ],
+  BOS: [
+    { id: 'stanleypenner',     name: 'Stanley Penner',         color: '#fcb514', url: 'https://www.stanleypenner.com/rss/current.xml',         type: 'atom'   },
+    { id: 'reddit-bos',        name: 'r/BostonBruins',         color: '#fcb514', url: 'https://www.reddit.com/r/BostonBruins/new.json',         type: 'reddit' },
+  ],
+  BUF: [
+    { id: 'diebytheblade',     name: 'Die By The Blade',       color: '#003e7e', url: 'https://www.diebytheblade.com/rss/current.xml',         type: 'atom'   },
+    { id: 'reddit-buf',        name: 'r/sabres',               color: '#003e7e', url: 'https://www.reddit.com/r/sabres/new.json',               type: 'reddit' },
+  ],
+  CGY: [
+    { id: 'flamesnation',      name: 'Flames Nation',          color: '#d2122e', url: 'https://flamesnation.ca/feed/',                         type: 'rss'    },
+    { id: 'reddit-cgy',        name: 'r/calgaryflames',        color: '#d2122e', url: 'https://www.reddit.com/r/calgaryflames/new.json',        type: 'reddit' },
+  ],
   CAR: [
-    {
-      // Canes Country — SBNation Atom feed, confirmed working
-      id:    'canescountry',
-      name:  'Canes Country',
-      color: '#cc2200',
-      url:   'https://www.canescountry.com/rss/current.xml',
-      type:  'atom',
-    },
+    { id: 'canescountry',      name: 'Canes Country',          color: '#cc2200', url: 'https://www.canescountry.com/rss/current.xml',          type: 'atom'   },
+    { id: 'reddit-car',        name: 'r/canes',                color: '#cc2200', url: 'https://www.reddit.com/r/canes/new.json',                type: 'reddit' },
+  ],
+  CHI: [
+    { id: 'secondcityhockey',  name: 'Second City Hockey',     color: '#cf0a2c', url: 'https://www.secondcityhockey.com/rss/current.xml',      type: 'atom'   },
+    { id: 'reddit-chi',        name: 'r/hawks',                color: '#cf0a2c', url: 'https://www.reddit.com/r/hawks/new.json',                type: 'reddit' },
+  ],
+  COL: [
+    { id: 'milehighhockey',    name: 'Mile High Hockey',       color: '#6f263d', url: 'https://www.milehighhockey.com/rss/current.xml',        type: 'atom'   },
+    { id: 'reddit-col',        name: 'r/coloradoavalanche',    color: '#6f263d', url: 'https://www.reddit.com/r/coloradoavalanche/new.json',    type: 'reddit' },
+  ],
+  CBJ: [
+    { id: 'wejustsaidthat',    name: 'We Just Said That',      color: '#002654', url: 'https://www.wejustsaidthat.com/rss/current.xml',        type: 'atom'   },
+    { id: 'reddit-cbj',        name: 'r/BlueJackets',          color: '#002654', url: 'https://www.reddit.com/r/BlueJackets/new.json',          type: 'reddit' },
+  ],
+  DAL: [
+    { id: 'defendingbigd',     name: 'Defending Big D',        color: '#006847', url: 'https://www.defendingbigd.com/rss/current.xml',         type: 'atom'   },
+    { id: 'reddit-dal',        name: 'r/DallasStars',          color: '#006847', url: 'https://www.reddit.com/r/DallasStars/new.json',          type: 'reddit' },
+  ],
+  DET: [
+    { id: 'wingingitmotown',   name: 'Winging It In Motown',   color: '#ce1126', url: 'https://www.wingingitinmotown.com/rss/current.xml',     type: 'atom'   },
+    { id: 'reddit-det',        name: 'r/DetroitRedWings',      color: '#ce1126', url: 'https://www.reddit.com/r/DetroitRedWings/new.json',      type: 'reddit' },
+  ],
+  EDM: [
+    { id: 'oilersnation',      name: 'Oilers Nation',          color: '#fc4c02', url: 'https://oilersnation.com/feed/',                        type: 'rss'    },
+    { id: 'reddit-edm',        name: 'r/EdmontonOilers',       color: '#fc4c02', url: 'https://www.reddit.com/r/EdmontonOilers/new.json',       type: 'reddit' },
+  ],
+  FLA: [
+    { id: 'litterboxcats',     name: 'Litter Box Cats',        color: '#c8102e', url: 'https://www.litter-box-cats.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-fla',        name: 'r/FloridaPanthers',      color: '#c8102e', url: 'https://www.reddit.com/r/FloridaPanthers/new.json',      type: 'reddit' },
+  ],
+  LAK: [
+    { id: 'jewelsfromthecrown',name: 'Jewels From The Crown',  color: '#111111', url: 'https://www.jewelsfromthecrown.com/rss/current.xml',    type: 'atom'   },
+    { id: 'reddit-lak',        name: 'r/losangeleskings',      color: '#111111', url: 'https://www.reddit.com/r/losangeleskings/new.json',      type: 'reddit' },
+  ],
+  MIN: [
+    { id: 'hockeywilderness',  name: 'Hockey Wilderness',      color: '#154734', url: 'https://www.hockeywilderness.com/rss/current.xml',      type: 'atom'   },
+    { id: 'reddit-min',        name: 'r/wildhockey',           color: '#154734', url: 'https://www.reddit.com/r/wildhockey/new.json',           type: 'reddit' },
+  ],
+  MTL: [
+    { id: 'habseyesontheprize',name: 'Eyes On The Prize',      color: '#af1e2d', url: 'https://www.habseyesontheprize.com/rss/current.xml',    type: 'atom'   },
+    { id: 'reddit-mtl',        name: 'r/Habs',                 color: '#af1e2d', url: 'https://www.reddit.com/r/Habs/new.json',                 type: 'reddit' },
+  ],
+  NSH: [
+    { id: 'ontheforecheck',    name: 'On The Forecheck',       color: '#ffb81c', url: 'https://www.ontheforecheck.com/rss/current.xml',        type: 'atom'   },
+    { id: 'reddit-nsh',        name: 'r/predators',            color: '#ffb81c', url: 'https://www.reddit.com/r/predators/new.json',            type: 'reddit' },
+  ],
+  NJD: [
+    { id: 'allaboutthejersey', name: 'All About The Jersey',   color: '#ce1126', url: 'https://www.allaboutthejersey.com/rss/current.xml',     type: 'atom'   },
+    { id: 'reddit-njd',        name: 'r/devils',               color: '#ce1126', url: 'https://www.reddit.com/r/devils/new.json',               type: 'reddit' },
+  ],
+  NYI: [
+    { id: 'lighthousehockey',  name: 'Lighthouse Hockey',      color: '#00539b', url: 'https://www.lighthousehockey.com/rss/current.xml',      type: 'atom'   },
+    { id: 'reddit-nyi',        name: 'r/NewYorkIslanders',     color: '#00539b', url: 'https://www.reddit.com/r/NewYorkIslanders/new.json',     type: 'reddit' },
+  ],
+  NYR: [
+    { id: 'blueshirtbanter',   name: 'Blueshirt Banter',       color: '#0038a8', url: 'https://www.blueshirtbanter.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-nyr',        name: 'r/rangers',              color: '#0038a8', url: 'https://www.reddit.com/r/rangers/new.json',              type: 'reddit' },
+  ],
+  OTT: [
+    { id: 'silversevenssens',  name: 'Silver Seven Sens',      color: '#c52128', url: 'https://www.silversevensens.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-ott',        name: 'r/OttawaSenators',       color: '#c52128', url: 'https://www.reddit.com/r/OttawaSenators/new.json',       type: 'reddit' },
+  ],
+  PHI: [
+    { id: 'broadstreethockey', name: 'Broad Street Hockey',    color: '#f74902', url: 'https://www.broadstreethockey.com/rss/current.xml',     type: 'atom'   },
+    { id: 'reddit-phi',        name: 'r/flyers',               color: '#f74902', url: 'https://www.reddit.com/r/flyers/new.json',               type: 'reddit' },
+  ],
+  PIT: [
+    { id: 'pensburgh',         name: 'PensBurgh',              color: '#fcb514', url: 'https://www.pensburgh.com/rss/current.xml',             type: 'atom'   },
+    { id: 'reddit-pit',        name: 'r/penguins',             color: '#fcb514', url: 'https://www.reddit.com/r/penguins/new.json',             type: 'reddit' },
+  ],
+  SEA: [
+    { id: 'dauntlessdomain',   name: 'Dauntless Domain',       color: '#001628', url: 'https://www.dauntlessdomain.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-sea',        name: 'r/SeattleKraken',        color: '#001628', url: 'https://www.reddit.com/r/SeattleKraken/new.json',        type: 'reddit' },
+  ],
+  SJS: [
+    { id: 'fearthefin',        name: 'Fear The Fin',           color: '#006d75', url: 'https://www.fearthefin.com/rss/current.xml',            type: 'atom'   },
+    { id: 'reddit-sjs',        name: 'r/SanJoseSharks',        color: '#006d75', url: 'https://www.reddit.com/r/SanJoseSharks/new.json',        type: 'reddit' },
+  ],
+  STL: [
+    { id: 'bluenotebanter',    name: 'Blue Note Banter',       color: '#003087', url: 'https://www.bluenotebanter.com/rss/current.xml',        type: 'atom'   },
+    { id: 'reddit-stl',        name: 'r/stlouisblues',         color: '#003087', url: 'https://www.reddit.com/r/stlouisblues/new.json',         type: 'reddit' },
+  ],
+  TBL: [
+    { id: 'rawcharge',         name: 'Raw Charge',             color: '#002868', url: 'https://www.rawcharge.com/rss/current.xml',             type: 'atom'   },
+    { id: 'reddit-tbl',        name: 'r/TampaBayLightning',    color: '#002868', url: 'https://www.reddit.com/r/TampaBayLightning/new.json',    type: 'reddit' },
+  ],
+  TOR: [
+    { id: 'pensionplanpuppets',name: 'Pension Plan Puppets',   color: '#003e7e', url: 'https://www.pensionplanpuppets.com/rss/current.xml',    type: 'atom'   },
+    { id: 'reddit-tor',        name: 'r/leafs',                color: '#003e7e', url: 'https://www.reddit.com/r/leafs/new.json',                type: 'reddit' },
+  ],
+  UTA: [
+    { id: 'reddit-uta',        name: 'r/UtahMammoth',          color: '#69b3e7', url: 'https://www.reddit.com/r/UtahMammoth/new.json',          type: 'reddit' },
+  ],
+  VAN: [
+    { id: 'nucksmisconduct',   name: 'Nucks Misconduct',       color: '#00843d', url: 'https://www.nucksmisconduct.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-van',        name: 'r/canucks',              color: '#00843d', url: 'https://www.reddit.com/r/canucks/new.json',              type: 'reddit' },
+  ],
+  VGK: [
+    { id: 'knightsontherink',  name: 'Knights On The Rink',    color: '#b4975a', url: 'https://www.knightsontherink.com/rss/current.xml',      type: 'atom'   },
+    { id: 'reddit-vgk',        name: 'r/goldenknights',        color: '#b4975a', url: 'https://www.reddit.com/r/goldenknights/new.json',        type: 'reddit' },
+  ],
+  WSH: [
+    { id: 'japersrink',        name: "Japer's Rink",           color: '#041e42', url: 'https://www.japersrink.com/rss/current.xml',            type: 'atom'   },
+    { id: 'reddit-wsh',        name: 'r/caps',                 color: '#041e42', url: 'https://www.reddit.com/r/caps/new.json',                 type: 'reddit' },
+  ],
+  WPG: [
+    { id: 'arcticicehockey',   name: 'Arctic Ice Hockey',      color: '#041e42', url: 'https://www.arcticicehockey.com/rss/current.xml',       type: 'atom'   },
+    { id: 'reddit-wpg',        name: 'r/winnipegjets',         color: '#041e42', url: 'https://www.reddit.com/r/winnipegjets/new.json',         type: 'reddit' },
   ],
 };
 
-// Build the active news source list for a given team abbr
+// Build a regex filter string for a team used to filter league-wide feeds
+// (Athletic, Bleacher Report) down to relevant articles.
+// Uses the explicit keywords array from TEAM_CONFIGS — nicknames, city,
+// and key player names — so articles like "Canes edge Capitals" or
+// "Bedard scores twice" match rather than just the full display name.
+function teamFilterKeywords(teamAbbr) {
+  const cfg = TEAM_CONFIGS[teamAbbr];
+  if (!cfg) return teamAbbr.toLowerCase();
+  return (cfg.keywords || cfg.displayName.toLowerCase().split(' ').filter(w => w.length > 3)).join('|');
+}
+
+// Build the active news source list for a given team abbr.
+// Clones Athletic and BR entries with a team-specific filter injected —
+// the shared NHL_NEWS_SOURCES constants are never mutated.
 function getNewsSources(teamAbbr) {
+  const keywords = teamFilterKeywords(teamAbbr);
+  const leagueSources = NHL_NEWS_SOURCES.map(src =>
+    src.filterKey === 'team' ? { ...src, filter: keywords } : src
+  );
   return [
     ...(TEAM_NEWS_SOURCES[teamAbbr] || []),
-    ...NHL_NEWS_SOURCES,
+    ...leagueSources,
   ];
 }
 
@@ -1396,6 +1554,21 @@ async function fetchOdds(env) {
 
   const kvKey = 'odds:nhl';
 
+  // Skip entirely when there are no upcoming games within 7 days.
+  // Avoids burning API quota during offseason and prevents 401 spam
+  // when the key is over cap — no games means odds aren't needed anyway.
+  const schedule = await kvGet(env, `schedule:${TEAM_ABBR}`) || [];
+  const now      = Date.now();
+  const week     = 7 * 24 * 60 * 60 * 1000;
+  const hasUpcoming = schedule.some(g => {
+    const t = new Date(g.startTimeUTC || g.gameDate).getTime();
+    return t > now && t < now + week;
+  });
+  if (!hasUpcoming) {
+    console.log('Odds: no upcoming games within 7 days — skipping');
+    return;
+  }
+
   // Check if still fresh — KV TTL handles expiry, but avoid redundant upstream calls
   // during the same poll cycle if KV already has data
   const existing = await kvGet(env, kvKey);
@@ -1496,18 +1669,21 @@ async function poll(env, ctx) {
   const newsAge = await env.CACHE.getWithMetadata(`news:${TEAM_ABBR}`);
   if (!newsAge.value) await fetchNews(env).catch(e => console.warn('News fetch failed:', e.message));
 
-  // Refresh MoneyPuck analytics if missing (12hr TTL — refreshes automatically)
-  try {
-    const mpVal = await env.CACHE.get(`moneypuck:skaters:${TEAM_ABBR}`);
-    if (!mpVal) {
-      // Clear raw cache too so we get fresh data
-      await env.CACHE.delete('moneypuck:raw');
-      ctx.waitUntil(
-        fetchAndComputeMoneyPuck(env, TEAM_ABBR).catch(e => console.warn('MoneyPuck refresh failed:', e.message))
-      );
+  // MoneyPuck analytics are populated via POST /moneypuck/ingest from GitHub Actions.
+  // Cloudflare Workers IPs are blocked by MoneyPuck; GH-hosted runners are not.
+  // The cron no longer attempts to fetch — it would always 403.
+  {
+    const staleTeams = (
+      await Promise.all(
+        Object.keys(TEAM_CONFIGS).map(async abbr => {
+          const val = await env.CACHE.get(`moneypuck:skaters:${abbr}`);
+          return val ? null : abbr;
+        })
+      )
+    ).filter(Boolean);
+    if (staleTeams.length > 0) {
+      console.log(`MoneyPuck: ${staleTeams.length} teams awaiting next GH Actions ingest: ${staleTeams.slice(0, 5).join(', ')}${staleTeams.length > 5 ? '...' : ''}`);
     }
-  } catch (e) {
-    ctx.waitUntil(fetchAndComputeMoneyPuck(env, TEAM_ABBR).catch(() => {}));
   }
 
   console.log(`Poll done. Live: ${liveId || 'none'}.`);
@@ -1530,6 +1706,21 @@ async function handleRequest(request, env, ctx) {
     const tc    = getTeamConfig(request);
     const items = await fetchNews(env, tc.abbr);
     return json({ ok: true, count: items.length, team: tc.abbr });
+  }
+
+  // GET /news — serve news for any team, fetching on-demand if cache is cold.
+  // This is how non-default teams get their news populated: the first visitor
+  // triggers a background fetch which populates the 30min KV cache for all
+  // subsequent requests. Without this, only the cron-polled default team (CAR)
+  // would ever have a warm news cache.
+  if (url.pathname === '/news' && request.method === 'GET') {
+    const tc      = getTeamConfig(request);
+    const cached  = await kvGet(env, `news:${tc.abbr}`);
+    if (cached) return json(cached);
+    // Cache is cold — fetch in the background and return empty for now so the
+    // client doesn't hang. Next request (after ~5s) will get real data.
+    ctx.waitUntil(fetchNews(env, tc.abbr).catch(e => console.warn(`News bg fetch ${tc.abbr}:`, e.message)));
+    return json([]);
   }
 
   // Health
@@ -1598,6 +1789,59 @@ async function handleRequest(request, env, ctx) {
     return json({ ok: true, preview: text, length: text.length });
   }
 
+  // Refresh MoneyPuck for ALL 32 teams — useful after season URL updates.
+  // Fires waitUntil for each team so they all compute in parallel without blocking.
+  if (url.pathname === '/moneypuck/refresh/all') {
+    const secret = url.searchParams.get('secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    const teams = Object.keys(TEAM_CONFIGS);
+    await env.CACHE.delete('moneypuck:raw'); // clear shared raw cache once
+    for (const abbr of teams) {
+      await env.CACHE.delete(`moneypuck:skaters:${abbr}`);
+      ctx.waitUntil(
+        fetchAndComputeMoneyPuck(env, abbr)
+          .then(d => console.log(`MoneyPuck all: ${abbr} done (${Object.keys(d || {}).length} players)`))
+          .catch(e => console.error(`MoneyPuck all: ${abbr} error: ${e.message}`))
+      );
+    }
+    return json({ ok: true, teams, status: 'refreshing all 32 teams — check logs in ~60s' });
+  }
+
+  // POST /moneypuck/ingest — accepts raw CSV text from GitHub Actions runner.
+  // Cloudflare Workers IPs are blocked by MoneyPuck; GitHub-hosted runners are not.
+  // GitHub Actions fetches the CSV and POSTs it here once daily.
+  if (url.pathname === '/moneypuck/ingest' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    let csvText;
+    try {
+      csvText = await request.text();
+      if (!csvText || csvText.length < 100) throw new Error('Empty or too-short body');
+    } catch (e) {
+      return new Response(`Bad request: ${e.message}`, { status: 400 });
+    }
+    const rows = parseCSV(csvText);
+    if (!rows.length) return new Response('CSV parsed to 0 rows', { status: 400 });
+    // Store raw rows (25hr TTL — refreshed daily by GH Actions)
+    await kvPut(env, 'moneypuck:raw', rows, 25 * 3600);
+    // Clear per-team caches so next access recomputes from fresh rows
+    const teams = Object.keys(TEAM_CONFIGS);
+    for (const abbr of teams) {
+      await env.CACHE.delete(`moneypuck:skaters:${abbr}`);
+    }
+    // Kick off background computation for all 32 teams
+    for (const abbr of teams) {
+      ctx.waitUntil(
+        computeMoneyPuckAnalytics(env, rows, abbr)
+          .then(d => console.log(`MoneyPuck ingest: ${abbr} done (${Object.keys(d || {}).length} players)`))
+          .catch(e => console.error(`MoneyPuck ingest: ${abbr} error: ${e.message}`))
+      );
+    }
+    console.log(`MoneyPuck ingest: received ${rows.length} rows, computing all 32 teams`);
+    return json({ ok: true, rows: rows.length, teams: teams.length, status: 'computing — check logs in ~60s' });
+  }
+
+  // Refresh MoneyPuck for a single team (default: team from ?team= param)
   // Generate summary for most recent completed game (protected, for testing)
   // MoneyPuck analytics endpoint
   if (url.pathname === '/moneypuck/refresh') {
@@ -1684,8 +1928,6 @@ async function handleRequest(request, env, ctx) {
     const gameId    = url.searchParams.get('gameId');
     const forceRegen = url.searchParams.get('force') === '1';
     if (!gameId) return json({ error: 'gameId required' });
-    if (!env.ANTHROPIC_API_KEY) return json({ error: 'AI not configured' });
-
     const tc = getTeamConfig(request);
 
     const kvKey = `prediction:${gameId}`;
@@ -1858,8 +2100,6 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     const gameId = url.searchParams.get('gameId');
     const period = url.searchParams.get('period'); // 'game' or period number
     if (!gameId || !period) return json({ error: 'gameId and period required' });
-    if (!env.ANTHROPIC_API_KEY) return json({ error: 'AI not configured' });
-
     const kvKey  = `narrative:${period}:${gameId}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
@@ -1911,13 +2151,30 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
 
   Focus on what mattered most — possession dominance, momentum, key goals. Under 60 words.${playoffNote}`;
 
-    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const narrative = aiResponse.response?.trim() || '';
-    if (!narrative)  return json({ error: 'Empty response' });
+    // For game summaries, also generate a short card caption in parallel
+    const cardPrompt = isGame
+      ? prompt.replace(
+          'Summarize how the game went, key turning points, and whether the result matched the underlying play. Under 80 words.',
+          'Write a 2-3 sentence shareable card caption. Hit the key result, one standout moment, and the underlying play if telling. Under 50 words. Plain text only.'
+        )
+      : null;
 
-    const result = { narrative, gameId, period, generatedAt: new Date().toISOString() };
+    const [aiResponse, cardResponse] = await Promise.all([
+      env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      cardPrompt
+        ? env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
+            messages: [{ role: 'user', content: cardPrompt }],
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const narrative     = aiResponse.response?.trim() || '';
+    const cardNarrative = cardResponse?.response?.trim() || null;
+    if (!narrative) return json({ error: 'Empty response' });
+
+    const result = { narrative, cardNarrative, gameId, period, generatedAt: new Date().toISOString() };
     // Cache 30 days — narratives never change for a completed period
     await kvPut(env, kvKey, result, 30 * 24 * 3600);
     console.log(`Narrative cached: ${kvKey}`);
