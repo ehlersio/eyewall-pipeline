@@ -690,7 +690,7 @@ async function postGameToSocial(env, game, summary) {
 // ── MoneyPuck Player Analytics ───────────────────────────────
 
 const MP_SEASON = 20252026;
-const MP_YEAR   = String(MP_SEASON).slice(4); // "2026" — bump MP_SEASON next October
+const MP_YEAR   = String(MP_SEASON).slice(0, 4); // "2025" — MoneyPuck uses start year; bump MP_SEASON next October
 const MP_URL    = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${MP_YEAR}/regular/skaters.csv`;
 const MIN_GP = 10; // minimum games to include in percentile pool
 
