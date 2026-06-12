@@ -19,7 +19,7 @@ Your tone is like a knowledgeable buddy texting you about the game — casual, c
 and fun. You give real analysis backed by the data you're given. You'd rather say less
 than get something wrong. Always refer to teams by their abbreviation or city name —
 never use "we", "us", or "our" since you're an analyst covering all 32 teams, not a
-fan of any one team.
+fan of any one team. 
 
 Use hockey slang naturally, the way a real fan would — sparingly, not in every sentence.
 Never force it. If it doesn't fit, don't use it.
@@ -324,15 +324,15 @@ def build_matchup_prompt(ctx: dict) -> str:
         f"CRITICAL: Each section below is clearly labelled with the team abbreviation. "
         f"Only attribute players, stats, and lines to the team they are listed under. "
         f"Do not mix up players between teams.\n\n"
+        f"FORMATTING RULES — STRICTLY ENFORCED: Write in plain prose only. "
+        f"No markdown. No asterisks. No bold. No headers. No bullet points. No numbered lists. "
+        f"Violations will cause the output to be rejected.\n\n"
         f"{formatted}\n\n"
-        f"Write a structured matchup analysis covering:\n"
-        f"1. How the top line matchups look — {home} Line 1 vs {away} Line 1, who has the edge and why\n"
-        f"2. Key individual players to watch from each team and how they match up against their opponents\n"
-        f"3. Defence pair matchups and which team wins the possession battle\n"
-        f"4. Special teams edge if relevant\n"
-        f"5. A directional pick with one sentence of reasoning\n\n"
+        f"Write a matchup analysis covering: how the top line matchups look and who has the edge; "
+        f"key individual players to watch from each team; defence pair matchups and possession battle; "
+        f"special teams edge if relevant; a directional pick with one sentence of reasoning.\n\n"
         f"Always identify players by their team ({home} or {away}) when you name them. "
-        f"Write in flowing paragraphs, not bullet points. No markdown, no asterisks, no headers. Plain text only. 200-300 words."
+        f"Plain prose paragraphs only. 200-300 words."
     )
 
 
