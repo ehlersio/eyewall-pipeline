@@ -86,28 +86,12 @@ jobs:
           # All SBNation/Vox Media blogs block Cloudflare datacenter IPs.
           # GH-hosted runners are not blocked — fetch here and POST to worker.
           declare -A FEEDS=(
-            [anaheimcalling]="https://www.anaheimcalling.com/rss/current.xml"
-            [diebytheblade]="https://www.diebytheblade.com/rss/current.xml"
+            # Only feeds confirmed reachable from GH-hosted runners
             [canescountry]="https://www.canescountry.com/rss/current.xml"
-            [secondcityhockey]="https://www.secondcityhockey.com/rss/current.xml"
-            [milehighhockey]="https://www.milehighhockey.com/rss/current.xml"
-            [defendingbigd]="https://www.defendingbigd.com/rss/current.xml"
-            [wingingitmotown]="https://www.wingingitinmotown.com/rss/current.xml"
-            [jewelsfromthecrown]="https://www.jewelsfromthecrown.com/rss/current.xml"
-            [hockeywilderness]="https://www.hockeywilderness.com/rss/current.xml"
-            [habseyesontheprize]="https://www.habseyesontheprize.com/rss/current.xml"
-            [ontheforecheck]="https://www.ontheforecheck.com/rss/current.xml"
-            [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
             [lighthousehockey]="https://www.lighthousehockey.com/rss/current.xml"
-            [blueshirtbanter]="https://www.blueshirtbanter.com/rss/current.xml"
-            [broadstreethockey]="https://www.broadstreethockey.com/rss/current.xml"
+            [milehighhockey]="https://www.milehighhockey.com/rss/current.xml"
             [pensburgh]="https://www.pensburgh.com/rss/current.xml"
-            [fearthefin]="https://www.fearthefin.com/rss/current.xml"
-            [rawcharge]="https://www.rawcharge.com/rss/current.xml"
-            [pensionplanpuppets]="https://www.pensionplanpuppets.com/rss/current.xml"
-            [nucksmisconduct]="https://www.nucksmisconduct.com/rss/current.xml"
-            [japersrink]="https://www.japersrink.com/rss/current.xml"
-            [arcticicehockey]="https://www.arcticicehockey.com/rss/current.xml"
+            [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
           )
 
           BUNDLE="{}"

@@ -1045,14 +1045,12 @@ const NHL_NEWS_SOURCES = [
 // Each team: one beat/fan-blog + one Reddit. UTA Reddit only (no blog yet).
 const TEAM_NEWS_SOURCES = {
   ANA: [
-    { id: 'anaheimcalling',    name: 'Anaheim Calling',        color: '#f47a38', url: 'https://www.anaheimcalling.com/rss/current.xml',        type: 'atom'   },
     { id: 'reddit-ana',        name: 'r/AnaheimDucks',         color: '#f47a38', url: 'https://www.reddit.com/r/AnaheimDucks/new.json',         type: 'reddit' },
   ],
   BOS: [
     { id: 'reddit-bos',        name: 'r/BostonBruins',         color: '#fcb514', url: 'https://www.reddit.com/r/BostonBruins/new.json',         type: 'reddit' },
   ],
   BUF: [
-    { id: 'diebytheblade',     name: 'Die By The Blade',       color: '#003e7e', url: 'https://www.diebytheblade.com/rss/current.xml',         type: 'atom'   },
     { id: 'reddit-buf',        name: 'r/sabres',               color: '#003e7e', url: 'https://www.reddit.com/r/sabres/new.json',               type: 'reddit' },
   ],
   CGY: [
@@ -1064,7 +1062,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-car',        name: 'r/canes',                color: '#cc2200', url: 'https://www.reddit.com/r/canes/new.json',                type: 'reddit' },
   ],
   CHI: [
-    { id: 'secondcityhockey',  name: 'Second City Hockey',     color: '#cf0a2c', url: 'https://www.secondcityhockey.com/rss/current.xml',      type: 'atom'   },
     { id: 'reddit-chi',        name: 'r/hawks',                color: '#cf0a2c', url: 'https://www.reddit.com/r/hawks/new.json',                type: 'reddit' },
   ],
   COL: [
@@ -1075,11 +1072,9 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-cbj',        name: 'r/BlueJackets',          color: '#002654', url: 'https://www.reddit.com/r/BlueJackets/new.json',          type: 'reddit' },
   ],
   DAL: [
-    { id: 'defendingbigd',     name: 'Defending Big D',        color: '#006847', url: 'https://www.defendingbigd.com/rss/current.xml',         type: 'atom'   },
     { id: 'reddit-dal',        name: 'r/DallasStars',          color: '#006847', url: 'https://www.reddit.com/r/DallasStars/new.json',          type: 'reddit' },
   ],
   DET: [
-    { id: 'wingingitmotown',   name: 'Winging It In Motown',   color: '#ce1126', url: 'https://www.wingingitinmotown.com/rss/current.xml',     type: 'atom'   },
     { id: 'reddit-det',        name: 'r/DetroitRedWings',      color: '#ce1126', url: 'https://www.reddit.com/r/DetroitRedWings/new.json',      type: 'reddit' },
   ],
   EDM: [
@@ -1090,19 +1085,15 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-fla',        name: 'r/FloridaPanthers',      color: '#c8102e', url: 'https://www.reddit.com/r/FloridaPanthers/new.json',      type: 'reddit' },
   ],
   LAK: [
-    { id: 'jewelsfromthecrown',name: 'Jewels From The Crown',  color: '#111111', url: 'https://www.jewelsfromthecrown.com/rss/current.xml',    type: 'atom'   },
     { id: 'reddit-lak',        name: 'r/losangeleskings',      color: '#111111', url: 'https://www.reddit.com/r/losangeleskings/new.json',      type: 'reddit' },
   ],
   MIN: [
-    { id: 'hockeywilderness',  name: 'Hockey Wilderness',      color: '#154734', url: 'https://www.hockeywilderness.com/rss/current.xml',      type: 'atom'   },
     { id: 'reddit-min',        name: 'r/wildhockey',           color: '#154734', url: 'https://www.reddit.com/r/wildhockey/new.json',           type: 'reddit' },
   ],
   MTL: [
-    { id: 'habseyesontheprize',name: 'Eyes On The Prize',      color: '#af1e2d', url: 'https://www.habseyesontheprize.com/rss/current.xml',    type: 'atom'   },
     { id: 'reddit-mtl',        name: 'r/Habs',                 color: '#af1e2d', url: 'https://www.reddit.com/r/Habs/new.json',                 type: 'reddit' },
   ],
   NSH: [
-    { id: 'ontheforecheck',    name: 'On The Forecheck',       color: '#ffb81c', url: 'https://www.ontheforecheck.com/rss/current.xml',        type: 'atom'   },
     { id: 'reddit-nsh',        name: 'r/predators',            color: '#ffb81c', url: 'https://www.reddit.com/r/predators/new.json',            type: 'reddit' },
   ],
   NJD: [
@@ -1114,14 +1105,12 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-nyi',        name: 'r/NewYorkIslanders',     color: '#00539b', url: 'https://www.reddit.com/r/NewYorkIslanders/new.json',     type: 'reddit' },
   ],
   NYR: [
-    { id: 'blueshirtbanter',   name: 'Blueshirt Banter',       color: '#0038a8', url: 'https://www.blueshirtbanter.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-nyr',        name: 'r/rangers',              color: '#0038a8', url: 'https://www.reddit.com/r/rangers/new.json',              type: 'reddit' },
   ],
   OTT: [
     { id: 'reddit-ott',        name: 'r/OttawaSenators',       color: '#c52128', url: 'https://www.reddit.com/r/OttawaSenators/new.json',       type: 'reddit' },
   ],
   PHI: [
-    { id: 'broadstreethockey', name: 'Broad Street Hockey',    color: '#f74902', url: 'https://www.broadstreethockey.com/rss/current.xml',     type: 'atom'   },
     { id: 'reddit-phi',        name: 'r/flyers',               color: '#f74902', url: 'https://www.reddit.com/r/flyers/new.json',               type: 'reddit' },
   ],
   PIT: [
@@ -1132,36 +1121,30 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-sea',        name: 'r/SeattleKraken',        color: '#001628', url: 'https://www.reddit.com/r/SeattleKraken/new.json',        type: 'reddit' },
   ],
   SJS: [
-    { id: 'fearthefin',        name: 'Fear The Fin',           color: '#006d75', url: 'https://www.fearthefin.com/rss/current.xml',            type: 'atom'   },
     { id: 'reddit-sjs',        name: 'r/SanJoseSharks',        color: '#006d75', url: 'https://www.reddit.com/r/SanJoseSharks/new.json',        type: 'reddit' },
   ],
   STL: [
     { id: 'reddit-stl',        name: 'r/stlouisblues',         color: '#003087', url: 'https://www.reddit.com/r/stlouisblues/new.json',         type: 'reddit' },
   ],
   TBL: [
-    { id: 'rawcharge',         name: 'Raw Charge',             color: '#002868', url: 'https://www.rawcharge.com/rss/current.xml',             type: 'atom'   },
     { id: 'reddit-tbl',        name: 'r/TampaBayLightning',    color: '#002868', url: 'https://www.reddit.com/r/TampaBayLightning/new.json',    type: 'reddit' },
   ],
   TOR: [
-    { id: 'pensionplanpuppets',name: 'Pension Plan Puppets',   color: '#003e7e', url: 'https://www.pensionplanpuppets.com/rss/current.xml',    type: 'atom'   },
     { id: 'reddit-tor',        name: 'r/leafs',                color: '#003e7e', url: 'https://www.reddit.com/r/leafs/new.json',                type: 'reddit' },
   ],
   UTA: [
     { id: 'reddit-uta',        name: 'r/UtahMammoth',          color: '#69b3e7', url: 'https://www.reddit.com/r/UtahMammoth/new.json',          type: 'reddit' },
   ],
   VAN: [
-    { id: 'nucksmisconduct',   name: 'Nucks Misconduct',       color: '#00843d', url: 'https://www.nucksmisconduct.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-van',        name: 'r/canucks',              color: '#00843d', url: 'https://www.reddit.com/r/canucks/new.json',              type: 'reddit' },
   ],
   VGK: [
     { id: 'reddit-vgk',        name: 'r/goldenknights',        color: '#b4975a', url: 'https://www.reddit.com/r/goldenknights/new.json',        type: 'reddit' },
   ],
   WSH: [
-    { id: 'japersrink',        name: "Japer's Rink",           color: '#041e42', url: 'https://www.japersrink.com/rss/current.xml',            type: 'atom'   },
     { id: 'reddit-wsh',        name: 'r/caps',                 color: '#041e42', url: 'https://www.reddit.com/r/caps/new.json',                 type: 'reddit' },
   ],
   WPG: [
-    { id: 'arcticicehockey',   name: 'Arctic Ice Hockey',      color: '#041e42', url: 'https://www.arcticicehockey.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-wpg',        name: 'r/winnipegjets',         color: '#041e42', url: 'https://www.reddit.com/r/winnipegjets/new.json',         type: 'reddit' },
   ],
 };
