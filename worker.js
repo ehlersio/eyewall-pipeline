@@ -1723,6 +1723,27 @@ async function handleRequest(request, env, ctx) {
     return json([]);
   }
 
+  // On-demand schedule for any team — mirrors the /news pattern.
+  // Warm: serve from KV. Cold: fetch in background, return [] immediately.
+  // Next request (~2s later) will get real data. Cron keeps CAR warm;
+  // all other teams populate on first user request.
+  if (url.pathname === '/schedule' && request.method === 'GET') {
+    const tc     = getTeamConfig(request);
+    const cached = await kvGet(env, `schedule:${tc.abbr}`);
+    if (cached) return json(cached);
+    ctx.waitUntil((async () => {
+      try {
+        const data  = await nhlGet(`${NHL_BASE}/club-schedule-season/${tc.abbr}/${tc.season}`);
+        const games = data?.games || [];
+        await kvPut(env, `schedule:${tc.abbr}`, games, 600);
+        console.log(`Schedule bg fetch: ${tc.abbr} (${games.length} games)`);
+      } catch (e) {
+        console.warn(`Schedule bg fetch ${tc.abbr}: ${e.message}`);
+      }
+    })());
+    return json([]);
+  }
+
   // Health
   if (url.pathname === '/health') {
     const liveId   = await kvGet(env, 'live:gameId');
@@ -1730,11 +1751,31 @@ async function handleRequest(request, env, ctx) {
     return json({ ok: true, liveGameId: liveId, subscribers: subs.length, timestamp: new Date().toISOString() });
   }
 
-  // KV cache read
+  // KV cache read — on a schedule miss, trigger background population
+  // so the next request gets real data without a frontend change.
   if (url.pathname.startsWith('/cache/')) {
     const key = decodeURIComponent(url.pathname.slice('/cache/'.length));
     const val = await kvGet(env, key);
-    if (val === null) return new Response('Not found', { status: 404, headers: corsHeaders() });
+    if (val === null) {
+      // Background-populate schedule for non-CAR teams on cache miss
+      if (key.startsWith('schedule:')) {
+        const abbr = key.split(':')[1];
+        const tc   = TEAM_CONFIGS[abbr];
+        if (tc) {
+          ctx.waitUntil((async () => {
+            try {
+              const data  = await nhlGet(`${NHL_BASE}/club-schedule-season/${tc.abbr}/${tc.season}`);
+              const games = data?.games || [];
+              await kvPut(env, `schedule:${tc.abbr}`, games, 600);
+              console.log(`Schedule bg fetch (cache miss): ${tc.abbr} (${games.length} games)`);
+            } catch (e) {
+              console.warn(`Schedule bg fetch ${abbr}: ${e.message}`);
+            }
+          })());
+        }
+      }
+      return new Response('Not found', { status: 404, headers: corsHeaders() });
+    }
     return json(val);
   }
 
@@ -1805,6 +1846,46 @@ async function handleRequest(request, env, ctx) {
       );
     }
     return json({ ok: true, teams, status: 'refreshing all 32 teams — check logs in ~60s' });
+  }
+
+  // POST /reddit/ingest — accepts bundled Reddit JSON from GitHub Actions runner.
+  // Reddit blocks Cloudflare Workers IPs; GH-hosted runners are not blocked.
+  // Workflow runs every 30 minutes, fetches all 32 subreddits, POSTs bundle here.
+  // Body: JSON object { abbr: redditApiResponse, ... } for all 32 teams.
+  // Merges parsed posts into existing news:abbr KV entries alongside RSS/Athletic/BR.
+  if (url.pathname === '/reddit/ingest' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    let bundle;
+    try {
+      bundle = await request.json();
+      if (!bundle || typeof bundle !== 'object') throw new Error('Expected JSON object');
+    } catch (e) {
+      return new Response(`Bad request: ${e.message}`, { status: 400 });
+    }
+    const TTL = 35 * 60; // 35 min — slightly longer than the 30min run interval
+    let processed = 0;
+    const results = {};
+    for (const [abbr, redditData] of Object.entries(bundle)) {
+      const cfg = TEAM_CONFIGS[abbr.toUpperCase()];
+      if (!cfg) continue;
+      // Find the reddit source config for this team to get id/name/color
+      const sources = getNewsSources(cfg);
+      const redditSrc = sources.find(s => s.type === 'reddit');
+      if (!redditSrc) continue;
+      const posts = parseReddit(redditData, redditSrc);
+      // Merge with existing non-reddit news items so we don't overwrite RSS/Athletic/BR
+      const existing = (await kvGet(env, `news:${abbr.toUpperCase()}`)) || [];
+      const nonReddit = existing.filter(item => !item.id.startsWith('reddit-'));
+      const merged = [...posts, ...nonReddit]
+        .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+        .slice(0, 30);
+      await kvPut(env, `news:${abbr.toUpperCase()}`, merged, TTL);
+      results[abbr] = posts.length;
+      processed++;
+    }
+    console.log(`Reddit ingest: ${processed} teams processed`);
+    return json({ ok: true, processed, results });
   }
 
   // POST /moneypuck/ingest — accepts raw CSV text from GitHub Actions runner.

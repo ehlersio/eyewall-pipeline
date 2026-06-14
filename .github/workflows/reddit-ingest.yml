@@ -1,0 +1,84 @@
+name: Reddit News Ingest
+
+on:
+  schedule:
+    # Every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch all 32 subreddits and POST to worker
+        run: |
+          declare -A SUBREDDITS=(
+            [ana]="AnaheimDucks"
+            [bos]="BostonBruins"
+            [buf]="sabres"
+            [cgy]="calgaryflames"
+            [car]="canes"
+            [chi]="hawks"
+            [col]="coloradoavalanche"
+            [cbj]="BlueJackets"
+            [dal]="DallasStars"
+            [det]="DetroitRedWings"
+            [edm]="EdmontonOilers"
+            [fla]="FloridaPanthers"
+            [lak]="losangeleskings"
+            [min]="wildhockey"
+            [mtl]="Habs"
+            [nsh]="predators"
+            [njd]="devils"
+            [nyi]="NewYorkIslanders"
+            [nyr]="rangers"
+            [ott]="OttawaSenators"
+            [phi]="flyers"
+            [pit]="penguins"
+            [sea]="SeattleKraken"
+            [sjs]="SanJoseSharks"
+            [stl]="stlouisblues"
+            [tbl]="TampaBayLightning"
+            [tor]="leafs"
+            [uta]="UtahMammoth"
+            [van]="canucks"
+            [vgk]="goldenknights"
+            [wsh]="caps"
+            [wpg]="winnipegjets"
+          )
+
+          # Build JSON bundle — fetch each subreddit, add to object
+          BUNDLE="{}"
+          for abbr in "${!SUBREDDITS[@]}"; do
+            sub="${SUBREDDITS[$abbr]}"
+            echo "Fetching r/$sub..."
+            DATA=$(curl -fsSL \
+              -H "User-Agent: EyeWall-Analytics-Bot/1.0 (NHL analytics app; contact via eyewallanalytics.com)" \
+              -H "Accept: application/json" \
+              "https://www.reddit.com/r/${sub}/new.json?limit=25" 2>/dev/null || echo "null")
+            # Skip if fetch failed or returned non-JSON
+            if [ "$DATA" = "null" ] || [ -z "$DATA" ]; then
+              echo "  Skipping $abbr (fetch failed)"
+              continue
+            fi
+            BUNDLE=$(echo "$BUNDLE" | jq --arg k "$abbr" --argjson v "$DATA" '. + {($k): $v}')
+            sleep 0.5  # small delay to avoid hitting Reddit rate limits
+          done
+
+          TEAM_COUNT=$(echo "$BUNDLE" | jq 'keys | length')
+          echo "Bundle contains $TEAM_COUNT teams"
+
+          HTTP_STATUS=$(echo "$BUNDLE" | curl -s -o response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            --data-binary @- \
+            "https://eyewall-poller.billowing-queen-bf23.workers.dev/reddit/ingest")
+
+          echo "Worker responded: $HTTP_STATUS"
+          cat response.txt
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Reddit ingest failed with status $HTTP_STATUS"
+            exit 1
+          fi
