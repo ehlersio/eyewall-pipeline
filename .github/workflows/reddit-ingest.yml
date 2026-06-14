@@ -1,4 +1,4 @@
-name: Reddit News Ingest
+name: Reddit & SBNation News Ingest
 
 on:
   schedule:
@@ -47,7 +47,6 @@ jobs:
             [wpg]="winnipegjets"
           )
 
-          # Build JSON bundle — fetch each subreddit, add to object
           BUNDLE="{}"
           for abbr in "${!SUBREDDITS[@]}"; do
             sub="${SUBREDDITS[$abbr]}"
@@ -56,17 +55,16 @@ jobs:
               -H "User-Agent: EyeWall-Analytics-Bot/1.0 (NHL analytics app; contact via eyewallanalytics.com)" \
               -H "Accept: application/json" \
               "https://www.reddit.com/r/${sub}/new.json?limit=25" 2>/dev/null || echo "null")
-            # Skip if fetch failed or returned non-JSON
             if [ "$DATA" = "null" ] || [ -z "$DATA" ]; then
               echo "  Skipping $abbr (fetch failed)"
               continue
             fi
             BUNDLE=$(echo "$BUNDLE" | jq --arg k "$abbr" --argjson v "$DATA" '. + {($k): $v}')
-            sleep 0.5  # small delay to avoid hitting Reddit rate limits
+            sleep 0.5
           done
 
           TEAM_COUNT=$(echo "$BUNDLE" | jq 'keys | length')
-          echo "Bundle contains $TEAM_COUNT teams"
+          echo "Reddit bundle: $TEAM_COUNT teams"
 
           HTTP_STATUS=$(echo "$BUNDLE" | curl -s -o response.txt -w "%{http_code}" \
             -X POST \
@@ -75,10 +73,73 @@ jobs:
             --data-binary @- \
             "https://eyewall-poller.billowing-queen-bf23.workers.dev/reddit/ingest")
 
-          echo "Worker responded: $HTTP_STATUS"
+          echo "Reddit ingest: $HTTP_STATUS"
           cat response.txt
 
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "Reddit ingest failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+      - name: Fetch all SBNation atom feeds and POST to worker
+        run: |
+          # All SBNation/Vox Media blogs block Cloudflare datacenter IPs.
+          # GH-hosted runners are not blocked — fetch here and POST to worker.
+          declare -A FEEDS=(
+            [anaheimcalling]="https://www.anaheimcalling.com/rss/current.xml"
+            [diebytheblade]="https://www.diebytheblade.com/rss/current.xml"
+            [canescountry]="https://www.canescountry.com/rss/current.xml"
+            [secondcityhockey]="https://www.secondcityhockey.com/rss/current.xml"
+            [milehighhockey]="https://www.milehighhockey.com/rss/current.xml"
+            [defendingbigd]="https://www.defendingbigd.com/rss/current.xml"
+            [wingingitmotown]="https://www.wingingitinmotown.com/rss/current.xml"
+            [jewelsfromthecrown]="https://www.jewelsfromthecrown.com/rss/current.xml"
+            [hockeywilderness]="https://www.hockeywilderness.com/rss/current.xml"
+            [habseyesontheprize]="https://www.habseyesontheprize.com/rss/current.xml"
+            [ontheforecheck]="https://www.ontheforecheck.com/rss/current.xml"
+            [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
+            [lighthousehockey]="https://www.lighthousehockey.com/rss/current.xml"
+            [blueshirtbanter]="https://www.blueshirtbanter.com/rss/current.xml"
+            [broadstreethockey]="https://www.broadstreethockey.com/rss/current.xml"
+            [pensburgh]="https://www.pensburgh.com/rss/current.xml"
+            [fearthefin]="https://www.fearthefin.com/rss/current.xml"
+            [rawcharge]="https://www.rawcharge.com/rss/current.xml"
+            [pensionplanpuppets]="https://www.pensionplanpuppets.com/rss/current.xml"
+            [nucksmisconduct]="https://www.nucksmisconduct.com/rss/current.xml"
+            [japersrink]="https://www.japersrink.com/rss/current.xml"
+            [arcticicehockey]="https://www.arcticicehockey.com/rss/current.xml"
+          )
+
+          BUNDLE="{}"
+          for sourceId in "${!FEEDS[@]}"; do
+            feedUrl="${FEEDS[$sourceId]}"
+            echo "Fetching $sourceId..."
+            XML=$(curl -fsSL \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+              -H "Accept: application/rss+xml,application/atom+xml,text/xml,*/*" \
+              "$feedUrl" 2>/dev/null || echo "")
+            if [ -z "$XML" ] || [ ${#XML} -lt 100 ]; then
+              echo "  Skipping $sourceId (empty response)"
+              continue
+            fi
+            BUNDLE=$(echo "$BUNDLE" | jq --arg k "$sourceId" --arg v "$XML" '. + {($k): $v}')
+            sleep 0.3
+          done
+
+          FEED_COUNT=$(echo "$BUNDLE" | jq 'keys | length')
+          echo "Atom bundle: $FEED_COUNT feeds"
+
+          HTTP_STATUS=$(echo "$BUNDLE" | curl -s -o response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            --data-binary @- \
+            "https://eyewall-poller.billowing-queen-bf23.workers.dev/atom/ingest")
+
+          echo "Atom ingest: $HTTP_STATUS"
+          cat response.txt
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Atom ingest failed with status $HTTP_STATUS"
             exit 1
           fi

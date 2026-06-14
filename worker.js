@@ -1049,7 +1049,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-ana',        name: 'r/AnaheimDucks',         color: '#f47a38', url: 'https://www.reddit.com/r/AnaheimDucks/new.json',         type: 'reddit' },
   ],
   BOS: [
-    { id: 'stanleypenner',     name: 'Stanley Penner',         color: '#fcb514', url: 'https://www.stanleypenner.com/rss/current.xml',         type: 'atom'   },
     { id: 'reddit-bos',        name: 'r/BostonBruins',         color: '#fcb514', url: 'https://www.reddit.com/r/BostonBruins/new.json',         type: 'reddit' },
   ],
   BUF: [
@@ -1073,7 +1072,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-col',        name: 'r/coloradoavalanche',    color: '#6f263d', url: 'https://www.reddit.com/r/coloradoavalanche/new.json',    type: 'reddit' },
   ],
   CBJ: [
-    { id: 'wejustsaidthat',    name: 'We Just Said That',      color: '#002654', url: 'https://www.wejustsaidthat.com/rss/current.xml',        type: 'atom'   },
     { id: 'reddit-cbj',        name: 'r/BlueJackets',          color: '#002654', url: 'https://www.reddit.com/r/BlueJackets/new.json',          type: 'reddit' },
   ],
   DAL: [
@@ -1089,7 +1087,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-edm',        name: 'r/EdmontonOilers',       color: '#fc4c02', url: 'https://www.reddit.com/r/EdmontonOilers/new.json',       type: 'reddit' },
   ],
   FLA: [
-    { id: 'litterboxcats',     name: 'Litter Box Cats',        color: '#c8102e', url: 'https://www.litter-box-cats.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-fla',        name: 'r/FloridaPanthers',      color: '#c8102e', url: 'https://www.reddit.com/r/FloridaPanthers/new.json',      type: 'reddit' },
   ],
   LAK: [
@@ -1121,7 +1118,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-nyr',        name: 'r/rangers',              color: '#0038a8', url: 'https://www.reddit.com/r/rangers/new.json',              type: 'reddit' },
   ],
   OTT: [
-    { id: 'silversevenssens',  name: 'Silver Seven Sens',      color: '#c52128', url: 'https://www.silversevensens.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-ott',        name: 'r/OttawaSenators',       color: '#c52128', url: 'https://www.reddit.com/r/OttawaSenators/new.json',       type: 'reddit' },
   ],
   PHI: [
@@ -1133,7 +1129,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-pit',        name: 'r/penguins',             color: '#fcb514', url: 'https://www.reddit.com/r/penguins/new.json',             type: 'reddit' },
   ],
   SEA: [
-    { id: 'dauntlessdomain',   name: 'Dauntless Domain',       color: '#001628', url: 'https://www.dauntlessdomain.com/rss/current.xml',       type: 'atom'   },
     { id: 'reddit-sea',        name: 'r/SeattleKraken',        color: '#001628', url: 'https://www.reddit.com/r/SeattleKraken/new.json',        type: 'reddit' },
   ],
   SJS: [
@@ -1141,7 +1136,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-sjs',        name: 'r/SanJoseSharks',        color: '#006d75', url: 'https://www.reddit.com/r/SanJoseSharks/new.json',        type: 'reddit' },
   ],
   STL: [
-    { id: 'bluenotebanter',    name: 'Blue Note Banter',       color: '#003087', url: 'https://www.bluenotebanter.com/rss/current.xml',        type: 'atom'   },
     { id: 'reddit-stl',        name: 'r/stlouisblues',         color: '#003087', url: 'https://www.reddit.com/r/stlouisblues/new.json',         type: 'reddit' },
   ],
   TBL: [
@@ -1160,7 +1154,6 @@ const TEAM_NEWS_SOURCES = {
     { id: 'reddit-van',        name: 'r/canucks',              color: '#00843d', url: 'https://www.reddit.com/r/canucks/new.json',              type: 'reddit' },
   ],
   VGK: [
-    { id: 'knightsontherink',  name: 'Knights On The Rink',    color: '#b4975a', url: 'https://www.knightsontherink.com/rss/current.xml',      type: 'atom'   },
     { id: 'reddit-vgk',        name: 'r/goldenknights',        color: '#b4975a', url: 'https://www.reddit.com/r/goldenknights/new.json',        type: 'reddit' },
   ],
   WSH: [
@@ -1481,6 +1474,10 @@ async function fetchNews(env, teamAbbr = TEAM_ABBR) {
   const sources  = getNewsSources(teamAbbr);
 
   for (const source of sources) {
+    // Reddit and SBNation atom feeds are fetched by GitHub Actions
+    // (CF Workers IPs are blocked). GH Actions POSTs to /reddit/ingest
+    // and /atom/ingest every 30 minutes.
+    if (source.type === 'reddit' || source.type === 'atom') continue;
     try {
       console.log(`News: fetching ${source.id} from ${source.url}`);
       const res = await fetch(source.url, {
@@ -1569,6 +1566,11 @@ async function fetchOdds(env) {
     return;
   }
 
+  // Backoff: if we got a 401 recently, skip silently for 6 hours to avoid log spam.
+  // Resets automatically when the KV key expires.
+  const backoff = await kvGet(env, 'odds:backoff');
+  if (backoff) return; // silently skip during backoff window
+
   // Check if still fresh — KV TTL handles expiry, but avoid redundant upstream calls
   // during the same poll cycle if KV already has data
   const existing = await kvGet(env, kvKey);
@@ -1579,7 +1581,13 @@ async function fetchOdds(env) {
       `?apiKey=${env.ODDS_API_KEY}&regions=us&markets=h2h&oddsFormat=american`;
     const res = await fetch(url);
     if (!res.ok) {
-      console.warn(`Odds API ${res.status} — skipping`);
+      if (res.status === 401 || res.status === 429) {
+        // Over quota or unauthorized — back off for 6 hours
+        await kvPut(env, 'odds:backoff', 1, 6 * 3600);
+        console.warn(`Odds API ${res.status} — backing off for 6h`);
+      } else {
+        console.warn(`Odds API ${res.status} — skipping`);
+      }
       return;
     }
     const data = await res.json();
@@ -1886,6 +1894,55 @@ async function handleRequest(request, env, ctx) {
     }
     console.log(`Reddit ingest: ${processed} teams processed`);
     return json({ ok: true, processed, results });
+  }
+
+  // POST /atom/ingest — accepts bundled SBNation/atom feed XML from GitHub Actions.
+  // SBNation blogs block Cloudflare datacenter IPs; GH-hosted runners are not blocked.
+  // Body: JSON object { sourceId: xmlText, ... } for all atom feeds.
+  // Merges parsed articles into existing news:ABBR KV alongside Reddit posts.
+  if (url.pathname === '/atom/ingest' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    let bundle;
+    try {
+      bundle = await request.json();
+      if (!bundle || typeof bundle !== 'object') throw new Error('Expected JSON object');
+    } catch (e) {
+      return new Response(`Bad request: ${e.message}`, { status: 400 });
+    }
+    // Build reverse lookup: sourceId → { abbr, sourceConfig }
+    const sourceToTeam = {};
+    for (const [abbr, sources] of Object.entries(TEAM_NEWS_SOURCES)) {
+      for (const src of sources) {
+        if (src.type === 'atom') sourceToTeam[src.id] = { abbr, src };
+      }
+    }
+    const TTL = 25 * 3600; // 25hr — refreshed daily
+    const results = {};
+    for (const [sourceId, xml] of Object.entries(bundle)) {
+      if (!xml || typeof xml !== 'string' || xml.length < 50) continue;
+      const entry = sourceToTeam[sourceId];
+      if (!entry) continue;
+      const { abbr, src } = entry;
+      try {
+        const parsed = parseAtom(xml, src);
+        if (!parsed.length) continue;
+        // Merge with existing news — keep non-atom items intact
+        const existing = (await kvGet(env, `news:${abbr}`)) || [];
+        const nonAtom = existing.filter(item => !item.source || item.source !== sourceId);
+        const merged = [...parsed, ...nonAtom]
+          .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+          .slice(0, 30);
+        await kvPut(env, `news:${abbr}`, merged, TTL);
+        results[sourceId] = parsed.length;
+      } catch (e) {
+        console.warn(`Atom ingest: ${sourceId} parse error: ${e.message}`);
+        results[sourceId] = 0;
+      }
+    }
+    const total = Object.values(results).reduce((s, n) => s + n, 0);
+    console.log(`Atom ingest: ${Object.keys(results).length} feeds, ${total} articles`);
+    return json({ ok: true, results });
   }
 
   // POST /moneypuck/ingest — accepts raw CSV text from GitHub Actions runner.
