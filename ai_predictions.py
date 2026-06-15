@@ -126,11 +126,12 @@ def already_generated(game_id: int) -> bool:
     return (result.count or 0) > 0
 
 
-def save_prediction(game_id: int, home_team: str, away_team: str,
+def save_prediction(game_id: int, season: int, home_team: str, away_team: str,
                     prediction_text: str, game_date: str, matchup_text: str = None):
     supabase.table("game_predictions").upsert(
         {
             "game_id":         game_id,
+            "season":          season,
             "home_team":       home_team,
             "away_team":       away_team,
             "prediction_text": prediction_text,
@@ -154,6 +155,10 @@ def process_game(game: dict, force: bool = False) -> bool:
     home_team = game["home_team"]
     away_team = game["away_team"]
     game_date = game["game_date"]
+    # Derive season from NHL game ID — first 4 digits are the start year
+    # e.g. 2025030415 → start year 2025 → season 20252026
+    start_year = int(str(game_id)[:4])
+    season     = start_year * 10000 + (start_year + 1)
 
     if not force and already_generated(game_id):
         print(f"  {game_id} — already generated, skipping")
@@ -193,7 +198,7 @@ def process_game(game: dict, force: bool = False) -> bool:
         print(f"  {game_id} — matchup context error: {e}")
         matchup = None
 
-    save_prediction(game_id, home_team, away_team, prediction, game_date, matchup_text=matchup)
+    save_prediction(game_id, season, home_team, away_team, prediction, game_date, matchup_text=matchup)
     print(f"  {game_id} — saved ({len(prediction)} chars prediction, {len(matchup) if matchup else 0} chars matchup)")
     return True
 

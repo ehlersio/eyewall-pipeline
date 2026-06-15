@@ -28,7 +28,6 @@ supabase = create_client(
 )
 
 NHL_SEASON    = int(os.environ.get("NHL_SEASON", "20252026"))
-PRIMARY_TEAM  = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
 REQUEST_DELAY = 1.0  # seconds between generation calls
 
 

@@ -1007,12 +1007,12 @@ const NHL_NEWS_SOURCES = [
     type:  'espn',
   },
   {
-    id:     'sportsnet',
-    name:   'Sportsnet',
-    color:  '#d4a017',
-    url:    'https://www.sportsnet.ca/feed/',
-    type:   'sportsnet',
-    filter: 'nhl|hockey|hurricane|carolina|playoff|stanley',
+    id:        'sportsnet',
+    name:      'Sportsnet',
+    color:     '#d4a017',
+    url:       'https://www.sportsnet.ca/feed/',
+    type:      'sportsnet',
+    filterKey: 'team',  // injected per-team at runtime by getNewsSources()
   },
   {
     id:    'thescore',
