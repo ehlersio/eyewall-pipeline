@@ -10,6 +10,7 @@ Populates:
 """
 
 import time
+from collections import defaultdict
 
 import requests
 
@@ -207,9 +208,8 @@ def run(season: int = NHL_SEASON):
     print("\n[1/5] Fetching rosters...")
     all_players = {}
     for team in ALL_TEAMS:
-        for _game_type in [2, 3]:
-            for p in fetch_roster(team, season):
-                all_players[p["id"]] = p
+        for p in fetch_roster(team, season):
+            all_players[p["id"]] = p
         time.sleep(0.1)  # be polite to NHL API
     print(f"  Found {len(all_players)} unique players")
     upsert(client, "players", list(all_players.values()), "id")
@@ -462,8 +462,6 @@ def run(season: int = NHL_SEASON):
         null_rows = []
 
     # Group by game_id so we fetch PBP once per game
-    from collections import defaultdict
-
     games_to_fetch = defaultdict(list)  # game_id -> [team_row, ...]
     for row in null_rows:
         games_to_fetch[row["game_id"]].append(row)
