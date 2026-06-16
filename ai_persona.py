@@ -80,11 +80,13 @@ Formatting rules:
 
 def format_game_context(ctx: dict) -> str:
     """Formats the game summary context dict into a readable prompt block."""
-    game   = ctx.get("game", {})
-    shots  = ctx.get("shots", {})
+    game    = ctx.get("game", {})
+    shots   = ctx.get("shots", {})
     players = ctx.get("players", [])
-    zones  = ctx.get("zones", [])
-    form   = ctx.get("form", [])
+    zones   = ctx.get("zones", [])
+    form    = ctx.get("form", [])
+    goalies = ctx.get("goalies", {})
+    series  = ctx.get("series")
 
     lines = []
 
@@ -92,16 +94,39 @@ def format_game_context(ctx: dict) -> str:
     lines.append("GAME INFORMATION")
     lines.append(f"Date: {game.get('game_date')}")
     lines.append(f"Matchup: {game.get('away_team')} @ {game.get('home_team')}")
-    lines.append(f"Final score: {game.get('away_team')} {game.get('team_score' if not game.get('is_home') else 'opp_score')}, "
-                 f"{game.get('home_team')} {game.get('opp_score' if not game.get('is_home') else 'team_score')}")
-    lines.append(f"Result for CAR: {game.get('result', '').upper()}")
+
+    home = game.get("home_team", "")
+    away = game.get("away_team", "")
+    team = game.get("primary_team", "")
+    is_home = game.get("is_home", False)
+    team_score = game.get("team_score", 0)
+    opp_score  = game.get("opp_score", 0)
+    home_score = team_score if is_home else opp_score
+    away_score = opp_score if is_home else team_score
+    lines.append(f"Final score: {away} {away_score} — {home} {home_score}")
+    lines.append(f"Result for {team}: {game.get('result', '').upper()}")
     lines.append(f"Game type: {game.get('game_type')}")
     if game.get('period_end', 3) > 3:
         lines.append(f"Went to overtime (ended period {game.get('period_end')})")
 
+    # Playoff series context — CRITICAL for accurate game number references
+    if series:
+        lines.append(f"\nPLAYOFF SERIES CONTEXT")
+        lines.append(f"{series['series_label']}")
+        lines.append(f"This is Game {series['game_number']} of this series.")
+        lines.append(f"Series record entering this game: {away} {series['away_wins']} — {home} {series['home_wins']}")
+        lines.append("IMPORTANT: Do not describe this as a series opener or Game 1 unless game_number = 1.")
+
+    # Goalies who actually played
+    if goalies:
+        lines.append(f"\nGOALIES IN NET (confirmed from shot data — only name these goalies)")
+        for gt, names in goalies.items():
+            lines.append(f"  {gt}: {', '.join(names)}")
+        lines.append("IMPORTANT: Do not name any other goalie. Only reference goalies listed above.")
+
     # Advanced stats if available
     if game.get("home_cf_pct") is not None:
-        lines.append(f"Corsi For % (home): {game.get('home_cf_pct'):.1f}%")
+        lines.append(f"\nCorsi For % (home): {game.get('home_cf_pct'):.1f}%")
     if game.get("pp_goals") is not None:
         lines.append(f"Power play: {game.get('pp_goals')}/{game.get('pp_opps')}")
     if game.get("pk_goals_against") is not None:
@@ -110,9 +135,9 @@ def format_game_context(ctx: dict) -> str:
     # Shot summary
     lines.append("\nSHOT SUMMARY")
     by_team = shots.get("by_team", {})
-    for team, stats in by_team.items():
+    for t, stats in by_team.items():
         lines.append(
-            f"{team}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal, "
+            f"{t}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal, "
             f"{stats['missed_shots']} missed, {stats['blocked_shots']} blocked"
         )
 
@@ -124,13 +149,17 @@ def format_game_context(ctx: dict) -> str:
     lines.append("\nSHOTS BY PERIOD")
     by_period = shots.get("by_period", {})
     for period, teams in sorted(by_period.items()):
-        for team, stats in teams.items():
-            lines.append(f"{period} {team}: {stats['goals']} goals, {stats['shots_on_goal']} SOG")
+        for t, stats in teams.items():
+            lines.append(f"{period} {t}: {stats['goals']} goals, {stats['shots_on_goal']} SOG")
 
-    # Goal scorers
+    # Goal scorers — authoritative record
     goals = ctx.get("goals", [])
     if goals:
-        lines.append("\nGOAL SCORING (chronological — authoritative, do not invent additional goals or assists)")
+        lines.append(
+            "\nGOAL SCORING — AUTHORITATIVE RECORD\n"
+            "These are the ONLY goals and assists in this game. "
+            "Do not invent, add, or modify any goal or assist."
+        )
         for g in goals:
             assists = []
             if g.get("assist1"): assists.append(g["assist1"])
@@ -152,11 +181,27 @@ def format_game_context(ctx: dict) -> str:
                 f"xG% {x['xgf_pct']*100:.1f}%"
             )
 
-    # Player stats
-    lines.append("\nCAR PLAYER STATS (regular season)")
+    # Player stats — background context only, NOT active roster for this game
+    # Extract names from goals and zones for grounding
+    goal_names = set()
+    for g in goals:
+        if g.get("scorer"):  goal_names.add(g["scorer"])
+        if g.get("assist1"): goal_names.add(g["assist1"])
+        if g.get("assist2"): goal_names.add(g["assist2"])
+    zone_names = {z["name"] for z in zones if z.get("name")}
+    goalie_names = set()
+    for names in goalies.values():
+        goalie_names.update(names)
+    allowed_names = goal_names | zone_names | goalie_names
+
+    lines.append(
+        f"\n{team} SEASON STATS (background context — do NOT use to invent game details)\n"
+        f"These are season averages, NOT a roster of players who appeared in this game.\n"
+        f"You may only name a player from this list if they also appear in GOAL SCORING or ZONE STARTS above."
+    )
     for p in players:
         if p.get("goals") is None:
-            continue  # skip players missing nhl_stats data
+            continue
         rapm_str = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
         lines.append(
             f"{p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A "
@@ -164,13 +209,14 @@ def format_game_context(ctx: dict) -> str:
             f"xGF/60 {p.get('xgf_per60'):.2f} | EV off pct {p.get('pct_ev_off')}"
         )
 
-    # Zone starts
-    lines.append("\nZONE STARTS (this game)")
-    for z in zones:
-        lines.append(
-            f"{z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}% | "
-            f"NZ starts {z['nz_starts']}"
-        )
+    # Zone starts — these players DID play in this game
+    if zones:
+        lines.append(f"\nZONE STARTS (this game — these players confirmed on ice)")
+        for z in zones:
+            lines.append(
+                f"{z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}% | "
+                f"NZ starts {z['nz_starts']}"
+            )
 
     # Recent form
     lines.append("\nRECENT FORM (last 5 games)")
@@ -235,18 +281,58 @@ def build_game_summary_prompt(ctx: dict) -> str:
     formatted = format_game_context(ctx)
     game = ctx.get("game", {})
     team = game.get("primary_team", "CAR")
-    opponent = game.get("opponent", "the opponent")
-    result = game.get("result", "")
+    goalies = ctx.get("goalies", {})
+    series  = ctx.get("series")
+
+    # Build explicit list of allowed player names for this game
+    goals = ctx.get("goals", [])
+    goal_names = set()
+    for g in goals:
+        if g.get("scorer"):  goal_names.add(g["scorer"])
+        if g.get("assist1"): goal_names.add(g["assist1"])
+        if g.get("assist2"): goal_names.add(g["assist2"])
+    zone_names = {z["name"] for z in ctx.get("zones", []) if z.get("name")}
+    goalie_names = set()
+    for names in goalies.values():
+        goalie_names.update(names)
+    allowed = goal_names | zone_names | goalie_names
+
+    allowed_block = (
+        f"PLAYERS YOU MAY NAME IN THIS SUMMARY:\n"
+        + (("\n".join(f"  - {n}" for n in sorted(allowed))) if allowed else "  (none confirmed — use team abbreviations only)")
+        + "\nDo not name any other player. If you are unsure whether a player appeared, do not name them."
+    )
+
+    series_note = ""
+    if series:
+        series_note = (
+            f"\nThis is Game {series['game_number']} of the playoff series. "
+            f"Series record: {series['away_team']} {series['away_wins']} — {series['home_team']} {series['home_wins']}. "
+            f"Do not call this the series opener or Game 1 unless game_number is 1."
+        )
+
+    goalie_note = ""
+    if goalies:
+        parts = [f"{t}: {', '.join(ns)}" for t, ns in goalies.items()]
+        goalie_note = f"\nGoalies confirmed in net: {'; '.join(parts)}. Do not name any other goalie."
 
     return (
         f"Here is the data for a completed NHL game involving {team}:\n\n"
         f"{formatted}\n\n"
-        f"Write a post-game summary for {team} fans. "
-        f"The GOAL SCORING section is the authoritative record of who scored and who assisted. "
-        f"Use it directly — do not attribute goals or assists to any player not listed there, "
-        f"and do not describe a player as scoring multiple goals unless they appear multiple times. "
-        f"Cover what happened period by period, who stood out, how the xG and shot data reflect "
-        f"the flow of play, and what the result means given the recent form shown. "
+        f"{allowed_block}\n"
+        f"{series_note}"
+        f"{goalie_note}\n\n"
+        f"ACCURACY RULES — STRICTLY ENFORCED:\n"
+        f"- Only name players from the PLAYERS YOU MAY NAME list above.\n"
+        f"- The GOAL SCORING section is the authoritative record. Do not attribute goals or assists to any player not listed there.\n"
+        f"- Do not describe a player as scoring multiple goals unless they appear multiple times in GOAL SCORING.\n"
+        f"- Do not name a player as 'linemate' of another unless both appear in the same goal or zone starts data.\n"
+        f"- The SEASON STATS section is background context only — do not use it to invent game details.\n"
+        f"- If a goalie is not in the GOALIES IN NET section, do not mention them.\n"
+        f"{'- This is Game ' + str(series['game_number']) + ' — do not call it the opener or Game 1.' + chr(10) if series and series['game_number'] != 1 else ''}"
+        f"\nWrite a post-game summary for {team} fans. Cover what happened period by period, "
+        f"who stood out (from the allowed list only), how the xG and shot data reflect the flow of play, "
+        f"and what the result means given the recent form. "
         f"Be accurate, be engaging, use your voice. Plain text only, no bullet points."
     )
 
@@ -341,13 +427,31 @@ def build_game_card_prompt(ctx: dict) -> str:
     formatted = format_game_context(ctx)
     game = ctx.get("game", {})
     team = game.get("primary_team", "CAR")
-    opponent = game.get("opponent", "the opponent")
+
+    goals = ctx.get("goals", [])
+    goalies = ctx.get("goalies", {})
+    goal_names = set()
+    for g in goals:
+        if g.get("scorer"):  goal_names.add(g["scorer"])
+        if g.get("assist1"): goal_names.add(g["assist1"])
+    goalie_names = set()
+    for names in goalies.values():
+        goalie_names.update(names)
+    allowed = goal_names | goalie_names
+
+    allowed_block = (
+        "Players you may name: "
+        + (", ".join(sorted(allowed)) if allowed else "none confirmed — use team names only")
+    )
 
     return (
         f"Here is the data for a completed NHL game involving {team}:\n\n"
         f"{formatted}\n\n"
+        f"{allowed_block}\n\n"
         f"Write a 2-3 sentence shareable card caption summarizing this game for {team} fans. "
-        f"Hit the key result, one standout moment or player, and the underlying play if it's telling. "
+        f"Hit the key result, one standout moment or player (from the allowed list only), "
+        f"and the underlying play if it's telling. "
+        f"Do not name any player not in the allowed list above. "
         f"Punchy and direct. Under 50 words. Plain text only, no bullet points."
     )
 

@@ -513,14 +513,25 @@ async function generateGameSummary(env, game) {
   const carPens   = penalties.filter(p => p.team === TEAM_ABBR).length;
   const oppPens   = penalties.filter(p => p.team !== TEAM_ABBR).length;
 
+  // Build explicit allowed-names list — only players confirmed in this game's data
+  const goalScorerNames = [...new Set(goals.map(g => g.scorer).filter(n => n && n !== 'Unknown'))];
+  const allowedNames    = carGoalie
+    ? [...goalScorerNames, carGoalie.name]
+    : goalScorerNames;
+  const allowedBlock = allowedNames.length > 0
+    ? `Players you may name: ${allowedNames.join(', ')}. Do not name any other player.`
+    : `No confirmed player names — refer to teams by abbreviation only.`;
+
   const prompt = `You are EyeWall Analytics, a ${TEAM_CONFIG.displayName} hockey analytics voice. Write a sharp 3-sentence game summary for ${TEAM_CONFIG.displayName} fans. Use the stats. Write flowing prose — no bullets, no headers.
 
 Result: CAR ${carScore}-${oppScore} ${oppAbbr} (${won ? 'WIN' : 'LOSS'}) · ${game.gameDate} · ${isHome ? 'Home' : 'Away'}
 Corsi For%: ${cfPct}% (${cfPct >= 50 ? 'CAR controlled possession' : 'CAR was outshot territorially'})
 Goals: ${goals.map(g => `${g.team} ${g.scorer} P${g.period} ${g.time}`).join(' | ') || 'no goals recorded'}
-${carGoalie ? `CAR Goalie: ${carGoalie.name} — ${carGoalie.saves}/${carGoalie.shots} (${carGoalie.svPct}% SV%)` : ''}
+${carGoalie ? `CAR Goalie: ${carGoalie.name} — ${carGoalie.saves}/${carGoalie.shots} (${carGoalie.svPct != null ? (carGoalie.svPct * 100).toFixed(1) : '—'}% SV%)` : ''}
 ${topScorer ? `Top CAR scorer: ${topScorer}` : ''}
 Penalties — CAR: ${carPens}, ${oppAbbr}: ${oppPens}
+
+${allowedBlock}
 
 3 sentences only. Sentence 1: result and key storyline. Sentence 2: possession/goaltending insight. Sentence 3: one forward-looking thought.`;
 
@@ -2250,6 +2261,17 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
       `${g.isCar ? carAbbr : oppAbbr} goal by ${g.scorerName || 'unknown'} at ${g.time || '—'} (${(g.strength || 'EV').toUpperCase()})`
     ).join('; ') || 'no goals';
 
+    // Build explicit allowed-names list from goal scorer data only
+    const confirmedNames = [...new Set(
+      (stats.goals || [])
+        .map(g => g.scorerName)
+        .filter(n => n && n !== 'unknown' && n !== 'Unknown')
+    )];
+    if (stats.primaryGoalieName) confirmedNames.push(stats.primaryGoalieName);
+    const allowedNamesNote = confirmedNames.length > 0
+      ? `Players you may name: ${confirmedNames.join(', ')}. Do not name any other player — not linemates, not defensemen, not anyone not listed here.`
+      : `No confirmed player names — refer to teams by abbreviation only (${carAbbr}, ${oppAbbr}).`;
+
     const playoffNote = isPlayoff
       ? '\n\nNote: This is a PLAYOFF game. Do not mention points, standings, or "escaping with a point". Overtime is full 20-minute periods, not 3v3. Focus on possession, goaltending, and series context.'
       : '';
@@ -2269,6 +2291,8 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
   - CAR hits: ${stats.carHits}, CAR faceoffs: ${stats.carFOPct}%
   - Goals: ${goalsSummary}
 
+  ${allowedNamesNote}
+
   Summarize how the game went, key turning points, and whether the result matched the underlying play. Under 80 words.${playoffNote}`
       : `You are EyeWall, an analytics assistant for ${carAbbr} hockey fans.
   Write a tight 2-3 sentence period summary for ${stats.periodLabel} of a ${carAbbr} vs ${oppAbbr} game.
@@ -2281,6 +2305,8 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
   - CAR hits: ${stats.carHits}
   - Penalties: ${stats.penaltyCount} total (${stats.carPenaltyCount} against ${carAbbr})
   - Goals: ${goalsSummary}
+
+  ${allowedNamesNote}
 
   Focus on what mattered most — possession dominance, momentum, key goals. Under 60 words.${playoffNote}`;
 
