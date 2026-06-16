@@ -1979,6 +1979,18 @@ async function handleRequest(request, env, ctx) {
     return json({ ok: true, team: tc.abbr, status: `refreshing — check /cache/moneypuck:skaters:${tc.abbr} in ~15s` });
   }
 
+  // Refresh PP/PK unit compositions from Supabase → KV
+  if (url.pathname === '/pp-units/refresh') {
+    const secret = url.searchParams.get('secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    ctx.waitUntil(
+      refreshPPUnits(env)
+        .then(map => console.log(`PP units done: ${Object.keys(map).length} teams`))
+        .catch(e => console.error('PP units error:', e.message))
+    );
+    return json({ ok: true, status: 'refreshing — check /cache/pp_units:all in ~5s' });
+  }
+
   // Backfill shot data for completed games — processes in batches to avoid timeout
   if (url.pathname === '/shots/backfill') {
     const secret = url.searchParams.get('secret');
@@ -2317,11 +2329,48 @@ function corsHeaders() {
   };
 }
 
+// ── PP/PK unit refresh ────────────────────────────────────────────────────────
+// Reads special_teams_units from Supabase and caches in KV as pp_units:all.
+// Uses the public anon key — same as the frontend app.
+const SB_URL  = 'https://mqgasjzywoibdgxjjkux.supabase.co';
+const SB_ANON = 'sb_publishable_e_zwr1UA7GnHq4OuQSas5Q_kO8bQ_Ct';
+
+async function refreshPPUnits(env) {
+  const season = env.NHL_SEASON || '20252026';
+  const r = await fetch(
+    `${SB_URL}/rest/v1/special_teams_units` +
+    `?season=eq.${season}&select=team,unit_type,unit_number,player_ids&limit=256`,
+    {
+      headers: {
+        'apikey':        SB_ANON,
+        'Authorization': `Bearer ${SB_ANON}`,
+      },
+    }
+  );
+  if (!r.ok) throw new Error(`Supabase ${r.status}`);
+  const rows = await r.json();
+
+  // Build nested map: { CAR: { PP: { 1: [...], 2: [...] }, PK: { ... } } }
+  const map = {};
+  for (const row of rows) {
+    if (!map[row.team]) map[row.team] = { PP: {}, PK: {} };
+    map[row.team][row.unit_type][row.unit_number] = row.player_ids;
+  }
+
+  await kvPut(env, 'pp_units:all', map, 4 * 60 * 60); // 4 hour TTL
+  return map;
+}
+
 // ── Entry points ──────────────────────────────────────────────
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(poll(env, ctx));
+    ctx.waitUntil(Promise.all([
+      poll(env, ctx),
+      refreshPPUnits(env)
+        .then(map => console.log(`PP units scheduled: ${Object.keys(map).length} teams`))
+        .catch(e => console.error('PP units scheduled error:', e.message)),
+    ]));
   },
   async fetch(request, env, ctx) {
     return handleRequest(request, env, ctx);
