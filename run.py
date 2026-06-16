@@ -61,6 +61,7 @@ def run_all():
     import rapm
     import moneypuck
     import line_combinations
+    import power_rankings
 
     nhl_stats.run()
     shot_events.run()
@@ -69,6 +70,7 @@ def run_all():
     rapm.run()
     moneypuck.run()
     line_combinations.run()  # must run after shift_data + shot_events
+    power_rankings.run()     # must run after moneypuck (needs fresh WAR + xGF%)
 
     # AI pipeline — runs after player_seasons is fresh
     run_ai_pipeline()
@@ -109,6 +111,9 @@ if __name__ == '__main__':
     elif arg == 'lines':
         import line_combinations
         line_combinations.run(*([season] if season else []))
+    elif arg == 'rankings':
+        import power_rankings
+        power_rankings.run(season=season)
     elif arg == 'validate':
         import validate_rapm
         eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
