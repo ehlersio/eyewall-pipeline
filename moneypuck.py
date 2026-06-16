@@ -7,8 +7,10 @@ Runs after nhl_stats.py (player_seasons rows must exist first).
 import csv
 import io
 import math
+
 import requests
-from db import get_client, NHL_SEASON
+
+from db import NHL_SEASON, get_client
 
 MP_URL = 'https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv'
 MP_TEAM_GAMES_URL = 'https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv'
@@ -28,8 +30,10 @@ def fetch_csv() -> list[dict]:
     return rows
 
 def n(v):
-    try: return float(v)
-    except: return 0.0
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return 0.0
 
 def per60(stat, icetime_sec):
     if not icetime_sec or icetime_sec < 60: return 0.0
@@ -154,7 +158,7 @@ def run_goalie_qs(client, season: int):
 
         # Aggregate QS per goalie
         goalie_totals = defaultdict(lambda: {'starts': 0, 'qs': 0})
-        for (goalie_id, game_id), stats in goalie_game_stats.items():
+        for (goalie_id, _game_id), stats in goalie_game_stats.items():
             sa = stats['sa']
             sv = stats['sv']
             if sa < 5:

@@ -15,40 +15,61 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-import urllib.request
-import requests
 import time
-from datetime import datetime, timezone
-from ai_context import get_player_context, _fmt_toi
+from datetime import UTC, datetime
 
+import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from ai_context import get_player_context
-from ai_persona import build_player_scouting_prompt, STICKS_SYSTEM_PROMPT
+from ai_context import _fmt_toi, get_player_context
+from ai_persona import STICKS_SYSTEM_PROMPT, build_player_scouting_prompt
 
 load_dotenv()
 
-SUPABASE_URL  = os.environ["SUPABASE_URL"]
-SUPABASE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON    = os.environ.get("NHL_SEASON", "20252026")
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+NHL_SEASON = os.environ.get("NHL_SEASON", "20252026")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def _fmt_toi(seconds: int | None) -> str | None:
-    if seconds is None:
-        return None
-    return f"{seconds // 60}:{seconds % 60:02d}"
 
 # All 32 NHL teams — used when no --team flag is passed
 ALL_TEAMS = [
-    "ANA", "ARI", "BOS", "BUF", "CAR", "CBJ", "CGY", "CHI",
-    "COL", "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL",
-    "NJD", "NSH", "NYI", "NYR", "OTT", "PHI", "PIT", "SEA",
-    "SJS", "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WPG",
+    "ANA",
+    "ARI",
+    "BOS",
+    "BUF",
+    "CAR",
+    "CBJ",
+    "CGY",
+    "CHI",
+    "COL",
+    "DAL",
+    "DET",
+    "EDM",
+    "FLA",
+    "LAK",
+    "MIN",
+    "MTL",
+    "NJD",
+    "NSH",
+    "NYI",
+    "NYR",
+    "OTT",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SJS",
+    "STL",
+    "TBL",
+    "TOR",
+    "UTA",
+    "VAN",
+    "VGK",
+    "WPG",
 ]
 
 
@@ -56,10 +77,11 @@ ALL_TEAMS = [
 # Model call
 # ---------------------------------------------------------------------------
 
+
 def generate(prompt: str, system: str = None) -> str | None:
     account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-    api_key    = os.environ["CLOUDFLARE_API_KEY"]
-    model      = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+    api_key = os.environ["CLOUDFLARE_API_KEY"]
+    model = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 
     messages = []
     if system:
@@ -71,7 +93,7 @@ def generate(prompt: str, system: str = None) -> str | None:
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}",
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type":  "application/json",
+                "Content-Type": "application/json",
             },
             json={"messages": messages, "max_tokens": 1024},
             timeout=120,
@@ -87,6 +109,7 @@ def generate(prompt: str, system: str = None) -> str | None:
 # DB helpers
 # ---------------------------------------------------------------------------
 
+
 def already_scouted(player_id: int, season: str, team: str) -> bool:
     resp = (
         supabase.table("player_scouting")
@@ -100,13 +123,15 @@ def already_scouted(player_id: int, season: str, team: str) -> bool:
     return bool(resp.data)
 
 
-def upsert_scouting_blurb(player_id: int, season: str, team: str, text: str, retries: int = 3) -> None:
+def upsert_scouting_blurb(
+    player_id: int, season: str, team: str, text: str, retries: int = 3
+) -> None:
     row = {
-        "player_id":     player_id,
-        "season":        season,
-        "team":          team,
+        "player_id": player_id,
+        "season": season,
+        "team": team,
         "scouting_text": text,
-        "generated_at":  datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }
     for attempt in range(1, retries + 1):
         try:
@@ -118,18 +143,17 @@ def upsert_scouting_blurb(player_id: int, season: str, team: str, text: str, ret
             if attempt == retries:
                 print(f"  upsert failed after {retries} attempts: {e}")
                 raise
-            wait = 2 ** attempt  # 2s, 4s
+            wait = 2**attempt  # 2s, 4s
             print(f"  upsert attempt {attempt} failed, retrying in {wait}s...")
             time.sleep(wait)
-    supabase.table("player_scouting").upsert(
-        row, on_conflict="player_id,season,team"
-    ).execute()
+    supabase.table("player_scouting").upsert(row, on_conflict="player_id,season,team").execute()
 
 
 # ---------------------------------------------------------------------------
 # Single-player context lookup
 # Used only in --player mode; normal team runs use get_player_context().
 # ---------------------------------------------------------------------------
+
 
 def get_single_player_context(player_id: int, season: str) -> tuple[dict | None, str | None]:
     """
@@ -167,33 +191,33 @@ def get_single_player_context(player_id: int, season: str) -> tuple[dict | None,
         .execute()
         .data
     )
-    name     = player_info["name"]     if player_info else f"Player {player_id}"
+    name = player_info["name"] if player_info else f"Player {player_id}"
     position = player_info["position"] if player_info else "?"
 
     player = {
-        "name":            name,
-        "position":        position,
-        "games_played":    r.get("games_played"),
-        "goals":           r.get("goals"),
-        "assists":         r.get("assists"),
-        "points":          r.get("points"),
-        "rapm":            float(r["rapm"]) if r.get("rapm") is not None else None,
-        "war":             float(r["war"])  if r.get("war")  is not None else None,
-        "pct_ev_off":      r.get("pct_ev_off"),
-        "pct_ev_def":      r.get("pct_ev_def"),
-        "pct_finishing":   r.get("pct_finishing"),
+        "name": name,
+        "position": position,
+        "games_played": r.get("games_played"),
+        "goals": r.get("goals"),
+        "assists": r.get("assists"),
+        "points": r.get("points"),
+        "rapm": float(r["rapm"]) if r.get("rapm") is not None else None,
+        "war": float(r["war"]) if r.get("war") is not None else None,
+        "pct_ev_off": r.get("pct_ev_off"),
+        "pct_ev_def": r.get("pct_ev_def"),
+        "pct_finishing": r.get("pct_finishing"),
         "pct_competition": r.get("pct_competition"),
-        "goals_per60":     float(r["goals_per60"]) if r.get("goals_per60") is not None else None,
-        "a1_per60":        float(r["a1_per60"])    if r.get("a1_per60")    is not None else None,
-        "xgf_per60":       float(r["xgf_per60"])   if r.get("xgf_per60")  is not None else None,
-        "xga_per60":       float(r["xga_per60"])   if r.get("xga_per60")  is not None else None,
-        "pp_goals":        r.get("pp_goals"),
-        "pp_points":       r.get("pp_points"),
-        "toi_per_game":    _fmt_toi(r.get("toi_per_game")),
-        "hits":            r.get("hits"),
-        "blocked_shots":   r.get("blocked_shots"),
-        "takeaways":       r.get("takeaways"),
-        "giveaways":       r.get("giveaways"),
+        "goals_per60": float(r["goals_per60"]) if r.get("goals_per60") is not None else None,
+        "a1_per60": float(r["a1_per60"]) if r.get("a1_per60") is not None else None,
+        "xgf_per60": float(r["xgf_per60"]) if r.get("xgf_per60") is not None else None,
+        "xga_per60": float(r["xga_per60"]) if r.get("xga_per60") is not None else None,
+        "pp_goals": r.get("pp_goals"),
+        "pp_points": r.get("pp_points"),
+        "toi_per_game": _fmt_toi(r.get("toi_per_game")),
+        "hits": r.get("hits"),
+        "blocked_shots": r.get("blocked_shots"),
+        "takeaways": r.get("takeaways"),
+        "giveaways": r.get("giveaways"),
     }
     return player, team
 
@@ -201,6 +225,7 @@ def get_single_player_context(player_id: int, season: str) -> tuple[dict | None,
 # ---------------------------------------------------------------------------
 # Core — process one player
 # ---------------------------------------------------------------------------
+
 
 def scout_player(
     player: dict,
@@ -223,9 +248,9 @@ def scout_player(
     prompt = build_player_scouting_prompt(player, team)
 
     if dry_run:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"DRY RUN — {name} ({team}, {season})")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(prompt)
         return "ok"
 
@@ -244,6 +269,7 @@ def scout_player(
 # Run modes
 # ---------------------------------------------------------------------------
 
+
 def run_single_player(player_id: int, season: str, force: bool, dry_run: bool) -> None:
     player, team = get_single_player_context(player_id, season)
     if not player:
@@ -251,23 +277,21 @@ def run_single_player(player_id: int, season: str, force: bool, dry_run: bool) -
         sys.exit(1)
 
     result = scout_player(player, team, season, player_id, force, dry_run)
-    print(f"\nDone — {'1 generated' if result == 'ok' else ('1 skipped' if result == 'skip' else '1 failed')}")
+    print(
+        f"\nDone — {'1 generated' if result == 'ok' else ('1 skipped' if result == 'skip' else '1 failed')}"
+    )
 
 
-def run_team(team: str, season: str, force: bool, dry_run: bool, missing_only: bool = False) -> tuple[int, int, int]:
+def run_team(
+    team: str, season: str, force: bool, dry_run: bool, missing_only: bool = False
+) -> tuple[int, int, int]:
     players = get_player_context(team=team, season=int(season), top_n=50)
     if not players:
         print(f"  no data for {team} {season}")
         return 0, 0, 0
 
     names = [p["name"] for p in players]
-    id_rows = (
-        supabase.table("players")
-        .select("id, name")
-        .in_("name", names)
-        .execute()
-        .data
-    )
+    id_rows = supabase.table("players").select("id, name").in_("name", names).execute().data
     id_map = {r["name"]: r["id"] for r in id_rows}
 
     if missing_only:
@@ -295,9 +319,12 @@ def run_team(team: str, season: str, force: bool, dry_run: bool, missing_only: b
             skipped += 1
             continue
         result = scout_player(player, team, season, pid, force, dry_run)
-        if result == "ok":      ok += 1
-        elif result == "skip":  skipped += 1
-        else:                   failed += 1
+        if result == "ok":
+            ok += 1
+        elif result == "skip":
+            skipped += 1
+        else:
+            failed += 1
 
     return ok, skipped, failed
 
@@ -313,7 +340,7 @@ def run(season, team=None, player_id=None, force=False, dry_run=False, missing_o
     for t in teams:
         print(f"\n--- {t} ---")
         ok, skip, fail = run_team(t, season, force, dry_run, missing_only=missing_only)
-        total_ok   += ok
+        total_ok += ok
         total_skip += skip
         total_fail += fail
 
@@ -327,11 +354,13 @@ def run(season, team=None, player_id=None, force=False, dry_run=False, missing_o
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate AI player scouting blurbs")
     parser.add_argument("--season", default=NHL_SEASON, help="Season e.g. 20252026")
-    parser.add_argument("--team",   default=None,       help="Team abbreviation e.g. CAR")
+    parser.add_argument("--team", default=None, help="Team abbreviation e.g. CAR")
     parser.add_argument("--player", type=int, default=None, help="Single NHL player ID")
-    parser.add_argument("--force",   action="store_true", help="Regenerate even if blurb exists")
+    parser.add_argument("--force", action="store_true", help="Regenerate even if blurb exists")
     parser.add_argument("--dry-run", action="store_true", help="Print prompts, skip DB writes")
-    parser.add_argument("--missing", action="store_true", help="Only generate blurbs that don't exist yet")
+    parser.add_argument(
+        "--missing", action="store_true", help="Only generate blurbs that don't exist yet"
+    )
     args = parser.parse_args()
 
     run(

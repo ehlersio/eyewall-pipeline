@@ -5,23 +5,23 @@ All functions return plain dicts/lists — no model calls happen here.
 """
 
 import os
-from supabase import create_client
+
 from dotenv import load_dotenv
+from supabase import create_client
 
 load_dotenv()
 
-supabase = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_KEY"]
-)
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+
 
 def _fmt_toi(seconds: int | None) -> str | None:
-        if seconds is None:
-            return None
-        return f"{seconds // 60}:{seconds % 60:02d}"
+    if seconds is None:
+        return None
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
 
 PRIMARY_TEAM = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
-NHL_SEASON   = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 
 
 # ---------------------------------------------------------------------------
@@ -29,6 +29,7 @@ NHL_SEASON   = int(os.environ.get("NHL_SEASON", "20252026"))
 # Format: 4 digits — home_skaters + away_skaters + home_goalie + away_goalie
 # e.g. 1551 = 5v5, 1541 = 5v4 (home PP), 1451 = 4v5 (home PK)
 # ---------------------------------------------------------------------------
+
 
 def decode_situation(code: str) -> str:
     if not code or len(code) != 4:
@@ -53,6 +54,7 @@ def decode_situation(code: str) -> str:
 # Game log context
 # ---------------------------------------------------------------------------
 
+
 def get_game_context(game_id: int, team: str = None) -> dict:
     """Returns basic game info and result from game_log."""
     team = team or PRIMARY_TEAM
@@ -70,34 +72,35 @@ def get_game_context(game_id: int, team: str = None) -> dict:
 
     is_home = row["home_team"] == team
     return {
-        "game_id":          game_id,
-        "game_date":        row["game_date"],
-        "season":           row["season"],
-        "game_type":        "playoff" if row["game_type"] == 3 else "regular",
-        "home_team":        row["home_team"],
-        "away_team":        row["away_team"],
-        "primary_team":     team,
-        "opponent":         row["opponent"],
-        "is_home":          is_home,
-        "team_score":       row["team_score"],
-        "opp_score":        row["opp_score"],
-        "result":           "win" if row["team_score"] > row["opp_score"] else "loss",
-        "period_end":       row["period_end"],
+        "game_id": game_id,
+        "game_date": row["game_date"],
+        "season": row["season"],
+        "game_type": "playoff" if row["game_type"] == 3 else "regular",
+        "home_team": row["home_team"],
+        "away_team": row["away_team"],
+        "primary_team": team,
+        "opponent": row["opponent"],
+        "is_home": is_home,
+        "team_score": row["team_score"],
+        "opp_score": row["opp_score"],
+        "result": "win" if row["team_score"] > row["opp_score"] else "loss",
+        "period_end": row["period_end"],
         "team_scored_first": row.get("team_scored_first"),
         # Advanced — may be null for playoffs
-        "home_cf_pct":      row.get("home_cf_pct"),
-        "home_ff_pct":      row.get("home_ff_pct"),
-        "home_pdo":         row.get("home_pdo"),
-        "pp_goals":         row.get("pp_goals"),
-        "pp_opps":          row.get("pp_opps"),
+        "home_cf_pct": row.get("home_cf_pct"),
+        "home_ff_pct": row.get("home_ff_pct"),
+        "home_pdo": row.get("home_pdo"),
+        "pp_goals": row.get("pp_goals"),
+        "pp_opps": row.get("pp_opps"),
         "pk_goals_against": row.get("pk_goals_against"),
-        "pk_opps":          row.get("pk_opps"),
+        "pk_opps": row.get("pk_opps"),
     }
 
 
 # ---------------------------------------------------------------------------
 # Shot event context
 # ---------------------------------------------------------------------------
+
 
 def get_shot_context(game_id: int, team: str = None) -> dict:
     """
@@ -135,30 +138,38 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
     }
 
     for r in rows:
-        team      = r["team"]
-        etype     = r["event_type"]
-        sit       = decode_situation(r.get("situation_code", ""))
-        period    = r.get("period", 0)
+        team = r["team"]
+        etype = r["event_type"]
+        sit = decode_situation(r.get("situation_code", ""))
+        period = r.get("period", 0)
 
         # by_team
         if team not in summary["by_team"]:
             summary["by_team"][team] = {
-                "goals": 0, "shots_on_goal": 0,
-                "missed_shots": 0, "blocked_shots": 0
+                "goals": 0,
+                "shots_on_goal": 0,
+                "missed_shots": 0,
+                "blocked_shots": 0,
             }
         t = summary["by_team"][team]
-        if etype == "goal":             t["goals"]         += 1
-        elif etype == "shot-on-goal":   t["shots_on_goal"] += 1
-        elif etype == "missed-shot":    t["missed_shots"]  += 1
-        elif etype == "blocked-shot":   t["blocked_shots"] += 1
+        if etype == "goal":
+            t["goals"] += 1
+        elif etype == "shot-on-goal":
+            t["shots_on_goal"] += 1
+        elif etype == "missed-shot":
+            t["missed_shots"] += 1
+        elif etype == "blocked-shot":
+            t["blocked_shots"] += 1
 
         # by_situation (5v5, pp, pk, en)
         sit_key = sit
         if sit_key not in summary["by_situation"]:
             summary["by_situation"][sit_key] = {"goals": 0, "shots_on_goal": 0}
         s = summary["by_situation"][sit_key]
-        if etype == "goal":           s["goals"]         += 1
-        elif etype == "shot-on-goal": s["shots_on_goal"] += 1
+        if etype == "goal":
+            s["goals"] += 1
+        elif etype == "shot-on-goal":
+            s["shots_on_goal"] += 1
 
         # by_period
         if not period:
@@ -169,8 +180,10 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
         if team not in summary["by_period"][p_key]:
             summary["by_period"][p_key][team] = {"goals": 0, "shots_on_goal": 0}
         pp = summary["by_period"][p_key][team]
-        if etype == "goal":           pp["goals"]         += 1
-        elif etype == "shot-on-goal": pp["shots_on_goal"] += 1
+        if etype == "goal":
+            pp["goals"] += 1
+        elif etype == "shot-on-goal":
+            pp["shots_on_goal"] += 1
 
     summary["home_team"] = home_team
     summary["away_team"] = away_team
@@ -180,6 +193,7 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Game xG context
 # ---------------------------------------------------------------------------
+
 
 def get_game_xg(game_id: int) -> list:
     """Returns xG data for a game by situation."""
@@ -192,11 +206,11 @@ def get_game_xg(game_id: int) -> list:
     )
     return [
         {
-            "team":      r["team"],
+            "team": r["team"],
             "situation": r["situation"],
-            "xgf":       float(r["xgf"])     if r.get("xgf")     is not None else None,
-            "xga":       float(r["xga"])     if r.get("xga")     is not None else None,
-            "xgf_pct":   float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
+            "xgf": float(r["xgf"]) if r.get("xgf") is not None else None,
+            "xga": float(r["xga"]) if r.get("xga") is not None else None,
+            "xgf_pct": float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
         }
         for r in rows
     ]
@@ -205,6 +219,7 @@ def get_game_xg(game_id: int) -> list:
 # ---------------------------------------------------------------------------
 # Goal scorers context
 # ---------------------------------------------------------------------------
+
 
 def get_goal_scorers(game_id: int) -> list:
     """
@@ -233,29 +248,27 @@ def get_goal_scorers(game_id: int) -> list:
                 player_ids.add(r[field])
 
     players = (
-        supabase.table("players")
-        .select("id, name")
-        .in_("id", list(player_ids))
-        .execute()
-        .data
+        supabase.table("players").select("id, name").in_("id", list(player_ids)).execute().data
     )
     name_map = {p["id"]: p["name"] for p in players}
 
     result = []
     for r in rows:
         sit = decode_situation(r.get("situation_code", ""))
-        result.append({
-            "period":           r["period"],
-            "time":             r["time_in_period"],
-            "team":             r["team"],
-            "scorer":           name_map.get(r["scorer_id"], "Unknown"),
-            "assist1":          name_map.get(r["assist1_id"]) if r.get("assist1_id") else None,
-            "assist2":          name_map.get(r["assist2_id"]) if r.get("assist2_id") else None,
-            "situation":        sit,
-            "shot_type":        r.get("shot_type"),
-            "home_score_after": r.get("home_score"),
-            "away_score_after": r.get("away_score"),
-        })
+        result.append(
+            {
+                "period": r["period"],
+                "time": r["time_in_period"],
+                "team": r["team"],
+                "scorer": name_map.get(r["scorer_id"], "Unknown"),
+                "assist1": name_map.get(r["assist1_id"]) if r.get("assist1_id") else None,
+                "assist2": name_map.get(r["assist2_id"]) if r.get("assist2_id") else None,
+                "situation": sit,
+                "shot_type": r.get("shot_type"),
+                "home_score_after": r.get("home_score"),
+                "away_score_after": r.get("away_score"),
+            }
+        )
     return result
 
 
@@ -263,14 +276,16 @@ def get_goal_scorers(game_id: int) -> list:
 # Player season context
 # ---------------------------------------------------------------------------
 
-def get_player_context(team: str = None, season: int = None, top_n: int = 12,
-                        min_gp: int = 5) -> list:
+
+def get_player_context(
+    team: str = None, season: int = None, top_n: int = 12, min_gp: int = 5
+) -> list:
     """
     Returns top_n players by points for a team with key stats and RAPM.
     min_gp filters out players who barely appeared (traded in/out early).
     Used for scouting and prediction context.
     """
-    team   = team or PRIMARY_TEAM
+    team = team or PRIMARY_TEAM
     season = season or NHL_SEASON
 
     rows = (
@@ -292,50 +307,50 @@ def get_player_context(team: str = None, season: int = None, top_n: int = 12,
         .execute()
         .data
     )
-     
+
     if not rows:
         return []
 
     # Fetch player names
     player_ids = [r["player_id"] for r in rows]
     players = (
-        supabase.table("players")
-        .select("id, name, position")
-        .in_("id", player_ids)
-        .execute()
-        .data
+        supabase.table("players").select("id, name, position").in_("id", player_ids).execute().data
     )
     name_map = {p["id"]: {"name": p["name"], "position": p["position"]} for p in players}
 
     result = []
     for r in rows:
-        pid  = r["player_id"]
+        pid = r["player_id"]
         info = name_map.get(pid, {"name": f"Player {pid}", "position": "?"})
-        result.append({
-            "name":           info["name"],
-            "position":       info["position"],
-            "games_played":   r.get("games_played"),
-            "goals":          r.get("goals"),
-            "assists":        r.get("assists"),
-            "points":         r.get("points"),
-            "rapm":           float(r["rapm"]) if r.get("rapm") is not None else None,
-            "war":            float(r["war"])  if r.get("war")  is not None else None,
-            "pct_ev_off":     r.get("pct_ev_off"),
-            "pct_ev_def":     r.get("pct_ev_def"),
-            "pct_finishing":  r.get("pct_finishing"),
-            "pct_competition":r.get("pct_competition"),
-            "goals_per60":    float(r["goals_per60"])  if r.get("goals_per60")  is not None else None,
-            "a1_per60":       float(r["a1_per60"])     if r.get("a1_per60")     is not None else None,
-            "xgf_per60":      float(r["xgf_per60"])    if r.get("xgf_per60")   is not None else None,
-            "xga_per60":      float(r["xga_per60"])    if r.get("xga_per60")   is not None else None,
-            "pp_goals":       r.get("pp_goals"),
-            "pp_points":      r.get("pp_points"),
-            "toi_per_game":   _fmt_toi(r.get("toi_per_game")),
-            "hits":           r.get("hits"),
-            "blocked_shots":  r.get("blocked_shots"),
-            "takeaways":      r.get("takeaways"),
-            "giveaways":      r.get("giveaways"),
-        })
+        result.append(
+            {
+                "name": info["name"],
+                "position": info["position"],
+                "games_played": r.get("games_played"),
+                "goals": r.get("goals"),
+                "assists": r.get("assists"),
+                "points": r.get("points"),
+                "rapm": float(r["rapm"]) if r.get("rapm") is not None else None,
+                "war": float(r["war"]) if r.get("war") is not None else None,
+                "pct_ev_off": r.get("pct_ev_off"),
+                "pct_ev_def": r.get("pct_ev_def"),
+                "pct_finishing": r.get("pct_finishing"),
+                "pct_competition": r.get("pct_competition"),
+                "goals_per60": float(r["goals_per60"])
+                if r.get("goals_per60") is not None
+                else None,
+                "a1_per60": float(r["a1_per60"]) if r.get("a1_per60") is not None else None,
+                "xgf_per60": float(r["xgf_per60"]) if r.get("xgf_per60") is not None else None,
+                "xga_per60": float(r["xga_per60"]) if r.get("xga_per60") is not None else None,
+                "pp_goals": r.get("pp_goals"),
+                "pp_points": r.get("pp_points"),
+                "toi_per_game": _fmt_toi(r.get("toi_per_game")),
+                "hits": r.get("hits"),
+                "blocked_shots": r.get("blocked_shots"),
+                "takeaways": r.get("takeaways"),
+                "giveaways": r.get("giveaways"),
+            }
+        )
     return result
 
 
@@ -378,7 +393,7 @@ def get_active_goalies(game_id: int) -> dict:
     goalie_by_team = {}
     for r in rows:
         shooting_team = r["team"]
-        goalie_id     = r["goalie_id"]
+        goalie_id = r["goalie_id"]
         defending_team = home if shooting_team == away else away
         if defending_team not in goalie_by_team:
             goalie_by_team[defending_team] = set()
@@ -391,13 +406,7 @@ def get_active_goalies(game_id: int) -> dict:
     if not all_ids:
         return {}
 
-    players = (
-        supabase.table("players")
-        .select("id, name")
-        .in_("id", list(all_ids))
-        .execute()
-        .data
-    )
+    players = supabase.table("players").select("id, name").in_("id", list(all_ids)).execute().data
     name_map = {p["id"]: p["name"] for p in players}
 
     return {
@@ -424,13 +433,15 @@ def get_playoff_series_context(game_id: int, home_team: str, away_team: str) -> 
     if not game_row or game_row[0].get("game_type") != 3:
         return None
 
-    season    = game_row[0]["season"]
+    season = game_row[0]["season"]
     game_date = game_row[0]["game_date"]
 
     # All playoff games between these two teams this season up to and including this one
     series_games = (
         supabase.table("game_log")
-        .select("game_id, game_date, home_team, away_team, home_score, away_score, team_score, opp_score, team")
+        .select(
+            "game_id, game_date, home_team, away_team, home_score, away_score, team_score, opp_score, team"
+        )
         .eq("season", season)
         .eq("game_type", 3)
         .eq("home_team", home_team)
@@ -445,19 +456,21 @@ def get_playoff_series_context(game_id: int, home_team: str, away_team: str) -> 
     if not series_games:
         return None
 
-    game_number   = len(series_games)
-    home_wins     = sum(1 for g in series_games[:-1] if g["home_score"] > g["away_score"])
-    away_wins     = sum(1 for g in series_games[:-1] if g["away_score"] > g["home_score"])
+    game_number = len(series_games)
+    home_wins = sum(1 for g in series_games[:-1] if g["home_score"] > g["away_score"])
+    away_wins = sum(1 for g in series_games[:-1] if g["away_score"] > g["home_score"])
 
     return {
         "game_number": game_number,
-        "home_team":   home_team,
-        "away_team":   away_team,
-        "home_wins":   home_wins,
-        "away_wins":   away_wins,
-        "series_label": f"Game {game_number} — {away_team} leads {away_wins}-{home_wins}" if away_wins > home_wins
-                        else f"Game {game_number} — {home_team} leads {home_wins}-{away_wins}" if home_wins > away_wins
-                        else f"Game {game_number} — Series tied {home_wins}-{away_wins}",
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_wins": home_wins,
+        "away_wins": away_wins,
+        "series_label": f"Game {game_number} — {away_team} leads {away_wins}-{home_wins}"
+        if away_wins > home_wins
+        else f"Game {game_number} — {home_team} leads {home_wins}-{away_wins}"
+        if home_wins > away_wins
+        else f"Game {game_number} — Series tied {home_wins}-{away_wins}",
     }
 
 
@@ -465,13 +478,15 @@ def get_playoff_series_context(game_id: int, home_team: str, away_team: str) -> 
 # Zone starts context
 # ---------------------------------------------------------------------------
 
-def get_zone_starts_context(game_id: int = None, team: str = None,
-                             season: int = None, top_n: int = 12) -> list:
+
+def get_zone_starts_context(
+    game_id: int = None, team: str = None, season: int = None, top_n: int = 12
+) -> list:
     """
     If game_id provided: zone starts for that specific game.
     Otherwise: aggregated season zone starts for a team's top players.
     """
-    team   = team or PRIMARY_TEAM
+    team = team or PRIMARY_TEAM
     season = season or NHL_SEASON
 
     query = (
@@ -500,13 +515,7 @@ def get_zone_starts_context(game_id: int = None, team: str = None,
 
     # Fetch names
     player_ids = list(agg.keys())
-    players = (
-        supabase.table("players")
-        .select("id, name")
-        .in_("id", player_ids)
-        .execute()
-        .data
-    )
+    players = supabase.table("players").select("id, name").in_("id", player_ids).execute().data
     name_map = {p["id"]: p["name"] for p in players}
 
     result = []
@@ -514,14 +523,16 @@ def get_zone_starts_context(game_id: int = None, team: str = None,
         total = counts["oz"] + counts["dz"] + counts["nz"]
         if total == 0:
             continue
-        result.append({
-            "name":      name_map.get(pid, f"Player {pid}"),
-            "oz_starts": counts["oz"],
-            "dz_starts": counts["dz"],
-            "nz_starts": counts["nz"],
-            "oz_pct":    round(counts["oz"] / total * 100, 1),
-            "dz_pct":    round(counts["dz"] / total * 100, 1),
-        })
+        result.append(
+            {
+                "name": name_map.get(pid, f"Player {pid}"),
+                "oz_starts": counts["oz"],
+                "dz_starts": counts["dz"],
+                "nz_starts": counts["nz"],
+                "oz_pct": round(counts["oz"] / total * 100, 1),
+                "dz_pct": round(counts["dz"] / total * 100, 1),
+            }
+        )
 
     # Sort by total starts descending, return top_n
     result.sort(key=lambda x: x["oz_starts"] + x["dz_starts"] + x["nz_starts"], reverse=True)
@@ -531,6 +542,7 @@ def get_zone_starts_context(game_id: int = None, team: str = None,
 # ---------------------------------------------------------------------------
 # Recent form context
 # ---------------------------------------------------------------------------
+
 
 def get_recent_form(team: str = None, n_games: int = 10) -> list:
     """Returns last n_games results for a team."""
@@ -548,15 +560,17 @@ def get_recent_form(team: str = None, n_games: int = 10) -> list:
 
     result = []
     for r in rows:
-        result.append({
-            "game_date": r["game_date"],
-            "opponent":  r["opponent"],
-            "team_score": r["team_score"],
-            "opp_score":  r["opp_score"],
-            "result":     "W" if r["team_score"] > r["opp_score"] else "L",
-            "game_type":  "playoff" if r["game_type"] == 3 else "regular",
-            "went_to_ot": r["period_end"] > 3,
-        })
+        result.append(
+            {
+                "game_date": r["game_date"],
+                "opponent": r["opponent"],
+                "team_score": r["team_score"],
+                "opp_score": r["opp_score"],
+                "result": "W" if r["team_score"] > r["opp_score"] else "L",
+                "game_type": "playoff" if r["game_type"] == 3 else "regular",
+                "went_to_ot": r["period_end"] > 3,
+            }
+        )
     return result
 
 
@@ -564,42 +578,48 @@ def get_recent_form(team: str = None, n_games: int = 10) -> list:
 # Full game summary context (combines all of the above)
 # ---------------------------------------------------------------------------
 
+
 def build_game_summary_context(game_id: int, team: str = None) -> dict:
     """
     Assembles all context needed to generate a post-game summary.
     Returns a single dict passed directly to the AI prompt.
     """
-    team    = team or PRIMARY_TEAM
-    game    = get_game_context(game_id, team=team)
-    shots   = get_shot_context(game_id, team=team)
-    goals   = get_goal_scorers(game_id)
-    xg      = get_game_xg(game_id)
+    team = team or PRIMARY_TEAM
+    game = get_game_context(game_id, team=team)
+    shots = get_shot_context(game_id, team=team)
+    goals = get_goal_scorers(game_id)
+    xg = get_game_xg(game_id)
     players = get_player_context(team=team, min_gp=10)  # min 10 GP filters departed players
-    zones   = get_zone_starts_context(game_id=game_id, team=team)
-    form    = get_recent_form(team=team, n_games=5)
+    zones = get_zone_starts_context(game_id=game_id, team=team)
+    form = get_recent_form(team=team, n_games=5)
     goalies = get_active_goalies(game_id)
-    series  = get_playoff_series_context(
-        game_id,
-        home_team=game.get("home_team", ""),
-        away_team=game.get("away_team", ""),
-    ) if game.get("game_type") == "playoff" else None
+    series = (
+        get_playoff_series_context(
+            game_id,
+            home_team=game.get("home_team", ""),
+            away_team=game.get("away_team", ""),
+        )
+        if game.get("game_type") == "playoff"
+        else None
+    )
 
     return {
-        "game":    game,
-        "shots":   shots,
-        "goals":   goals,
-        "xg":      xg,
+        "game": game,
+        "shots": shots,
+        "goals": goals,
+        "xg": xg,
         "players": players,
-        "zones":   zones,
-        "form":    form,
-        "goalies": goalies,   # { team: [goalie_name, ...] }
-        "series":  series,    # playoff series context or None
+        "zones": zones,
+        "form": form,
+        "goalies": goalies,  # { team: [goalie_name, ...] }
+        "series": series,  # playoff series context or None
     }
 
 
 # ---------------------------------------------------------------------------
 # Full prediction context (pre-game)
 # ---------------------------------------------------------------------------
+
 
 def build_prediction_context(home_team: str, away_team: str) -> dict:
     """
@@ -608,20 +628,20 @@ def build_prediction_context(home_team: str, away_team: str) -> dict:
     """
     home_players = get_player_context(team=home_team)
     away_players = get_player_context(team=away_team)
-    home_zones   = get_zone_starts_context(team=home_team)
-    away_zones   = get_zone_starts_context(team=away_team)
-    home_form    = get_recent_form(team=home_team, n_games=10)
-    away_form    = get_recent_form(team=away_team, n_games=10)
+    home_zones = get_zone_starts_context(team=home_team)
+    away_zones = get_zone_starts_context(team=away_team)
+    home_form = get_recent_form(team=home_team, n_games=10)
+    away_form = get_recent_form(team=away_team, n_games=10)
 
     return {
-        "home_team":    home_team,
-        "away_team":    away_team,
+        "home_team": home_team,
+        "away_team": away_team,
         "home_players": home_players,
         "away_players": away_players,
-        "home_zones":   home_zones,
-        "away_zones":   away_zones,
-        "home_form":    home_form,
-        "away_form":    away_form,
+        "home_zones": home_zones,
+        "away_zones": away_zones,
+        "home_form": home_form,
+        "away_form": away_form,
     }
 
 
@@ -640,6 +660,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # Line combinations context
 # ---------------------------------------------------------------------------
+
 
 def get_line_combos(team: str, season: int = None) -> dict:
     """Returns inferred forward lines and D pairs for a team."""
@@ -669,10 +690,10 @@ def get_line_combos(team: str, season: int = None) -> dict:
         players = [p for p in players if p["name"]]
 
         unit = {
-            "rank":     r["rank"],
-            "players":  players,
-            "toiMins":  round(r["toi_secs"] / 60) if r.get("toi_secs") else None,
-            "xgfPct":   float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
+            "rank": r["rank"],
+            "players": players,
+            "toiMins": round(r["toi_secs"] / 60) if r.get("toi_secs") else None,
+            "xgfPct": float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
         }
         if r["unit_type"] == "F":
             lines.append(unit)
@@ -685,6 +706,7 @@ def get_line_combos(team: str, season: int = None) -> dict:
 # ---------------------------------------------------------------------------
 # Scouting blurbs context
 # ---------------------------------------------------------------------------
+
 
 def get_scouting_blurbs(team: str, season: int = None) -> dict:
     """Returns player_id -> scouting_text map for a team."""
@@ -704,6 +726,7 @@ def get_scouting_blurbs(team: str, season: int = None) -> dict:
 # Full matchup context (pre-game, line + player analysis)
 # ---------------------------------------------------------------------------
 
+
 def build_matchup_context(home_team: str, away_team: str) -> dict:
     """
     Assembles line combo + player scouting context for matchup analysis.
@@ -711,18 +734,18 @@ def build_matchup_context(home_team: str, away_team: str) -> dict:
     """
     home_players = get_player_context(team=home_team)
     away_players = get_player_context(team=away_team)
-    home_lines   = get_line_combos(team=home_team)
-    away_lines   = get_line_combos(team=away_team)
-    home_blurbs  = get_scouting_blurbs(team=home_team)
-    away_blurbs  = get_scouting_blurbs(team=away_team)
+    home_lines = get_line_combos(team=home_team)
+    away_lines = get_line_combos(team=away_team)
+    home_blurbs = get_scouting_blurbs(team=home_team)
+    away_blurbs = get_scouting_blurbs(team=away_team)
 
     return {
-        "home_team":    home_team,
-        "away_team":    away_team,
+        "home_team": home_team,
+        "away_team": away_team,
         "home_players": home_players,
         "away_players": away_players,
-        "home_lines":   home_lines,
-        "away_lines":   away_lines,
-        "home_blurbs":  home_blurbs,
-        "away_blurbs":  away_blurbs,
+        "home_lines": home_lines,
+        "away_lines": away_lines,
+        "home_blurbs": home_blurbs,
+        "away_blurbs": away_blurbs,
     }

@@ -21,7 +21,7 @@ Usage:
 import argparse
 import os
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import combinations
 
 from dotenv import load_dotenv
@@ -32,33 +32,63 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON   = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 
 ALL_TEAMS = [
-    "ANA", "BOS", "BUF", "CAR", "CBJ", "CGY", "CHI", "COL",
-    "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NJD",
-    "NSH", "NYI", "NYR", "OTT", "PHI", "PIT", "SEA", "SJS",
-    "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WPG", "WSH",
+    "ANA",
+    "BOS",
+    "BUF",
+    "CAR",
+    "CBJ",
+    "CGY",
+    "CHI",
+    "COL",
+    "DAL",
+    "DET",
+    "EDM",
+    "FLA",
+    "LAK",
+    "MIN",
+    "MTL",
+    "NJD",
+    "NSH",
+    "NYI",
+    "NYR",
+    "OTT",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SJS",
+    "STL",
+    "TBL",
+    "TOR",
+    "UTA",
+    "VAN",
+    "VGK",
+    "WPG",
+    "WSH",
 ]
 
 # Situation code format: {away_skaters}{away_goalie}{home_skaters}{home_goalie}
 # PP for home team: away has 4 skaters, home has 5 → code starts with '14' and ends in '51'
 # PP for away team: away has 5 skaters, home has 4 → code starts with '15' and ends in '41'
 # We also include 6v4, 6v5, etc. edge cases
-HOME_PP_CODES = {'1451', '1461', '1351', '1361'}  # home team on PP
-AWAY_PP_CODES = {'1541', '1641', '1531', '1631'}  # away team on PP
+HOME_PP_CODES = {"1451", "1461", "1351", "1361"}  # home team on PP
+AWAY_PP_CODES = {"1541", "1641", "1531", "1631"}  # away team on PP
 
-MIN_PP_SHOTS     = 10    # minimum PP shots to attempt unit inference for a team
-MIN_UNIT_SHOTS   = 5     # minimum shots a combination must appear in to be a unit
-MIN_OVERLAP      = 3     # minimum players overlapping to count a combo
-PP_UNIT_SIZE     = 5     # forwards + D on PP
-PK_UNIT_SIZE     = 4     # forwards + D on PK
+MIN_PP_SHOTS = 10  # minimum PP shots to attempt unit inference for a team
+MIN_UNIT_SHOTS = 5  # minimum shots a combination must appear in to be a unit
+MIN_OVERLAP = 3  # minimum players overlapping to count a combo
+PP_UNIT_SIZE = 5  # forwards + D on PP
+PK_UNIT_SIZE = 4  # forwards + D on PK
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY,
-                         options=ClientOptions(postgrest_client_timeout=60))
+supabase = create_client(
+    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=60)
+)
 
 
 # ── Data fetchers ─────────────────────────────────────────────────────────────
+
 
 def fetch_game_home_away(season: int) -> dict[int, tuple[str, str]]:
     """Returns {game_id: (home_team, away_team)} for all games in the season."""
@@ -72,15 +102,14 @@ def fetch_game_home_away(season: int) -> dict[int, tuple[str, str]]:
         .data
     )
     seen = {}
-    for r in (rows or []):
+    for r in rows or []:
         gid = r["game_id"]
         if gid not in seen and r.get("home_team") and r.get("away_team"):
             seen[gid] = (r["home_team"], r["away_team"])
     return seen
 
 
-def fetch_pp_shots_for_team(team: str, season: int,
-                             game_home_away: dict) -> list[dict]:
+def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> list[dict]:
     """
     Returns PP shot events where `team` is the team on the power play.
     Each row has: game_id, period, time_in_period.
@@ -110,25 +139,25 @@ def fetch_pp_shots_for_team(team: str, season: int,
     # Filter to PP shots where this team is on the power play
     pp_shots = []
     for r in rows:
-        gid  = r["game_id"]
+        gid = r["game_id"]
         code = r.get("situation_code", "")
-        ha   = game_home_away.get(gid)
+        ha = game_home_away.get(gid)
         if not ha:
             continue
         home, away = ha
 
         is_team_pp = False
-        if code in HOME_PP_CODES and home == team:
-            is_team_pp = True
-        elif code in AWAY_PP_CODES and away == team:
+        if (code in HOME_PP_CODES and home == team) or (code in AWAY_PP_CODES and away == team):
             is_team_pp = True
 
         if is_team_pp:
-            pp_shots.append({
-                "game_id":        gid,
-                "period":         r["period"],
-                "time_in_period": r["time_in_period"],
-            })
+            pp_shots.append(
+                {
+                    "game_id": gid,
+                    "period": r["period"],
+                    "time_in_period": r["time_in_period"],
+                }
+            )
 
     return pp_shots
 
@@ -172,6 +201,7 @@ def fetch_existing_manual_units(team: str, season: int) -> set[tuple]:
 
 # ── Inference logic ───────────────────────────────────────────────────────────
 
+
 def build_shift_index(shifts: list[dict]) -> dict:
     """
     Build a nested index: {game_id: {period: [(player_id, start, end)]}}
@@ -196,7 +226,7 @@ def time_to_secs(t) -> int:
     if isinstance(t, int):
         return t
     try:
-        parts = str(t).split(':')
+        parts = str(t).split(":")
         if len(parts) == 2:
             return int(parts[0]) * 60 + int(parts[1])
         return int(t)
@@ -204,18 +234,19 @@ def time_to_secs(t) -> int:
         return 0
 
 
-def players_on_ice_at(shift_idx: dict, game_id: int, period: int,
-                       time_secs: int) -> list[int]:
+def players_on_ice_at(shift_idx: dict, game_id: int, period: int, time_secs: int) -> list[int]:
     """Returns player IDs on ice at a specific game_id + period + time."""
     shifts = shift_idx.get(game_id, {}).get(period, [])
     return [
-        pid for pid, start, end in shifts
+        pid
+        for pid, start, end in shifts
         if start is not None and end is not None and start <= time_secs <= end
     ]
 
 
-def infer_units(pp_shots: list[dict], shift_idx: dict,
-                unit_size: int) -> tuple[list[int] | None, list[int] | None]:
+def infer_units(
+    pp_shots: list[dict], shift_idx: dict, unit_size: int
+) -> tuple[list[int] | None, list[int] | None]:
     """
     Given PP shot events and a shift index, infer the two most common unit
     player combinations.
@@ -232,8 +263,7 @@ def infer_units(pp_shots: list[dict], shift_idx: dict,
 
     for shot in pp_shots:
         players = players_on_ice_at(
-            shift_idx, shot["game_id"], shot["period"],
-            time_to_secs(shot["time_in_period"])
+            shift_idx, shot["game_id"], shot["period"], time_to_secs(shot["time_in_period"])
         )
         if len(players) < MIN_OVERLAP:
             continue
@@ -251,8 +281,7 @@ def infer_units(pp_shots: list[dict], shift_idx: dict,
     # Find the tightest cluster: players that appear together most
     # Strategy: seed unit1 with the single most common player, then add
     # the player with the highest co-occurrence with the current unit
-    def build_unit(seed_players: list[int], exclude: set[int],
-                   size: int) -> list[int] | None:
+    def build_unit(seed_players: list[int], exclude: set[int], size: int) -> list[int] | None:
         remaining = [p for p in seed_players if p not in exclude]
         if not remaining:
             return None
@@ -262,10 +291,7 @@ def infer_units(pp_shots: list[dict], shift_idx: dict,
             # Pick the player with highest average co-occurrence with current unit
             best_pid = max(
                 remaining,
-                key=lambda p: sum(
-                    combo_counter.get(tuple(sorted([p, u])), 0)
-                    for u in unit
-                )
+                key=lambda p: sum(combo_counter.get(tuple(sorted([p, u])), 0) for u in unit),
             )
             unit.append(best_pid)
             remaining.remove(best_pid)
@@ -283,30 +309,32 @@ def infer_units(pp_shots: list[dict], shift_idx: dict,
 
 # ── DB write ──────────────────────────────────────────────────────────────────
 
-def upsert_unit(team: str, season: int, unit_type: str,
-                unit_number: int, player_ids: list[int]) -> None:
+
+def upsert_unit(
+    team: str, season: int, unit_type: str, unit_number: int, player_ids: list[int]
+) -> None:
     supabase.table("special_teams_units").upsert(
         {
-            "team":        team,
-            "season":      season,
-            "unit_type":   unit_type,
+            "team": team,
+            "season": season,
+            "unit_type": unit_type,
             "unit_number": unit_number,
-            "player_ids":  player_ids,
-            "source":      "inferred",
-            "updated_at":  datetime.now(timezone.utc).isoformat(),
+            "player_ids": player_ids,
+            "source": "inferred",
+            "updated_at": datetime.now(UTC).isoformat(),
         },
-        on_conflict="team,season,unit_type,unit_number"
+        on_conflict="team,season,unit_type,unit_number",
     ).execute()
 
 
 # ── Core runner ───────────────────────────────────────────────────────────────
 
-def run_team(team: str, season: int, game_home_away: dict,
-             dry_run: bool = False) -> None:
+
+def run_team(team: str, season: int, game_home_away: dict, dry_run: bool = False) -> None:
     print(f"  {team}:", end=" ", flush=True)
 
     manual_units = fetch_existing_manual_units(team, season)
-    shifts       = fetch_shifts_for_team(team, season)
+    shifts = fetch_shifts_for_team(team, season)
     if not shifts:
         print("no shifts — skip")
         return
@@ -332,26 +360,27 @@ def run_team(team: str, season: int, game_home_away: dict,
         .eq("car_game", True)
         .not_.is_("situation_code", "null")
         .execute()
-        .data or []
+        .data
+        or []
     ):
-        gid  = r_shot["game_id"]
+        gid = r_shot["game_id"]
         code = r_shot.get("situation_code", "")
-        ha   = game_home_away.get(gid)
+        ha = game_home_away.get(gid)
         if not ha:
             continue
         home, away = ha
         # Team is on PK when opponent is on PP
         is_team_pk = False
-        if code in HOME_PP_CODES and away == team:
-            is_team_pk = True
-        elif code in AWAY_PP_CODES and home == team:
+        if (code in HOME_PP_CODES and away == team) or (code in AWAY_PP_CODES and home == team):
             is_team_pk = True
         if is_team_pk:
-            pk_shots.append({
-                "game_id":        gid,
-                "period":         r_shot["period"],
-                "time_in_period": r_shot["time_in_period"],
-            })
+            pk_shots.append(
+                {
+                    "game_id": gid,
+                    "period": r_shot["period"],
+                    "time_in_period": r_shot["time_in_period"],
+                }
+            )
 
     pk1_ids, pk2_ids = infer_units(pk_shots, shift_idx, PK_UNIT_SIZE)
 
@@ -399,8 +428,8 @@ def run(season: int = None, team: str = None, dry_run: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Infer PP/PK unit compositions")
-    parser.add_argument("--season",  type=int, default=None)
-    parser.add_argument("--team",    default=None)
+    parser.add_argument("--season", type=int, default=None)
+    parser.add_argument("--team", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     run(season=args.season, team=args.team, dry_run=args.dry_run)

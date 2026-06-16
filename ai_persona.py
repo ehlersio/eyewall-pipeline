@@ -4,7 +4,6 @@ Defines the Sticks persona and all prompt templates used by the AI pipeline.
 No model calls happen here — just strings and formatters.
 """
 
-import json
 
 # ---------------------------------------------------------------------------
 # Persona — system prompt
@@ -19,7 +18,7 @@ Your tone is like a knowledgeable buddy texting you about the game — casual, c
 and fun. You give real analysis backed by the data you're given. You'd rather say less
 than get something wrong. Always refer to teams by their abbreviation or city name —
 never use "we", "us", or "our" since you're an analyst covering all 32 teams, not a
-fan of any one team. 
+fan of any one team.
 
 Use hockey slang naturally, the way a real fan would — sparingly, not in every sentence.
 Never force it. If it doesn't fit, don't use it.
@@ -78,15 +77,16 @@ Formatting rules:
 # Context formatters — turn dicts into readable prompt input
 # ---------------------------------------------------------------------------
 
+
 def format_game_context(ctx: dict) -> str:
     """Formats the game summary context dict into a readable prompt block."""
-    game    = ctx.get("game", {})
-    shots   = ctx.get("shots", {})
+    game = ctx.get("game", {})
+    shots = ctx.get("shots", {})
     players = ctx.get("players", [])
-    zones   = ctx.get("zones", [])
-    form    = ctx.get("form", [])
+    zones = ctx.get("zones", [])
+    form = ctx.get("form", [])
     goalies = ctx.get("goalies", {})
-    series  = ctx.get("series")
+    series = ctx.get("series")
 
     lines = []
 
@@ -100,29 +100,35 @@ def format_game_context(ctx: dict) -> str:
     team = game.get("primary_team", "")
     is_home = game.get("is_home", False)
     team_score = game.get("team_score", 0)
-    opp_score  = game.get("opp_score", 0)
+    opp_score = game.get("opp_score", 0)
     home_score = team_score if is_home else opp_score
     away_score = opp_score if is_home else team_score
     lines.append(f"Final score: {away} {away_score} — {home} {home_score}")
     lines.append(f"Result for {team}: {game.get('result', '').upper()}")
     lines.append(f"Game type: {game.get('game_type')}")
-    if game.get('period_end', 3) > 3:
+    if game.get("period_end", 3) > 3:
         lines.append(f"Went to overtime (ended period {game.get('period_end')})")
 
     # Playoff series context — CRITICAL for accurate game number references
     if series:
-        lines.append(f"\nPLAYOFF SERIES CONTEXT")
+        lines.append("\nPLAYOFF SERIES CONTEXT")
         lines.append(f"{series['series_label']}")
         lines.append(f"This is Game {series['game_number']} of this series.")
-        lines.append(f"Series record entering this game: {away} {series['away_wins']} — {home} {series['home_wins']}")
-        lines.append("IMPORTANT: Do not describe this as a series opener or Game 1 unless game_number = 1.")
+        lines.append(
+            f"Series record entering this game: {away} {series['away_wins']} — {home} {series['home_wins']}"
+        )
+        lines.append(
+            "IMPORTANT: Do not describe this as a series opener or Game 1 unless game_number = 1."
+        )
 
     # Goalies who actually played
     if goalies:
-        lines.append(f"\nGOALIES IN NET (confirmed from shot data — only name these goalies)")
+        lines.append("\nGOALIES IN NET (confirmed from shot data — only name these goalies)")
         for gt, names in goalies.items():
             lines.append(f"  {gt}: {', '.join(names)}")
-        lines.append("IMPORTANT: Do not name any other goalie. Only reference goalies listed above.")
+        lines.append(
+            "IMPORTANT: Do not name any other goalie. Only reference goalies listed above."
+        )
 
     # Advanced stats if available
     if game.get("home_cf_pct") is not None:
@@ -130,7 +136,9 @@ def format_game_context(ctx: dict) -> str:
     if game.get("pp_goals") is not None:
         lines.append(f"Power play: {game.get('pp_goals')}/{game.get('pp_opps')}")
     if game.get("pk_goals_against") is not None:
-        lines.append(f"Penalty kill: {game.get('pk_opps') - game.get('pk_goals_against')}/{game.get('pk_opps')}")
+        lines.append(
+            f"Penalty kill: {game.get('pk_opps') - game.get('pk_goals_against')}/{game.get('pk_opps')}"
+        )
 
     # Shot summary
     lines.append("\nSHOT SUMMARY")
@@ -162,8 +170,10 @@ def format_game_context(ctx: dict) -> str:
         )
         for g in goals:
             assists = []
-            if g.get("assist1"): assists.append(g["assist1"])
-            if g.get("assist2"): assists.append(g["assist2"])
+            if g.get("assist1"):
+                assists.append(g["assist1"])
+            if g.get("assist2"):
+                assists.append(g["assist2"])
             assist_str = f" (assists: {', '.join(assists)})" if assists else " (unassisted)"
             sit_str = f" [{g['situation']}]" if g.get("situation") != "5v5" else ""
             lines.append(
@@ -178,22 +188,22 @@ def format_game_context(ctx: dict) -> str:
         for x in xg:
             lines.append(
                 f"  {x['team']} {x['situation']}: xGF {x['xgf']:.2f} | xGA {x['xga']:.2f} | "
-                f"xG% {x['xgf_pct']*100:.1f}%"
+                f"xG% {x['xgf_pct'] * 100:.1f}%"
             )
 
     # Player stats — background context only, NOT active roster for this game
     # Extract names from goals and zones for grounding
     goal_names = set()
     for g in goals:
-        if g.get("scorer"):  goal_names.add(g["scorer"])
-        if g.get("assist1"): goal_names.add(g["assist1"])
-        if g.get("assist2"): goal_names.add(g["assist2"])
-    zone_names = {z["name"] for z in zones if z.get("name")}
+        if g.get("scorer"):
+            goal_names.add(g["scorer"])
+        if g.get("assist1"):
+            goal_names.add(g["assist1"])
+        if g.get("assist2"):
+            goal_names.add(g["assist2"])
     goalie_names = set()
     for names in goalies.values():
         goalie_names.update(names)
-    allowed_names = goal_names | zone_names | goalie_names
-
     lines.append(
         f"\n{team} SEASON STATS (background context — do NOT use to invent game details)\n"
         f"These are season averages, NOT a roster of players who appeared in this game.\n"
@@ -211,11 +221,10 @@ def format_game_context(ctx: dict) -> str:
 
     # Zone starts — these players DID play in this game
     if zones:
-        lines.append(f"\nZONE STARTS (this game — these players confirmed on ice)")
+        lines.append("\nZONE STARTS (this game — these players confirmed on ice)")
         for z in zones:
             lines.append(
-                f"{z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}% | "
-                f"NZ starts {z['nz_starts']}"
+                f"{z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}% | NZ starts {z['nz_starts']}"
             )
 
     # Recent form
@@ -237,8 +246,8 @@ def format_prediction_context(ctx: dict) -> str:
     for side in ("home", "away"):
         team = ctx.get(f"{side}_team", "")
         players = ctx.get(f"{side}_players", [])
-        zones   = ctx.get(f"{side}_zones", [])
-        form    = ctx.get(f"{side}_form", [])
+        zones = ctx.get(f"{side}_zones", [])
+        form = ctx.get(f"{side}_form", [])
 
         lines.append(f"{team.upper()} — {side.upper()}")
 
@@ -277,20 +286,24 @@ def format_prediction_context(ctx: dict) -> str:
 # Prompt builders
 # ---------------------------------------------------------------------------
 
+
 def build_game_summary_prompt(ctx: dict) -> str:
     formatted = format_game_context(ctx)
     game = ctx.get("game", {})
     team = game.get("primary_team", "CAR")
     goalies = ctx.get("goalies", {})
-    series  = ctx.get("series")
+    series = ctx.get("series")
 
     # Build explicit list of allowed player names for this game
     goals = ctx.get("goals", [])
     goal_names = set()
     for g in goals:
-        if g.get("scorer"):  goal_names.add(g["scorer"])
-        if g.get("assist1"): goal_names.add(g["assist1"])
-        if g.get("assist2"): goal_names.add(g["assist2"])
+        if g.get("scorer"):
+            goal_names.add(g["scorer"])
+        if g.get("assist1"):
+            goal_names.add(g["assist1"])
+        if g.get("assist2"):
+            goal_names.add(g["assist2"])
     zone_names = {z["name"] for z in ctx.get("zones", []) if z.get("name")}
     goalie_names = set()
     for names in goalies.values():
@@ -298,8 +311,12 @@ def build_game_summary_prompt(ctx: dict) -> str:
     allowed = goal_names | zone_names | goalie_names
 
     allowed_block = (
-        f"PLAYERS YOU MAY NAME IN THIS SUMMARY:\n"
-        + (("\n".join(f"  - {n}" for n in sorted(allowed))) if allowed else "  (none confirmed — use team abbreviations only)")
+        "PLAYERS YOU MAY NAME IN THIS SUMMARY:\n"
+        + (
+            ("\n".join(f"  - {n}" for n in sorted(allowed)))
+            if allowed
+            else "  (none confirmed — use team abbreviations only)"
+        )
         + "\nDo not name any other player. If you are unsure whether a player appeared, do not name them."
     )
 
@@ -314,7 +331,9 @@ def build_game_summary_prompt(ctx: dict) -> str:
     goalie_note = ""
     if goalies:
         parts = [f"{t}: {', '.join(ns)}" for t, ns in goalies.items()]
-        goalie_note = f"\nGoalies confirmed in net: {'; '.join(parts)}. Do not name any other goalie."
+        goalie_note = (
+            f"\nGoalies confirmed in net: {'; '.join(parts)}. Do not name any other goalie."
+        )
 
     return (
         f"Here is the data for a completed NHL game involving {team}:\n\n"
@@ -363,12 +382,12 @@ def format_matchup_context(ctx: dict) -> str:
         players = ctx.get(f"{side}_players", [])
 
         venue = "HOME" if side == "home" else "AWAY"
-        lines.append(f"\n{'='*40}")
+        lines.append(f"\n{'=' * 40}")
         lines.append(f"{team} ({venue})")
-        lines.append(f"{'='*40}")
+        lines.append(f"{'=' * 40}")
 
         fwd_lines = combos.get("lines", [])
-        d_pairs   = combos.get("pairs", [])
+        d_pairs = combos.get("pairs", [])
 
         if fwd_lines:
             lines.append("Forward lines (inferred from shift data):")
@@ -394,7 +413,9 @@ def format_matchup_context(ctx: dict) -> str:
             for p in players[:6]:
                 rapm = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
                 xgf60 = f"xGF/60 {p['xgf_per60']:.2f}" if p.get("xgf_per60") is not None else ""
-                lines.append(f"  {p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A | {rapm} | {xgf60}")
+                lines.append(
+                    f"  {p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A | {rapm} | {xgf60}"
+                )
 
     return "\n".join(lines)
 
@@ -432,16 +453,17 @@ def build_game_card_prompt(ctx: dict) -> str:
     goalies = ctx.get("goalies", {})
     goal_names = set()
     for g in goals:
-        if g.get("scorer"):  goal_names.add(g["scorer"])
-        if g.get("assist1"): goal_names.add(g["assist1"])
+        if g.get("scorer"):
+            goal_names.add(g["scorer"])
+        if g.get("assist1"):
+            goal_names.add(g["assist1"])
     goalie_names = set()
     for names in goalies.values():
         goalie_names.update(names)
     allowed = goal_names | goalie_names
 
-    allowed_block = (
-        "Players you may name: "
-        + (", ".join(sorted(allowed)) if allowed else "none confirmed — use team names only")
+    allowed_block = "Players you may name: " + (
+        ", ".join(sorted(allowed)) if allowed else "none confirmed — use team names only"
     )
 
     return (

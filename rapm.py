@@ -22,22 +22,30 @@ Scope:
   - Minimum 150 minutes EV icetime across 3-season pool for display
   - League-wide shots and shifts (all 32 teams)
 """
+
 import math
 from collections import defaultdict
-from db import get_client, NHL_SEASON, PRIMARY_TEAM_ABBR
+
+from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 
 # -- Score-state adjustment weights (Macdonald 2012) -----------
 # Teams trailing outshooot; teams leading turtle.
 # Weights normalise for this bias.
 SCORE_WEIGHTS = {
-    -3: 0.817, -2: 0.847, -1: 0.906,
-     0: 1.000,
-     1: 1.097,  2: 1.166,  3: 1.227,
+    -3: 0.817,
+    -2: 0.847,
+    -1: 0.906,
+    0: 1.000,
+    1: 1.097,
+    2: 1.166,
+    3: 1.227,
 }
+
 
 def score_weight(score_diff: int) -> float:
     clamped = max(-3, min(3, score_diff))
     return SCORE_WEIGHTS[clamped]
+
 
 # -- xG proxy from shot danger ---------------------------------
 # MoneyPuck xG not stored per-event in shot_events.
@@ -45,25 +53,27 @@ def score_weight(score_diff: int) -> float:
 # Based on league-average MoneyPuck danger-zone xG values.
 # These are the values rapm.py uses as y (outcome per shot event).
 DANGER_XG = {
-    'high':   0.20,
-    'medium': 0.07,
-    'low':    0.03,
-    'goal':   1.00,   # actual goals always count as 1.0
+    "high": 0.20,
+    "medium": 0.07,
+    "low": 0.03,
+    "goal": 1.00,  # actual goals always count as 1.0
 }
+
 
 def shot_xg(event_type: str, x: int, y: int) -> float:
     """Approximate xG from shot location and event type."""
-    if event_type == 'goal':
+    if event_type == "goal":
         return 1.0
-    if event_type not in ('shot-on-goal', 'missed-shot', 'blocked-shot'):
+    if event_type not in ("shot-on-goal", "missed-shot", "blocked-shot"):
         return 0.0
     # Use distance from goal (NHL goal at x=89, centre y=0)
     dist = math.sqrt((abs(x) - 89) ** 2 + (y or 0) ** 2)
     if dist <= 15:
-        return DANGER_XG['high']
+        return DANGER_XG["high"]
     if dist <= 30:
-        return DANGER_XG['medium']
-    return DANGER_XG['low']
+        return DANGER_XG["medium"]
+    return DANGER_XG["low"]
+
 
 def fetch_all(client, table, select, filters: dict, page_size=1000):
     """Fetch all rows from a Supabase table, paginating past the 1000-row limit.
@@ -84,19 +94,21 @@ def fetch_all(client, table, select, filters: dict, page_size=1000):
         offset += page_size
     return all_rows
 
+
 def prior_season(season: int) -> int:
     """Return the season immediately before this one.
     e.g. 20252026 -> 20242025, 20242025 -> 20232024
     """
-    end_year   = season % 10000          # 2026
-    start_year = season // 10000         # 2025
+    end_year = season % 10000  # 2026
+    start_year = season // 10000  # 2025
     return (start_year - 1) * 10000 + (end_year - 1)  # 20242025
+
 
 def run(season: int = NHL_SEASON):
     try:
-        from sklearn.linear_model import Ridge
-        from scipy.sparse import lil_matrix
         import numpy as np
+        from scipy.sparse import lil_matrix
+        from sklearn.linear_model import Ridge
     except ImportError:
         print("  ERROR Missing dependencies. Run:")
         print("    pip install scikit-learn scipy --break-system-packages")
@@ -107,7 +119,7 @@ def run(season: int = NHL_SEASON):
 
     # -- Seasons to include in regression pool -----------------
     s1 = prior_season(prior_season(season))  # 2 years ago
-    s2 = prior_season(season)                # 1 year ago
+    s2 = prior_season(season)  # 1 year ago
     POOL_SEASONS = [s for s in [s1, s2, season] if s >= 20222023]
     print(f"  Pool seasons: {POOL_SEASONS}")
 
@@ -115,13 +127,19 @@ def run(season: int = NHL_SEASON):
     print("\n[1/5] Loading shot events...")
     all_shots = []
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'shot_events',
-            'game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code',
-            {'season': s})
+        rows = fetch_all(
+            client,
+            "shot_events",
+            "game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code",
+            {"season": s},
+        )
         # Filter to 5v5 only — situation_code='1551' = both goalies, 5 skaters each
-        rows = [r for r in rows
-                if r.get('situation_code') == '1551'
-                and r['event_type'] in ('goal','shot-on-goal','missed-shot','blocked-shot')]
+        rows = [
+            r
+            for r in rows
+            if r.get("situation_code") == "1551"
+            and r["event_type"] in ("goal", "shot-on-goal", "missed-shot", "blocked-shot")
+        ]
         all_shots.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shot events")
     print(f"  Total: {len(all_shots):,} 5v5 shot events")
@@ -130,9 +148,9 @@ def run(season: int = NHL_SEASON):
     print("\n[2/5] Loading shift events...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'shift_events',
-            'game_id,player_id,team,start_secs,end_secs',
-            {'season': s})
+        rows = fetch_all(
+            client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
+        )
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} shifts")
     print(f"  Total: {len(all_shifts):,} shifts")
@@ -147,48 +165,53 @@ def run(season: int = NHL_SEASON):
     # We need to know which team is home per game
     game_home = {}  # game_id -> home_team_abbrev
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'game_log',
-            'game_id,home_team,away_team',
-            {'season': s})
+        rows = fetch_all(client, "game_log", "game_id,home_team,away_team", {"season": s})
         for r in rows:
-            game_home[r['game_id']] = r['home_team']
+            game_home[r["game_id"]] = r["home_team"]
 
     PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
+
     def shot_abs_secs(shot):
-        period = shot.get('period', 1) or 1
-        tip = shot.get('time_in_period', '0:00') or '0:00'
-        parts = tip.split(':')
-        return PERIOD_OFFSETS.get(period, (period-1)*1200) + int(parts[0])*60 + int(parts[1] if len(parts)>1 else 0)
+        period = shot.get("period", 1) or 1
+        tip = shot.get("time_in_period", "0:00") or "0:00"
+        parts = tip.split(":")
+        return (
+            PERIOD_OFFSETS.get(period, (period - 1) * 1200)
+            + int(parts[0]) * 60
+            + int(parts[1] if len(parts) > 1 else 0)
+        )
 
     for shot in all_shots:
-        if shot['event_type'] == 'goal':
-            goal_timeline[shot['game_id']].append({
-                'secs': shot_abs_secs(shot),
-                'team': shot['team'],
-            })
+        if shot["event_type"] == "goal":
+            goal_timeline[shot["game_id"]].append(
+                {
+                    "secs": shot_abs_secs(shot),
+                    "team": shot["team"],
+                }
+            )
 
     # -- 3.5 Load zone starts for zone-start adjustment ---------
     print("  Loading zone starts...")
     # player_id -> {oz_starts, dz_starts, nz_starts} aggregated across pool seasons
-    player_zone_starts = defaultdict(lambda: {'oz': 0, 'dz': 0, 'nz': 0})
+    player_zone_starts = defaultdict(lambda: {"oz": 0, "dz": 0, "nz": 0})
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'zone_starts',
-            'player_id,oz_starts,dz_starts,nz_starts',
-            {'season': s})
+        rows = fetch_all(
+            client, "zone_starts", "player_id,oz_starts,dz_starts,nz_starts", {"season": s}
+        )
         for r in rows:
-            pid = r['player_id']
-            player_zone_starts[pid]['oz'] += r['oz_starts']
-            player_zone_starts[pid]['dz'] += r['dz_starts']
-            player_zone_starts[pid]['nz'] += r['nz_starts']
+            pid = r["player_id"]
+            player_zone_starts[pid]["oz"] += r["oz_starts"]
+            player_zone_starts[pid]["dz"] += r["dz_starts"]
+            player_zone_starts[pid]["nz"] += r["nz_starts"]
 
     # Compute OZS% per player (oz / (oz + dz), neutral starts excluded)
     # League average OZS% ~ 0.50
     LEAGUE_AVG_OZS = 0.50
     player_ozs = {}
     for pid, counts in player_zone_starts.items():
-        total_zs = counts['oz'] + counts['dz']
+        total_zs = counts["oz"] + counts["dz"]
         if total_zs >= 20:  # min 20 zone starts to compute
-            player_ozs[pid] = counts['oz'] / total_zs
+            player_ozs[pid] = counts["oz"] / total_zs
         else:
             player_ozs[pid] = LEAGUE_AVG_OZS  # default to average
 
@@ -202,12 +225,12 @@ def run(season: int = NHL_SEASON):
     print("  Loading score state expected weights...")
     player_expected_sw = {}
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'player_score_state_dist',
-            'player_id,expected_weight',
-            {'season': s})
+        rows = fetch_all(
+            client, "player_score_state_dist", "player_id,expected_weight", {"season": s}
+        )
         for r in rows:
-            pid = r['player_id']
-            ew  = float(r['expected_weight'])
+            pid = r["player_id"]
+            ew = float(r["expected_weight"])
             # Average across pool seasons (simple mean — pool is weighted
             # by icetime in the regression itself)
             if pid in player_expected_sw:
@@ -238,9 +261,9 @@ def run(season: int = NHL_SEASON):
     game_teams_seen = defaultdict(set)
 
     for shift in all_shifts:
-        shift_index[shift['game_id']].append(shift)
-        player_icetime[shift['player_id']] += (shift['end_secs'] - shift['start_secs'])
-        game_teams_seen[shift['game_id']].add(shift['team'])
+        shift_index[shift["game_id"]].append(shift)
+        player_icetime[shift["player_id"]] += shift["end_secs"] - shift["start_secs"]
+        game_teams_seen[shift["game_id"]].add(shift["team"])
 
     for gid, teams in game_teams_seen.items():
         if teams:
@@ -254,36 +277,35 @@ def run(season: int = NHL_SEASON):
     n_players = len(player_ids)
     print(f"  Qualified players (>=150 min): {n_players}")
 
-    SHOT_TYPES = {'goal', 'shot-on-goal', 'missed-shot', 'blocked-shot'}
+    SHOT_TYPES = {"goal", "shot-on-goal", "missed-shot", "blocked-shot"}
 
     rows_X = []
     rows_y = []
     skipped_no_shifts = 0
-    skipped_not_5v5   = 0
-    included           = 0
+    skipped_not_5v5 = 0
+    included = 0
 
     for shot in all_shots:
-        if shot['event_type'] not in SHOT_TYPES:
+        if shot["event_type"] not in SHOT_TYPES:
             continue
 
-        game_id       = shot['game_id']
-        shooting_team = shot['team']  # real abbrev e.g. 'BOS'
-        shot_sec      = shot_abs_secs(shot)
-        xg            = shot_xg(shot['event_type'], shot.get('x') or 0, shot.get('y') or 0)
+        game_id = shot["game_id"]
+        shooting_team = shot["team"]  # real abbrev e.g. 'BOS'
+        shot_sec = shot_abs_secs(shot)
+        xg = shot_xg(shot["event_type"], shot.get("x") or 0, shot.get("y") or 0)
         if xg == 0:
             continue
 
         active = [
-            s for s in shift_index.get(game_id, [])
-            if s['start_secs'] <= shot_sec <= s['end_secs']
+            s for s in shift_index.get(game_id, []) if s["start_secs"] <= shot_sec <= s["end_secs"]
         ]
 
         if not active:
             skipped_no_shifts += 1
             continue
 
-        shoot_skaters  = [s for s in active if s['team'] == shooting_team]
-        defend_skaters = [s for s in active if s['team'] != shooting_team]
+        shoot_skaters = [s for s in active if s["team"] == shooting_team]
+        defend_skaters = [s for s in active if s["team"] != shooting_team]
 
         if len(shoot_skaters) < 3 or len(defend_skaters) < 3:
             skipped_not_5v5 += 1
@@ -294,13 +316,10 @@ def run(season: int = NHL_SEASON):
         # Normalisation prevents penalising players on consistently strong teams
         # (e.g. EDM, COL) who spend more time in positive score states through
         # skill rather than luck.
-        home_team  = game_home.get(game_id)
-        goals_so_far = [
-            g for g in goal_timeline.get(game_id, [])
-            if g['secs'] < shot_sec
-        ]
-        home_score = sum(1 for g in goals_so_far if g['team'] == home_team)
-        away_score = sum(1 for g in goals_so_far if g['team'] != home_team)
+        home_team = game_home.get(game_id)
+        goals_so_far = [g for g in goal_timeline.get(game_id, []) if g["secs"] < shot_sec]
+        home_score = sum(1 for g in goals_so_far if g["team"] == home_team)
+        away_score = sum(1 for g in goals_so_far if g["team"] != home_team)
         if shooting_team == home_team:
             score_diff = home_score - away_score
         else:
@@ -310,28 +329,25 @@ def run(season: int = NHL_SEASON):
         # Normalise: divide raw sw by each shooting player's expected weight,
         # then average across the unit. Defending team uses their own expected
         # weights — they experience the same shot from the opposite perspective.
-        def normalised_sw(player_id):
+        def normalised_sw(player_id, sw=sw):
             exp_w = player_expected_sw.get(player_id, LEAGUE_AVG_SW)
             return sw / exp_w if exp_w > 0 else sw
 
-        shoot_norm_weights = [normalised_sw(s['player_id']) for s in shoot_skaters]
-        norm_w = (
-            sum(shoot_norm_weights) / len(shoot_norm_weights)
-            if shoot_norm_weights else 1.0
-        )
+        shoot_norm_weights = [normalised_sw(s["player_id"]) for s in shoot_skaters]
+        norm_w = sum(shoot_norm_weights) / len(shoot_norm_weights) if shoot_norm_weights else 1.0
 
-        shoot_ozs_weights = [zone_start_weight(s['player_id']) for s in shoot_skaters]
+        shoot_ozs_weights = [zone_start_weight(s["player_id"]) for s in shoot_skaters]
         ozs_w = sum(shoot_ozs_weights) / len(shoot_ozs_weights) if shoot_ozs_weights else 1.0
         combined_w = norm_w * ozs_w
 
         # Build row: shooting team +1, defending team -1
         row = {}
         for s in shoot_skaters:
-            if s['player_id'] in player_idx:
-                row[player_idx[s['player_id']]] = 1
+            if s["player_id"] in player_idx:
+                row[player_idx[s["player_id"]]] = 1
         for s in defend_skaters:
-            if s['player_id'] in player_idx:
-                row[player_idx[s['player_id']]] = -1
+            if s["player_id"] in player_idx:
+                row[player_idx[s["player_id"]]] = -1
 
         if not row:
             continue
@@ -357,6 +373,7 @@ def run(season: int = NHL_SEASON):
 
     # Build sparse matrix
     import numpy as np
+
     n_shots = len(rows_X)
     X = lil_matrix((n_shots, n_players), dtype=np.float32)
     y = np.array(rows_y, dtype=np.float32)
@@ -380,7 +397,7 @@ def run(season: int = NHL_SEASON):
     # Mean-center so distribution is relative performance (mean = 0)
     # Ridge regression doesn't guarantee this when y is always positive
     coef_mean = coefs.mean()
-    coefs     = coefs - coef_mean
+    coefs = coefs - coef_mean
 
     print(f"  Intercept:  {model.intercept_:.4f}")
     print(f"  Raw mean:   {coef_mean:.4f} (subtracted for centering)")
@@ -390,28 +407,25 @@ def run(season: int = NHL_SEASON):
     # -- 6. Upsert rapm to player_seasons ----------------------
     print(f"\n  Upserting RAPM to player_seasons (season {season})...")
     updates = 0
-    errors  = 0
+    errors = 0
 
     # Get team mapping for current season
-    season_rows = fetch_all(client, 'player_seasons',
-        'player_id,team,game_type',
-        {'season': season, 'game_type': 2})
-    season_map = {r['player_id']: r['team'] for r in season_rows}
+    season_rows = fetch_all(
+        client, "player_seasons", "player_id,team,game_type", {"season": season, "game_type": 2}
+    )
+    season_map = {r["player_id"]: r["team"] for r in season_rows}
 
     for pid, idx in player_idx.items():
         rapm_val = round(float(coefs[idx]), 3)
-        team = season_map.get(pid, '')
+        team = season_map.get(pid, "")
         if not team:
             continue  # player not on current season roster
         try:
-            client.table('player_seasons') \
-                .update({'rapm': rapm_val}) \
-                .eq('player_id', pid) \
-                .eq('season', season) \
-                .eq('game_type', 2) \
-                .execute()
+            client.table("player_seasons").update({"rapm": rapm_val}).eq("player_id", pid).eq(
+                "season", season
+            ).eq("game_type", 2).execute()
             updates += 1
-        except Exception as e:
+        except Exception:
             errors += 1
 
     print(f"  OK Updated {updates} players, {errors} errors")
@@ -425,11 +439,11 @@ def run(season: int = NHL_SEASON):
     primary_players.sort(key=lambda x: x[1], reverse=True)
 
     if primary_players:
-        top5    = primary_players[:5]
+        top5 = primary_players[:5]
         bottom5 = primary_players[-5:]
         pid_list = list({str(p[0]) for p in top5 + bottom5})
-        name_rows = client.table('players').select('id,name').in_('id', pid_list).execute().data
-        names = {r['id']: r['name'] for r in name_rows}
+        name_rows = client.table("players").select("id,name").in_("id", pid_list).execute().data
+        names = {r["id"]: r["name"] for r in name_rows}
 
         print(f"\n  {PRIMARY_TEAM_ABBR} RAPM leaders (top 5):")
         for pid, val in top5:
@@ -441,7 +455,9 @@ def run(season: int = NHL_SEASON):
 
     print("\nDONE RAPM pipeline complete")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     import sys
+
     season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
     run(season_arg)

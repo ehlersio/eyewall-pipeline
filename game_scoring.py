@@ -9,28 +9,26 @@ Usage:
     python game_scoring.py --game 2025030414      # single game (useful for testing)
 """
 
-import os
-import sys
-import time
 import argparse
+import os
+import time
+
 import requests
-from supabase import create_client
 from dotenv import load_dotenv
+from supabase import create_client
 
 load_dotenv()
 
-supabase = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_KEY"]
-)
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 
-NHL_BASE    = "https://api-web.nhle.com/v1"
-NHL_SEASON  = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_BASE = "https://api-web.nhle.com/v1"
+NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 REQUEST_DELAY = 0.5  # seconds between NHL API calls — stay well under rate limits
 
 # ---------------------------------------------------------------------------
 # NHL API helpers
 # ---------------------------------------------------------------------------
+
 
 def nhl_get(url: str) -> dict | None:
     try:
@@ -83,6 +81,7 @@ def is_completed(game: dict) -> bool:
 # PBP parsing
 # ---------------------------------------------------------------------------
 
+
 def parse_goals_from_pbp(pbp: dict, game_id: int, season: int) -> list:
     """
     Extracts goal events from NHL PBP response.
@@ -94,36 +93,40 @@ def parse_goals_from_pbp(pbp: dict, game_id: int, season: int) -> list:
     # Build team id → abbrev map from PBP
     home_team_id = pbp.get("homeTeam", {}).get("id")
     away_team_id = pbp.get("awayTeam", {}).get("id")
-    home_abbrev  = pbp.get("homeTeam", {}).get("abbrev", "HOME")
-    away_abbrev  = pbp.get("awayTeam", {}).get("abbrev", "AWAY")
+    home_abbrev = pbp.get("homeTeam", {}).get("abbrev", "HOME")
+    away_abbrev = pbp.get("awayTeam", {}).get("abbrev", "AWAY")
 
     team_map = {}
-    if home_team_id: team_map[home_team_id] = home_abbrev
-    if away_team_id: team_map[away_team_id] = away_abbrev
+    if home_team_id:
+        team_map[home_team_id] = home_abbrev
+    if away_team_id:
+        team_map[away_team_id] = away_abbrev
 
     for play in plays:
         if play.get("typeDescKey") != "goal":
             continue
 
         details = play.get("details", {})
-        period  = play.get("periodDescriptor", {}).get("number")
+        period = play.get("periodDescriptor", {}).get("number")
         owner_id = details.get("eventOwnerTeamId")
-        team     = team_map.get(owner_id, str(owner_id))
+        team = team_map.get(owner_id, str(owner_id))
 
-        rows.append({
-            "game_id":        game_id,
-            "season":         season,
-            "period":         period,
-            "time_in_period": play.get("timeInPeriod"),
-            "team":           team,
-            "scorer_id":      details.get("scoringPlayerId"),
-            "assist1_id":     details.get("assist1PlayerId"),
-            "assist2_id":     details.get("assist2PlayerId"),
-            "situation_code": play.get("situationCode"),
-            "shot_type":      details.get("shotType"),
-            "home_score":     details.get("homeScore"),
-            "away_score":     details.get("awayScore"),
-        })
+        rows.append(
+            {
+                "game_id": game_id,
+                "season": season,
+                "period": period,
+                "time_in_period": play.get("timeInPeriod"),
+                "team": team,
+                "scorer_id": details.get("scoringPlayerId"),
+                "assist1_id": details.get("assist1PlayerId"),
+                "assist2_id": details.get("assist2PlayerId"),
+                "situation_code": play.get("situationCode"),
+                "shot_type": details.get("shotType"),
+                "home_score": details.get("homeScore"),
+                "away_score": details.get("awayScore"),
+            }
+        )
 
     return rows
 
@@ -131,6 +134,7 @@ def parse_goals_from_pbp(pbp: dict, game_id: int, season: int) -> list:
 # ---------------------------------------------------------------------------
 # Supabase write
 # ---------------------------------------------------------------------------
+
 
 def upsert_goals(rows: list) -> int:
     if not rows:
@@ -145,8 +149,7 @@ def upsert_goals(rows: list) -> int:
             deduped.append(r)
     try:
         supabase.table("game_scoring").upsert(
-            deduped,
-            on_conflict="game_id,period,time_in_period,team"
+            deduped, on_conflict="game_id,period,time_in_period,team"
         ).execute()
         return len(deduped)
     except Exception as e:
@@ -165,11 +168,11 @@ def already_processed(game_id: int) -> bool:
     )
     return (result.count or 0) > 0
 
-    
 
 # ---------------------------------------------------------------------------
 # Single game processor
 # ---------------------------------------------------------------------------
+
 
 def process_game(game_id: int, season: int, force: bool = False) -> bool:
     """
@@ -201,16 +204,21 @@ def process_game(game_id: int, season: int, force: bool = False) -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="EyeWall game scoring pipeline")
-    parser.add_argument("season", nargs="?", type=int, default=NHL_SEASON,
-                        help="Season to process (e.g. 20252026)")
-    parser.add_argument("--backfill", action="store_true",
-                        help="Process all completed games, not just unprocessed ones")
-    parser.add_argument("--game", type=int, default=None,
-                        help="Process a single game ID")
-    parser.add_argument("--force", action="store_true",
-                        help="Re-process even if already in database")
+    parser.add_argument(
+        "season", nargs="?", type=int, default=NHL_SEASON, help="Season to process (e.g. 20252026)"
+    )
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="Process all completed games, not just unprocessed ones",
+    )
+    parser.add_argument("--game", type=int, default=None, help="Process a single game ID")
+    parser.add_argument(
+        "--force", action="store_true", help="Re-process even if already in database"
+    )
     args = parser.parse_args()
 
     season = args.season
@@ -229,10 +237,10 @@ def main():
         print("No completed games found — exiting")
         return
 
-    total     = len(games)
+    total = len(games)
     processed = 0
-    skipped   = 0
-    failed    = 0
+    skipped = 0
+    failed = 0
 
     for i, game in enumerate(games, 1):
         game_id = game.get("id")

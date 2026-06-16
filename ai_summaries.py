@@ -9,25 +9,22 @@ Usage:
     python ai_summaries.py --game 2025030414 --force  # regenerate even if exists
 """
 
-import os
-import sys
-import time
 import argparse
+import os
+import time
+
 import requests
-from supabase import create_client
 from dotenv import load_dotenv
+from supabase import create_client
 
 from ai_context import build_game_summary_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_game_summary_prompt, build_game_card_prompt
+from ai_persona import STICKS_SYSTEM_PROMPT, build_game_card_prompt, build_game_summary_prompt
 
 load_dotenv()
 
-supabase = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_KEY"]
-)
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 
-NHL_SEASON    = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 REQUEST_DELAY = 1.0  # seconds between generation calls
 
 
@@ -35,10 +32,11 @@ REQUEST_DELAY = 1.0  # seconds between generation calls
 # Model call
 # ---------------------------------------------------------------------------
 
+
 def generate(prompt: str, system: str = None) -> str | None:
     account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-    api_key    = os.environ["CLOUDFLARE_API_KEY"]
-    model      = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+    api_key = os.environ["CLOUDFLARE_API_KEY"]
+    model = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 
     messages = []
     if system:
@@ -50,7 +48,7 @@ def generate(prompt: str, system: str = None) -> str | None:
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}",
             headers={
                 "Authorization": f"Bearer {api_key}",
-                "Content-Type":  "application/json",
+                "Content-Type": "application/json",
             },
             json={"messages": messages, "max_tokens": 1024},
             timeout=120,
@@ -65,6 +63,7 @@ def generate(prompt: str, system: str = None) -> str | None:
 # ---------------------------------------------------------------------------
 # Supabase helpers
 # ---------------------------------------------------------------------------
+
 
 def already_generated(game_id: int, team: str) -> bool:
     result = (
@@ -81,14 +80,14 @@ def already_generated(game_id: int, team: str) -> bool:
 def save_summary(game_id: int, season: int, team: str, summary_text: str, card_text: str = None):
     supabase.table("game_summaries").upsert(
         {
-            "game_id":      game_id,
-            "season":       season,
-            "team":         team,
+            "game_id": game_id,
+            "season": season,
+            "team": team,
             "summary_text": summary_text,
-            "card_text":    card_text,
+            "card_text": card_text,
             "generated_at": "now()",
         },
-        on_conflict="game_id,team"
+        on_conflict="game_id,team",
     ).execute()
 
 
@@ -115,7 +114,9 @@ def get_completed_games(season: int) -> list:
 # ---------------------------------------------------------------------------
 # Single game processor
 # ---------------------------------------------------------------------------
-def process_game(game_id: int, season: int, home_team: str, away_team: str, force: bool = False) -> tuple[bool, bool]:
+def process_game(
+    game_id: int, season: int, home_team: str, away_team: str, force: bool = False
+) -> tuple[bool, bool]:
     """
     Generates and saves summaries for both teams in a completed game.
     Returns (home_success, away_success).
@@ -163,7 +164,9 @@ def process_game(game_id: int, season: int, home_team: str, away_team: str, forc
             print(f"  {game_id} {team} — card caption failed, saving summary only")
 
         save_summary(game_id, season, team, summary, card_text=card_text)
-        print(f"  {game_id} {team} — saved ({len(summary)} chars full, {len(card_text) if card_text else 0} chars card)")
+        print(
+            f"  {game_id} {team} — saved ({len(summary)} chars full, {len(card_text) if card_text else 0} chars card)"
+        )
         results.append(True)
 
     return tuple(results)
@@ -173,13 +176,14 @@ def process_game(game_id: int, season: int, home_team: str, away_team: str, forc
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="EyeWall AI game summary pipeline")
     parser.add_argument("season", nargs="?", type=int, default=NHL_SEASON)
-    parser.add_argument("--game", type=int, default=None,
-                        help="Process a single game ID")
-    parser.add_argument("--force", action="store_true",
-                        help="Regenerate even if summary already exists")
+    parser.add_argument("--game", type=int, default=None, help="Process a single game ID")
+    parser.add_argument(
+        "--force", action="store_true", help="Regenerate even if summary already exists"
+    )
     args = parser.parse_args()
 
     season = args.season
@@ -209,13 +213,12 @@ def main():
         print("No completed games found — exiting")
         return
 
-    total     = len(games)
+    total = len(games)
     generated = 0
-    skipped   = 0
-    failed    = 0
+    failed = 0
 
     for i, game in enumerate(games, 1):
-        game_id   = game["game_id"]
+        game_id = game["game_id"]
         home_team = game["home_team"]
         away_team = game["away_team"]
         print(f"[{i}/{total}] Game {game_id} ({game['game_date']} — {away_team} @ {home_team})")
@@ -223,7 +226,7 @@ def main():
         home_ok, away_ok = process_game(game_id, season, home_team, away_team, force=args.force)
 
         generated += (1 if home_ok else 0) + (1 if away_ok else 0)
-        failed    += (0 if home_ok else 1) + (0 if away_ok else 1)
+        failed += (0 if home_ok else 1) + (0 if away_ok else 1)
 
         time.sleep(REQUEST_DELAY)
 

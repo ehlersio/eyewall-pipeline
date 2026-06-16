@@ -25,13 +25,14 @@ Usage:
   python score_state.py                  # current season
   python score_state.py --season 20242025
 """
+
 import sys
 from collections import defaultdict
-from db import get_client, NHL_SEASON
 
+from db import NHL_SEASON, get_client
 
 PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
-SCORE_STATES   = [-3, -2, -1, 0, 1, 2, 3]
+SCORE_STATES = [-3, -2, -1, 0, 1, 2, 3]
 
 
 def clamp(val, lo, hi):
@@ -57,7 +58,7 @@ def fetch_all(client, table, select, filters, page_size=1000):
 
 
 def prior_season(season: int) -> int:
-    end_year   = season % 10000
+    end_year = season % 10000
     start_year = season // 10000
     return (start_year - 1) * 10000 + (end_year - 1)
 
@@ -68,26 +69,31 @@ def build_goal_timeline(client, seasons):
       game_home:     game_id -> home_team_abbr
       goal_timeline: game_id -> sorted list of (abs_secs, scoring_team)
     """
-    game_home     = {}
+    game_home = {}
     goal_timeline = defaultdict(list)
 
     for s in seasons:
-        rows = fetch_all(client, 'game_log', 'game_id,home_team', {'season': s})
+        rows = fetch_all(client, "game_log", "game_id,home_team", {"season": s})
         for r in rows:
-            game_home[r['game_id']] = r['home_team']
+            game_home[r["game_id"]] = r["home_team"]
 
     for s in seasons:
-        rows = fetch_all(client, 'shot_events',
-            'game_id,team,event_type,period,time_in_period',
-            {'season': s, 'event_type': 'goal'})
+        rows = fetch_all(
+            client,
+            "shot_events",
+            "game_id,team,event_type,period,time_in_period",
+            {"season": s, "event_type": "goal"},
+        )
         for r in rows:
-            period = r.get('period', 1) or 1
-            tip    = r.get('time_in_period', '0:00') or '0:00'
-            parts  = tip.split(':')
-            secs   = (PERIOD_OFFSETS.get(period, (period - 1) * 1200)
-                      + int(parts[0]) * 60
-                      + int(parts[1] if len(parts) > 1 else 0))
-            goal_timeline[r['game_id']].append((secs, r['team']))
+            period = r.get("period", 1) or 1
+            tip = r.get("time_in_period", "0:00") or "0:00"
+            parts = tip.split(":")
+            secs = (
+                PERIOD_OFFSETS.get(period, (period - 1) * 1200)
+                + int(parts[0]) * 60
+                + int(parts[1] if len(parts) > 1 else 0)
+            )
+            goal_timeline[r["game_id"]].append((secs, r["team"]))
 
     # Sort each game's timeline chronologically
     for gid in goal_timeline:
@@ -101,10 +107,10 @@ def score_state_at(secs, game_id, shooting_team, game_home, goal_timeline):
     Returns the score differential (clamped to [-3, 3]) from shooting_team's
     perspective at the given absolute second in the game.
     """
-    home_team  = game_home.get(game_id)
+    home_team = game_home.get(game_id)
     home_score = 0
     away_score = 0
-    for (gsecs, gteam) in goal_timeline.get(game_id, []):
+    for gsecs, gteam in goal_timeline.get(game_id, []):
         if gsecs >= secs:
             break
         if gteam == home_team:
@@ -131,11 +137,11 @@ def compute_distributions(shifts, game_home, goal_timeline):
     player_dist = defaultdict(lambda: defaultdict(float))
 
     for shift in shifts:
-        game_id   = shift['game_id']
-        player_id = shift['player_id']
-        team      = shift['team']
-        start     = shift['start_secs']
-        end       = shift['end_secs']
+        game_id = shift["game_id"]
+        player_id = shift["player_id"]
+        team = shift["team"]
+        start = shift["start_secs"]
+        end = shift["end_secs"]
 
         if end <= start:
             continue
@@ -143,7 +149,7 @@ def compute_distributions(shifts, game_home, goal_timeline):
         # Build list of goal timestamps that fall within this shift
         # These are the breakpoints where score state changes
         breakpoints = [start]
-        for (gsecs, _) in goal_timeline.get(game_id, []):
+        for gsecs, _ in goal_timeline.get(game_id, []):
             if gsecs <= start:
                 continue
             if gsecs >= end:
@@ -154,8 +160,8 @@ def compute_distributions(shifts, game_home, goal_timeline):
         # For each sub-interval, determine score state at its start
         for i in range(len(breakpoints) - 1):
             interval_start = breakpoints[i]
-            interval_end   = breakpoints[i + 1]
-            duration       = interval_end - interval_start
+            interval_end = breakpoints[i + 1]
+            duration = interval_end - interval_start
             if duration <= 0:
                 continue
 
@@ -176,8 +182,7 @@ def expected_weight(dist, score_weights):
     if total_secs == 0:
         return 1.0
     return sum(
-        score_weights[clamp(state, -3, 3)] * secs / total_secs
-        for state, secs in dist.items()
+        score_weights[clamp(state, -3, 3)] * secs / total_secs for state, secs in dist.items()
     )
 
 
@@ -200,9 +205,9 @@ def run(season: int = NHL_SEASON):
     print("\n[2/3] Loading shifts...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all(client, 'shift_events',
-            'game_id,player_id,team,start_secs,end_secs',
-            {'season': s})
+        rows = fetch_all(
+            client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
+        )
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shifts")
     print(f"  Total: {len(all_shifts):,} 5v5 shifts")
@@ -214,15 +219,19 @@ def run(season: int = NHL_SEASON):
 
     # Macdonald weights (same as rapm.py) — needed to compute expected_weight
     SCORE_WEIGHTS = {
-        -3: 0.817, -2: 0.847, -1: 0.906,
-         0: 1.000,
-         1: 1.097,  2: 1.166,  3: 1.227,
+        -3: 0.817,
+        -2: 0.847,
+        -1: 0.906,
+        0: 1.000,
+        1: 1.097,
+        2: 1.166,
+        3: 1.227,
     }
 
     # -- Upsert to player_score_state_dist ----------------------
     print(f"\n  Upserting to player_score_state_dist (season {season})...")
     upserted = 0
-    errors   = 0
+    errors = 0
 
     for player_id, dist in player_dist.items():
         total_secs = sum(dist.values())
@@ -232,24 +241,24 @@ def run(season: int = NHL_SEASON):
         exp_w = expected_weight(dist, SCORE_WEIGHTS)
 
         record = {
-            'player_id':      player_id,
-            'season':         season,
-            'total_ev_secs':  round(total_secs, 1),
-            'expected_weight': round(exp_w, 6),
+            "player_id": player_id,
+            "season": season,
+            "total_ev_secs": round(total_secs, 1),
+            "expected_weight": round(exp_w, 6),
             # Seconds in each score state
-            'secs_m3': round(dist.get(-3, 0), 1),
-            'secs_m2': round(dist.get(-2, 0), 1),
-            'secs_m1': round(dist.get(-1, 0), 1),
-            'secs_0':  round(dist.get( 0, 0), 1),
-            'secs_p1': round(dist.get( 1, 0), 1),
-            'secs_p2': round(dist.get( 2, 0), 1),
-            'secs_p3': round(dist.get( 3, 0), 1),
+            "secs_m3": round(dist.get(-3, 0), 1),
+            "secs_m2": round(dist.get(-2, 0), 1),
+            "secs_m1": round(dist.get(-1, 0), 1),
+            "secs_0": round(dist.get(0, 0), 1),
+            "secs_p1": round(dist.get(1, 0), 1),
+            "secs_p2": round(dist.get(2, 0), 1),
+            "secs_p3": round(dist.get(3, 0), 1),
         }
 
         try:
-            client.table('player_score_state_dist') \
-                .upsert(record, on_conflict='player_id,season') \
-                .execute()
+            client.table("player_score_state_dist").upsert(
+                record, on_conflict="player_id,season"
+            ).execute()
             upserted += 1
         except Exception as e:
             errors += 1
@@ -259,16 +268,17 @@ def run(season: int = NHL_SEASON):
     print(f"  OK Upserted {upserted:,} players, {errors} errors")
 
     # Sanity check — print a few extreme expected_weight values
-    sorted_players = sorted(player_dist.items(),
-        key=lambda x: expected_weight(x[1], SCORE_WEIGHTS), reverse=True)
+    sorted_players = sorted(
+        player_dist.items(), key=lambda x: expected_weight(x[1], SCORE_WEIGHTS), reverse=True
+    )
 
-    print(f"\n  Highest expected score-state weight (most time leading):")
+    print("\n  Highest expected score-state weight (most time leading):")
     for pid, dist in sorted_players[:5]:
         ew = expected_weight(dist, SCORE_WEIGHTS)
         total = sum(dist.values())
         print(f"    player {pid}: expected_weight={ew:.4f}, ev_secs={total:.0f}")
 
-    print(f"\n  Lowest expected score-state weight (most time trailing):")
+    print("\n  Lowest expected score-state weight (most time trailing):")
     for pid, dist in sorted_players[-5:]:
         ew = expected_weight(dist, SCORE_WEIGHTS)
         total = sum(dist.values())
@@ -277,12 +287,12 @@ def run(season: int = NHL_SEASON):
     print("\nDONE Score state distribution complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = sys.argv[1:]
     season = NHL_SEASON
     i = 0
     while i < len(args):
-        if args[i] == '--season' and i + 1 < len(args):
+        if args[i] == "--season" and i + 1 < len(args):
             season = int(args[i + 1])
             i += 2
         else:

@@ -27,6 +27,7 @@ Usage:
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
   python run.py ai               # AI pipeline only (summaries + scouting)
 """
+
 import subprocess
 import sys
 import time
@@ -36,33 +37,33 @@ from datetime import datetime
 def run_subprocess(label, cmd):
     """Run a script via subprocess. Raises on non-zero exit."""
     print(f"\n  >> {label}")
-    result = subprocess.run([sys.executable] + cmd)
+    result = subprocess.run([sys.executable, *cmd])
     if result.returncode != 0:
         raise RuntimeError(f"{cmd[0]} failed with exit code {result.returncode}")
 
 
 def run_ai_pipeline():
     """AI pipeline — game_scoring, summaries, scouting. Runs after moneypuck."""
-    run_subprocess("game_scoring   — PBP goals/assists parser",  ["game_scoring.py"])
-    run_subprocess("ai_summaries   — post-game summaries",       ["ai_summaries.py"])
-    run_subprocess("ai_scouting    — missing scouting blurbs",   ["ai_scouting.py", "--missing"])
+    run_subprocess("game_scoring   — PBP goals/assists parser", ["game_scoring.py"])
+    run_subprocess("ai_summaries   — post-game summaries", ["ai_summaries.py"])
+    run_subprocess("ai_scouting    — missing scouting blurbs", ["ai_scouting.py", "--missing"])
 
 
 def run_all():
     start = time.time()
-    print(f"\n{'='*55}")
+    print(f"\n{'=' * 55}")
     print(f"  EyeWall Analytics Pipeline -- {datetime.now():%Y-%m-%d %H:%M}")
-    print(f"{'='*55}")
+    print(f"{'=' * 55}")
 
-    import nhl_stats
-    import shot_events
-    import shift_data
-    import zone_starts
-    import rapm
-    import moneypuck
     import line_combinations
-    import special_teams
+    import moneypuck
+    import nhl_stats
     import power_rankings
+    import rapm
+    import shift_data
+    import shot_events
+    import special_teams
+    import zone_starts
 
     nhl_stats.run()
     shot_events.run()
@@ -71,8 +72,8 @@ def run_all():
     rapm.run()
     moneypuck.run()
     line_combinations.run()  # must run after shift_data + shot_events
-    special_teams.run()    # must run after shift_data
-    power_rankings.run()     # must run after moneypuck (needs fresh WAR + xGF%)
+    special_teams.run()  # must run after shift_data
+    power_rankings.run()  # must run after moneypuck (needs fresh WAR + xGF%)
 
     # AI pipeline — runs after player_seasons is fresh
     run_ai_pipeline()
@@ -80,50 +81,66 @@ def run_all():
     # Validate RAPM after every nightly run — exits non-zero on failure
     # which triggers a GitHub Actions failure email
     import validate_rapm
+
     status = validate_rapm.run()
 
     elapsed = round(time.time() - start, 1)
-    print(f"\n{'='*55}")
+    print(f"\n{'=' * 55}")
     print(f"  All pipelines complete in {elapsed}s")
-    print(f"{'='*55}\n")
+    print(f"{'=' * 55}\n")
 
-    if status == 'fail':
+    if status == "fail":
         sys.exit(1)
 
 
-if __name__ == '__main__':
-    arg    = sys.argv[1] if len(sys.argv) > 1 else 'all'
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else "all"
     season = int(sys.argv[2]) if len(sys.argv) > 2 else None
 
-    if arg == 'nhl':
-        import nhl_stats; nhl_stats.run()
-    elif arg == 'shots':
+    if arg == "nhl":
+        import nhl_stats
+
+        nhl_stats.run()
+    elif arg == "shots":
         import shot_events
+
         shot_events.run(*([season] if season else []))
-    elif arg == 'shifts':
+    elif arg == "shifts":
         import shift_data
+
         shift_data.run(*([season] if season else []))
-    elif arg == 'zones':
+    elif arg == "zones":
         import zone_starts
+
         zone_starts.run(*([season] if season else []))
-    elif arg == 'rapm':
-        import rapm; rapm.run()
-    elif arg == 'moneypuck':
-        import moneypuck; moneypuck.run()
-    elif arg == 'lines':
+    elif arg == "rapm":
+        import rapm
+
+        rapm.run()
+    elif arg == "moneypuck":
+        import moneypuck
+
+        moneypuck.run()
+    elif arg == "lines":
         import line_combinations
+
         line_combinations.run(*([season] if season else []))
-    elif arg == 'special': import special_teams; special_teams.run(season=season)
-    elif arg == 'rankings':
+    elif arg == "special":
+        import special_teams
+
+        special_teams.run(season=season)
+    elif arg == "rankings":
         import power_rankings
+
         power_rankings.run(season=season)
-    elif arg == 'validate':
+    elif arg == "validate":
         import validate_rapm
-        eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else None
+
+        eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         status = validate_rapm.run(eh_csv_path=eh_csv)
-        if status == 'fail':
+        if status == "fail":
             sys.exit(1)
-    elif arg == 'ai':
+    elif arg == "ai":
         run_ai_pipeline()
     else:
         run_all()

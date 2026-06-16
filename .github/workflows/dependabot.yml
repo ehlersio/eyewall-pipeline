@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # pip — Python pipeline dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    groups:
+      # Batch supabase client library updates together
+      supabase-ecosystem:
+        patterns:
+          - "supabase"
+          - "gotrue"
+          - "postgrest"
+          - "storage3"
+          - "realtime"
+          - "supafunc"
+    ignore:
+      # Pin these — major versions often have breaking API changes
+      - dependency-name: "supabase"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "scikit-learn"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5

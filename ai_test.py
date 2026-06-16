@@ -1,15 +1,11 @@
 import requests
-import json
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1:8b"
 
+
 def ask(prompt, system=None):
-    payload = {
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
+    payload = {"model": MODEL, "prompt": prompt, "stream": False}
     if system:
         payload["system"] = system
 
@@ -68,4 +64,8 @@ Accuracy rules:
 """
 
 print("=== Test 2: Same question, hockey bro persona ===")
-print(ask("Who won the 2006 Stanley Cup and who was the Conn Smythe winner?", system=HOCKEY_BRO_SYSTEM))
+print(
+    ask(
+        "Who won the 2006 Stanley Cup and who was the Conn Smythe winner?", system=HOCKEY_BRO_SYSTEM
+    )
+)

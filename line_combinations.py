@@ -32,24 +32,30 @@ Usage:
 
 Run order: after shift_data and shot_events (both must be populated).
 """
+
 import math
 from collections import defaultdict
-from db import get_client, NHL_SEASON
 
-TEAM        = 'CAR'
-MIN_PAIR_SECS = 60    # ignore pairs with < 1 min shared ice (noise)
-MIN_UNIT_SECS = 300   # a unit must have 5+ min together to surface in UI
+from db import NHL_SEASON, get_client
+
+TEAM = "CAR"
+MIN_PAIR_SECS = 60  # ignore pairs with < 1 min shared ice (noise)
+MIN_UNIT_SECS = 300  # a unit must have 5+ min together to surface in UI
+
 
 # xG proxy (mirrors rapm.py — no MoneyPuck xG stored per shot event)
 def shot_xg(event_type, x, y):
-    if event_type == 'goal':
+    if event_type == "goal":
         return 1.0
-    if event_type not in ('shot-on-goal', 'missed-shot', 'blocked-shot'):
+    if event_type not in ("shot-on-goal", "missed-shot", "blocked-shot"):
         return 0.0
     dist = math.sqrt((abs(x or 0) - 89) ** 2 + (y or 0) ** 2)
-    if dist <= 15:  return 0.20
-    if dist <= 30:  return 0.07
+    if dist <= 15:
+        return 0.20
+    if dist <= 30:
+        return 0.07
     return 0.03
+
 
 def fetch_all(client, table, select, filters, page_size=1000):
     """Paginated Supabase fetch."""
@@ -70,21 +76,28 @@ def fetch_all(client, table, select, filters, page_size=1000):
         offset += page_size
     return rows
 
+
 def mmss_to_secs(tip):
     """'14:32' -> 872"""
     try:
-        parts = (tip or '0:00').split(':')
+        parts = (tip or "0:00").split(":")
         return int(parts[0]) * 60 + int(parts[1] if len(parts) > 1 else 0)
     except Exception:
         return 0
 
+
 PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
 
+
 def shot_abs_secs(shot):
-    period = shot.get('period', 1) or 1
-    return PERIOD_OFFSETS.get(period, (period - 1) * 1200) + mmss_to_secs(shot.get('time_in_period'))
+    period = shot.get("period", 1) or 1
+    return PERIOD_OFFSETS.get(period, (period - 1) * 1200) + mmss_to_secs(
+        shot.get("time_in_period")
+    )
+
 
 # ── Pair-level TOI computation ────────────────────────────────────────────────
+
 
 def compute_pair_toi(game_shifts):
     """
@@ -99,15 +112,17 @@ def compute_pair_toi(game_shifts):
     for i in range(n):
         for j in range(i + 1, n):
             a, b = game_shifts[i], game_shifts[j]
-            if a['player_id'] == b['player_id']:   # same player, different shift rows
+            if a["player_id"] == b["player_id"]:  # same player, different shift rows
                 continue
-            overlap = min(a['end_secs'], b['end_secs']) - max(a['start_secs'], b['start_secs'])
+            overlap = min(a["end_secs"], b["end_secs"]) - max(a["start_secs"], b["start_secs"])
             if overlap > 0:
-                key = frozenset({a['player_id'], b['player_id']})
+                key = frozenset({a["player_id"], b["player_id"]})
                 pairs[key] += overlap
     return pairs
 
+
 # ── Shot attribution to pair windows ─────────────────────────────────────────
+
 
 def attribute_shots_to_pairs(game_shots, game_shifts, pair_toi):
     """
@@ -117,21 +132,20 @@ def attribute_shots_to_pairs(game_shots, game_shifts, pair_toi):
     Returns dict: frozenset({pid_a, pid_b}) -> {'xgf': float, 'xga': float}
     """
     # Build shift index for this game: list of shifts sorted by start
-    car_shifts = [s for s in game_shifts]  # already CAR-only
+    car_shifts = list(game_shifts)  # already CAR-only
 
-    pair_xg = defaultdict(lambda: {'xgf': 0.0, 'xga': 0.0})
+    pair_xg = defaultdict(lambda: {"xgf": 0.0, "xga": 0.0})
 
     for shot in game_shots:
-        xg    = shot_xg(shot['event_type'], shot.get('x'), shot.get('y'))
+        xg = shot_xg(shot["event_type"], shot.get("x"), shot.get("y"))
         if xg == 0:
             continue
-        t     = shot_abs_secs(shot)
-        is_car = (shot['team'] == TEAM)
-        key   = 'xgf' if is_car else 'xga'
+        t = shot_abs_secs(shot)
+        is_car = shot["team"] == TEAM
+        key = "xgf" if is_car else "xga"
 
         # Find CAR players on ice at this moment
-        on_ice = [s['player_id'] for s in car_shifts
-                  if s['start_secs'] <= t <= s['end_secs']]
+        on_ice = [s["player_id"] for s in car_shifts if s["start_secs"] <= t <= s["end_secs"]]
 
         # Credit all pairs that were on ice together
         for i in range(len(on_ice)):
@@ -142,21 +156,24 @@ def attribute_shots_to_pairs(game_shots, game_shifts, pair_toi):
 
     return pair_xg
 
+
 # ── Player position lookup ────────────────────────────────────────────────────
+
 
 def fetch_player_positions(client, player_ids):
     """Returns dict: player_id -> {'name': str, 'position': str}"""
     result = {}
     ids = list(player_ids)
     for i in range(0, len(ids), 200):
-        batch = ids[i:i + 200]
-        rows = client.table('players').select('id,name,position') \
-            .in_('id', batch).execute().data
+        batch = ids[i : i + 200]
+        rows = client.table("players").select("id,name,position").in_("id", batch).execute().data
         for r in rows:
-            result[r['id']] = {'name': r['name'], 'position': r['position']}
+            result[r["id"]] = {"name": r["name"], "position": r["position"]}
     return result
 
+
 # ── Line/pair clustering ──────────────────────────────────────────────────────
+
 
 def cluster_into_units(pair_toi, positions, min_unit_secs):
     """
@@ -171,11 +188,16 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
       { 'unit_type': 'F'|'D', 'players': [pid, ...], 'toi_secs': int }
     """
     # Separate forwards and defenders
-    fwd_ids = {pid for pid, p in positions.items() if p['position'] in ('C', 'L', 'R', 'LW', 'RW', 'F')}
-    def_ids = {pid for pid, p in positions.items() if p['position'] in ('D',)}
+    fwd_ids = {
+        pid for pid, p in positions.items() if p["position"] in ("C", "L", "R", "LW", "RW", "F")
+    }
+    def_ids = {pid for pid, p in positions.items() if p["position"] in ("D",)}
 
-    def is_fwd(pid): return pid in fwd_ids
-    def is_def(pid): return pid in def_ids
+    def is_fwd(pid):
+        return pid in fwd_ids
+
+    def is_def(pid):
+        return pid in def_ids
 
     # Build per-player TOI-sorted partner list
     player_partners = defaultdict(list)  # pid -> [(toi, partner_pid)]
@@ -196,8 +218,12 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
     forward_units = []
 
     fwd_by_toi = sorted(
-        [(sum(t for t, _ in player_partners[pid]), pid) for pid in fwd_ids if pid in player_partners],
-        reverse=True
+        [
+            (sum(t for t, _ in player_partners[pid]), pid)
+            for pid in fwd_ids
+            if pid in player_partners
+        ],
+        reverse=True,
     )
 
     for _, pid in fwd_by_toi:
@@ -219,14 +245,16 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
         if unit_toi < min_unit_secs:
             continue
 
-        forward_units.append({
-            'unit_type': 'F',
-            'players':   sorted(triplet),
-            'toi_secs':  int(unit_toi),
-        })
+        forward_units.append(
+            {
+                "unit_type": "F",
+                "players": sorted(triplet),
+                "toi_secs": int(unit_toi),
+            }
+        )
 
     # Sort by TOI descending — Line 1 is top TOI triplet
-    forward_units.sort(key=lambda u: u['toi_secs'], reverse=True)
+    forward_units.sort(key=lambda u: u["toi_secs"], reverse=True)
 
     # ── Defence pairs ─────────────────────────────────────────
     seen_pairs = set()
@@ -239,10 +267,10 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
         if not partners:
             continue
         best_toi, best_partner = partners[0]
-        if best_partner == pid:          # skip degenerate self-pairs
+        if best_partner == pid:  # skip degenerate self-pairs
             continue
         pair = frozenset({pid, best_partner})
-        if len(pair) < 2:               # guard: collapsed frozenset
+        if len(pair) < 2:  # guard: collapsed frozenset
             continue
         if pair in seen_pairs:
             continue
@@ -250,17 +278,21 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
         if best_toi < min_unit_secs:
             continue
         members = sorted(pair)
-        def_units.append({
-            'unit_type': 'D',
-            'players':   members,
-            'toi_secs':  int(best_toi),
-        })
+        def_units.append(
+            {
+                "unit_type": "D",
+                "players": members,
+                "toi_secs": int(best_toi),
+            }
+        )
 
-    def_units.sort(key=lambda u: u['toi_secs'], reverse=True)
+    def_units.sort(key=lambda u: u["toi_secs"], reverse=True)
 
     return forward_units[:4] + def_units[:3]  # top 4 lines + top 3 D pairs
 
+
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def run(season=NHL_SEASON):
     client = get_client()
@@ -269,9 +301,10 @@ def run(season=NHL_SEASON):
     # 1. Load CAR shifts (5v5 — situation column may be null; filter at shot level)
     print("\n[1/4] Loading CAR shift events...")
     raw_shifts = fetch_all(
-        client, 'shift_events',
-        'game_id,player_id,team,start_secs,end_secs',
-        {'season': season, 'team': TEAM}
+        client,
+        "shift_events",
+        "game_id,player_id,team,start_secs,end_secs",
+        {"season": season, "team": TEAM},
     )
     print(f"  {len(raw_shifts):,} CAR shift rows")
 
@@ -282,43 +315,44 @@ def run(season=NHL_SEASON):
     # 2. Load CAR game 5v5 shot events
     print("\n[2/4] Loading 5v5 shot events for CAR games...")
     raw_shots = fetch_all(
-        client, 'shot_events',
-        'game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code',
-        {'season': season, 'car_game': True}
+        client,
+        "shot_events",
+        "game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code",
+        {"season": season, "car_game": True},
     )
-    raw_shots = [s for s in raw_shots if s.get('situation_code') == '1551']
+    raw_shots = [s for s in raw_shots if s.get("situation_code") == "1551"]
     print(f"  {len(raw_shots):,} 5v5 shot events")
 
     # 3. Index by game
     shifts_by_game = defaultdict(list)
     for s in raw_shifts:
-        shifts_by_game[s['game_id']].append(s)
+        shifts_by_game[s["game_id"]].append(s)
 
     shots_by_game = defaultdict(list)
     for s in raw_shots:
-        shots_by_game[s['game_id']].append(s)
+        shots_by_game[s["game_id"]].append(s)
 
     # 4. Compute pair TOI and xG across all games
     print("\n[3/4] Computing pair TOI and xG...")
     all_pair_toi = defaultdict(float)
-    all_pair_xg  = defaultdict(lambda: {'xgf': 0.0, 'xga': 0.0})
+    all_pair_xg = defaultdict(lambda: {"xgf": 0.0, "xga": 0.0})
 
     games = sorted(shifts_by_game.keys())
     for i, game_id in enumerate(games):
         game_shifts = shifts_by_game[game_id]
-        game_shots  = shots_by_game.get(game_id, [])
+        game_shots = shots_by_game.get(game_id, [])
 
         pair_toi = compute_pair_toi(game_shifts)
-        pair_xg  = attribute_shots_to_pairs(game_shots, game_shifts, pair_toi)
+        pair_xg = attribute_shots_to_pairs(game_shots, game_shifts, pair_toi)
 
         for pair, toi in pair_toi.items():
             all_pair_toi[pair] += toi
         for pair, xg in pair_xg.items():
-            all_pair_xg[pair]['xgf'] += xg['xgf']
-            all_pair_xg[pair]['xga'] += xg['xga']
+            all_pair_xg[pair]["xgf"] += xg["xgf"]
+            all_pair_xg[pair]["xga"] += xg["xga"]
 
         if (i + 1) % 20 == 0:
-            print(f"  [{i+1}/{len(games)}] games processed")
+            print(f"  [{i + 1}/{len(games)}] games processed")
 
     print(f"  {len(all_pair_toi):,} unique pairs found")
 
@@ -332,8 +366,10 @@ def run(season=NHL_SEASON):
     # 6. Cluster into line units
     print("\n[4/4] Clustering into lines and D pairs...")
     units = cluster_into_units(all_pair_toi, positions, MIN_UNIT_SECS)
-    print(f"  {len(units)} units formed ({sum(1 for u in units if u['unit_type']=='F')} lines, "
-          f"{sum(1 for u in units if u['unit_type']=='D')} D pairs)")
+    print(
+        f"  {len(units)} units formed ({sum(1 for u in units if u['unit_type'] == 'F')} lines, "
+        f"{sum(1 for u in units if u['unit_type'] == 'D')} D pairs)"
+    )
 
     if not units:
         print("  No units met the minimum TOI threshold — check shift data coverage")
@@ -342,74 +378,79 @@ def run(season=NHL_SEASON):
     # 7. Build upsert rows
     rows = []
     fwd_rank = 1
-    def_rank  = 1
+    def_rank = 1
     for unit in units:
-        players = unit['players']
+        players = unit["players"]
         # xGF% = average of all pair xGF% within unit
         pair_keys = []
-        if unit['unit_type'] == 'F':
+        if unit["unit_type"] == "F":
             a, b, c = players[0], players[1], players[2]
             pair_keys = [frozenset({a, b}), frozenset({a, c}), frozenset({b, c})]
-            rank = fwd_rank; fwd_rank += 1
-            p3   = c
+            rank = fwd_rank
+            fwd_rank += 1
+            p3 = c
         else:
             a, b = players[0], players[1]
             pair_keys = [frozenset({a, b})]
-            rank = def_rank; def_rank += 1
-            p3   = None
+            rank = def_rank
+            def_rank += 1
+            p3 = None
 
-        total_xgf = sum(all_pair_xg[pk]['xgf'] for pk in pair_keys)
-        total_xga = sum(all_pair_xg[pk]['xga'] for pk in pair_keys)
-        total_xg  = total_xgf + total_xga
-        xgf_pct   = round(total_xgf / total_xg, 4) if total_xg > 0.001 else None
+        total_xgf = sum(all_pair_xg[pk]["xgf"] for pk in pair_keys)
+        total_xga = sum(all_pair_xg[pk]["xga"] for pk in pair_keys)
+        total_xg = total_xgf + total_xga
+        xgf_pct = round(total_xgf / total_xg, 4) if total_xg > 0.001 else None
 
         # Player names
         def name(pid):
             p = positions.get(pid, {})
-            return p.get('name') or str(pid)
+            return p.get("name") or str(pid)
+
         def pos(pid):
             p = positions.get(pid, {})
-            return p.get('position') or '?'
+            return p.get("position") or "?"
 
-        rows.append({
-            'season':        season,
-            'team':          TEAM,
-            'unit_type':     unit['unit_type'],
-            'rank':          rank,
-            'player_a':      players[0],
-            'player_b':      players[1],
-            'player_c':      p3,
-            'name_a':        name(players[0]),
-            'name_b':        name(players[1]),
-            'name_c':        name(p3) if p3 else None,
-            'pos_a':         pos(players[0]),
-            'pos_b':         pos(players[1]),
-            'pos_c':         pos(p3) if p3 else None,
-            'toi_secs':      unit['toi_secs'],
-            'xgf':           round(total_xgf / len(pair_keys), 2),
-            'xga':           round(total_xga / len(pair_keys), 2),
-            'xgf_pct':       xgf_pct,
-        })
-        label = f"Line {rank}" if unit['unit_type'] == 'F' else f"D{rank}"
+        rows.append(
+            {
+                "season": season,
+                "team": TEAM,
+                "unit_type": unit["unit_type"],
+                "rank": rank,
+                "player_a": players[0],
+                "player_b": players[1],
+                "player_c": p3,
+                "name_a": name(players[0]),
+                "name_b": name(players[1]),
+                "name_c": name(p3) if p3 else None,
+                "pos_a": pos(players[0]),
+                "pos_b": pos(players[1]),
+                "pos_c": pos(p3) if p3 else None,
+                "toi_secs": unit["toi_secs"],
+                "xgf": round(total_xgf / len(pair_keys), 2),
+                "xga": round(total_xga / len(pair_keys), 2),
+                "xgf_pct": xgf_pct,
+            }
+        )
+        label = f"Line {rank}" if unit["unit_type"] == "F" else f"D{rank}"
         names = f"{name(players[0])} / {name(players[1])}" + (f" / {name(p3)}" if p3 else "")
-        toi_min = round(unit['toi_secs'] / 60, 1)
-        print(f"  {label:6s}  {names:<45}  {toi_min}m  xGF%={xgf_pct*100:.1f}%" if xgf_pct else
-              f"  {label:6s}  {names:<45}  {toi_min}m  xGF%=—")
+        toi_min = round(unit["toi_secs"] / 60, 1)
+        print(
+            f"  {label:6s}  {names:<45}  {toi_min}m  xGF%={xgf_pct * 100:.1f}%"
+            if xgf_pct
+            else f"  {label:6s}  {names:<45}  {toi_min}m  xGF%=—"
+        )
 
     # 8. Delete old rows for this season/team, then insert fresh
     print(f"\n  Upserting {len(rows)} line combination rows...")
-    client.table('line_combinations') \
-        .delete() \
-        .eq('season', season) \
-        .eq('team', TEAM) \
-        .execute()
+    client.table("line_combinations").delete().eq("season", season).eq("team", TEAM).execute()
     for i in range(0, len(rows), 500):
-        client.table('line_combinations').insert(rows[i:i+500]).execute()
+        client.table("line_combinations").insert(rows[i : i + 500]).execute()
     print(f"  ✓ line_combinations: {len(rows)} rows written")
     print("\nLine combinations pipeline complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
+
     season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
     run(season_arg)

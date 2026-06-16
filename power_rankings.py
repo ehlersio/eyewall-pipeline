@@ -23,35 +23,67 @@ Usage:
 import argparse
 import os
 import time
+from datetime import date
+
 import requests
-from datetime import date, datetime, timezone
 from dotenv import load_dotenv
 from supabase import create_client
 from supabase.lib.client_options import ClientOptions
 
 load_dotenv()
 
-SUPABASE_URL  = os.environ["SUPABASE_URL"]
-SUPABASE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON    = int(os.environ.get("NHL_SEASON", "20252026"))
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 
 CF_ACCOUNT_ID = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-CF_API_KEY    = os.environ["CLOUDFLARE_API_KEY"]
-CF_MODEL      = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
+CF_API_KEY = os.environ["CLOUDFLARE_API_KEY"]
+CF_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 
 ALL_TEAMS = [
-    "ANA", "BOS", "BUF", "CAR", "CBJ", "CGY", "CHI", "COL",
-    "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NJD",
-    "NSH", "NYI", "NYR", "OTT", "PHI", "PIT", "SEA", "SJS",
-    "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WPG", "UTA",
+    "ANA",
+    "BOS",
+    "BUF",
+    "CAR",
+    "CBJ",
+    "CGY",
+    "CHI",
+    "COL",
+    "DAL",
+    "DET",
+    "EDM",
+    "FLA",
+    "LAK",
+    "MIN",
+    "MTL",
+    "NJD",
+    "NSH",
+    "NYI",
+    "NYR",
+    "OTT",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SJS",
+    "STL",
+    "TBL",
+    "TOR",
+    "UTA",
+    "VAN",
+    "VGK",
+    "WPG",
+    "UTA",
 ]
 # Deduplicate while preserving order
 ALL_TEAMS = list(dict.fromkeys(ALL_TEAMS))
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=30))
+supabase = create_client(
+    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=30)
+)
 
 
 # ── Cloudflare Workers AI ─────────────────────────────────────────────────────
+
 
 def generate(prompt: str, system: str = None) -> str | None:
     messages = []
@@ -63,7 +95,7 @@ def generate(prompt: str, system: str = None) -> str | None:
             f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/run/{CF_MODEL}",
             headers={
                 "Authorization": f"Bearer {CF_API_KEY}",
-                "Content-Type":  "application/json",
+                "Content-Type": "application/json",
             },
             json={"messages": messages, "max_tokens": 300},
             timeout=120,
@@ -76,6 +108,7 @@ def generate(prompt: str, system: str = None) -> str | None:
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
+
 
 def fetch_team_seasons(season: int) -> list[dict]:
     """All 32 team_seasons rows for the season (game_type=2)."""
@@ -108,13 +141,7 @@ def fetch_team_seasons(season: int) -> list[dict]:
 def fetch_goalie_ids(season: int) -> set[int]:
     """Fetch player IDs of goalies from the players table for exclusion."""
     try:
-        rows = (
-            supabase.table("players")
-            .select("id")
-            .eq("position", "G")
-            .execute()
-            .data
-        )
+        rows = supabase.table("players").select("id").eq("position", "G").execute().data
         return {r["id"] for r in (rows or [])}
     except Exception:
         return set()
@@ -186,10 +213,7 @@ def fetch_top_players_for_team(team: str, season: int, skater_rows: list[dict]) 
     Top 5 skaters by WAR for a team. If current season GP < 10, falls back
     to fetching prior season rows from Supabase.
     """
-    current = [
-        r for r in skater_rows
-        if r["team"] == team and r.get("war") is not None
-    ]
+    current = [r for r in skater_rows if r["team"] == team and r.get("war") is not None]
     current.sort(key=lambda x: x["war"] or 0, reverse=True)
 
     max_gp = max((r.get("games_played") or 0 for r in current), default=0)
@@ -219,19 +243,16 @@ def fetch_top_players_for_team(team: str, season: int, skater_rows: list[dict]) 
 def fetch_player_names(player_ids: list[int]) -> dict[int, str]:
     if not player_ids:
         return {}
-    rows = (
-        supabase.table("players")
-        .select("id,name")
-        .in_("id", player_ids)
-        .execute()
-        .data
-    )
+    rows = supabase.table("players").select("id,name").in_("id", player_ids).execute().data
     return {r["id"]: r["name"] for r in (rows or [])}
 
 
 # ── Roster WAR score ──────────────────────────────────────────────────────────
 
-def compute_roster_war_scores(skater_rows: list[dict], goalie_rows: list[dict], season: int) -> dict[str, float]:
+
+def compute_roster_war_scores(
+    skater_rows: list[dict], goalie_rows: list[dict], season: int
+) -> dict[str, float]:
     """
     For each team: sum top-18 skater WAR + top goalie GSAX.
     Returns {team: raw_war_score} (not yet normalised).
@@ -247,7 +268,7 @@ def compute_roster_war_scores(skater_rows: list[dict], goalie_rows: list[dict], 
     by_team: dict[str, list[float]] = {}
     for r in skater_rows:
         team = r["team"]
-        war  = r.get("war")
+        war = r.get("war")
         if war is None:
             continue
         by_team.setdefault(team, []).append(float(war))
@@ -256,7 +277,7 @@ def compute_roster_war_scores(skater_rows: list[dict], goalie_rows: list[dict], 
     for team in ALL_TEAMS:
         wars = sorted(by_team.get(team, []), reverse=True)[:18]
         skater_war = sum(wars)
-        gsax       = goalie_map.get(team, 0.0)
+        gsax = goalie_map.get(team, 0.0)
         scores[team] = skater_war + gsax
 
     return scores
@@ -273,6 +294,7 @@ def normalise(values: dict[str, float]) -> dict[str, float]:
 
 
 # ── Power ranking formula ─────────────────────────────────────────────────────
+
 
 def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]) -> list[dict]:
     """
@@ -305,80 +327,82 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
     teams = []
     for t in team_seasons:
         team = t["team"]
-        gp   = t.get("games_played") or 1
-        pts  = t.get("points") or 0
-        gf   = t.get("goals_for") or 0
-        ga   = t.get("goals_against") or 0
-        pp   = t.get("pp_pct") or 0
-        pk   = t.get("pk_pct") or 0
+        gp = t.get("games_played") or 1
+        pts = t.get("points") or 0
+        gf = t.get("goals_for") or 0
+        ga = t.get("goals_against") or 0
+        pp = t.get("pp_pct") or 0
+        pk = t.get("pk_pct") or 0
         # Normalise pp/pk — may be stored as 0–100 or 0–1
         pp = pp / 100 if pp > 1 else pp
         pk = pk / 100 if pk > 1 else pk
 
         # L10 — now available from team_seasons (populated by nhl_stats.py)
-        l10w  = t.get("l10_wins")      or 0
-        l10l  = t.get("l10_losses")    or 0
+        l10w = t.get("l10_wins") or 0
+        l10l = t.get("l10_losses") or 0
         l10ot = t.get("l10_ot_losses") or 0
         l10gp = (l10w + l10l + l10ot) or 10  # fallback to 10 if missing
 
-        teams.append({
-            "team":       team,
-            "gp":         gp,
-            "wins":       t.get("wins") or 0,
-            "losses":     t.get("losses") or 0,
-            "ot_losses":  t.get("ot_losses") or 0,
-            "pts_pct":    pts / (gp * 2),
-            "l10_pts_pct": ((l10w * 2) + l10ot) / (l10gp * 2),
-            "gd_pg":      (gf - ga) / gp,
-            "xgf_pct":    t.get("xgf_pct"),
-            "sp_pct":     (pp + pk) / 2,
-            "pp_pct":     pp,
-            "pk_pct":     pk,
-            "roster_war": roster_war_norm.get(team, 0.5),
-            "l10":        f"{l10w}-{l10l}-{l10ot}",
-        })
+        teams.append(
+            {
+                "team": team,
+                "gp": gp,
+                "wins": t.get("wins") or 0,
+                "losses": t.get("losses") or 0,
+                "ot_losses": t.get("ot_losses") or 0,
+                "pts_pct": pts / (gp * 2),
+                "l10_pts_pct": ((l10w * 2) + l10ot) / (l10gp * 2),
+                "gd_pg": (gf - ga) / gp,
+                "xgf_pct": t.get("xgf_pct"),
+                "sp_pct": (pp + pk) / 2,
+                "pp_pct": pp,
+                "pk_pct": pk,
+                "roster_war": roster_war_norm.get(team, 0.5),
+                "l10": f"{l10w}-{l10l}-{l10ot}",
+            }
+        )
 
     # Blending alpha — based on team with most games played
     max_gp = max((t["gp"] for t in teams), default=0)
-    alpha  = min(max_gp / 20.0, 1.0)
+    alpha = min(max_gp / 20.0, 1.0)
 
     # Weights — now matches frontend formula exactly (25/25/20/20/10 + WAR taper)
     W_BASE = {"pts": 0.25, "l10": 0.25, "gd": 0.20, "xgf": 0.20, "sp": 0.10}
-    w_war  = 0.15 * (1.0 - alpha)
-    scale  = (1.0 - w_war)
-    W      = {k: v * scale for k, v in W_BASE.items()}
+    w_war = 0.15 * (1.0 - alpha)
+    scale = 1.0 - w_war
+    W = {k: v * scale for k, v in W_BASE.items()}
 
     def norm_component(key):
         vals = {t["team"]: t[key] for t in teams if t.get(key) is not None}
         if not vals:
             return lambda team: 0.5
-        mn  = min(vals.values())
+        mn = min(vals.values())
         rng = max(vals.values()) - mn or 1.0
         return lambda team: (vals[team] - mn) / rng if team in vals else 0.5
 
     n_pts = norm_component("pts_pct")
     n_l10 = norm_component("l10_pts_pct")
-    n_gd  = norm_component("gd_pg")
+    n_gd = norm_component("gd_pg")
     n_xgf = norm_component("xgf_pct")
-    n_sp  = norm_component("sp_pct")
+    n_sp = norm_component("sp_pct")
 
     for t in teams:
         team = t["team"]
         t["score"] = (
-            n_pts(team) * W["pts"] +
-            n_l10(team) * W["l10"] +
-            n_gd(team)  * W["gd"]  +
-            n_xgf(team) * W["xgf"] +
-            n_sp(team)  * W["sp"]  +
-            t["roster_war"] * w_war
+            n_pts(team) * W["pts"]
+            + n_l10(team) * W["l10"]
+            + n_gd(team) * W["gd"]
+            + n_xgf(team) * W["xgf"]
+            + n_sp(team) * W["sp"]
+            + t["roster_war"] * w_war
         )
         t["component_ranks"] = {
-            "pts":  n_pts(team),
-            "l10":  n_l10(team),
-            "gd":   n_gd(team),
-            "xgf":  n_xgf(team),
-            "sp":   n_sp(team),
-            "war":  t["roster_war"],
+            "pts": n_pts(team),
+            "l10": n_l10(team),
+            "gd": n_gd(team),
+            "xgf": n_xgf(team),
+            "sp": n_sp(team),
+            "war": t["roster_war"],
         }
 
     teams.sort(key=lambda x: x["score"], reverse=True)
@@ -396,6 +420,7 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
 
 # ── Narrative prompt ──────────────────────────────────────────────────────────
 
+
 def build_power_rankings_prompt(
     team: str,
     ranked: list[dict],
@@ -411,22 +436,22 @@ def build_power_rankings_prompt(
     if not team_data:
         return None, None
 
-    rank      = team_data["rank"]
-    gp        = team_data["gp"]
-    pts_pct   = team_data["pts_pct"] * 100
-    gd_pg     = team_data["gd_pg"]
-    xgf_pct   = team_data.get("xgf_pct")
-    pp_pct    = team_data.get("pp_pct", 0) * 100
-    pk_pct    = team_data.get("pk_pct", 0) * 100
-    l10       = team_data.get("l10", "?-?-?")
-    l10_pct   = team_data.get("l10_pts_pct", 0) * 100
-    pts_rank  = team_data.get("pts_pct_rank", "?")
-    l10_rank  = team_data.get("l10_pts_pct_rank", "?")
-    gd_rank   = team_data.get("gd_pg_rank", "?")
-    xgf_rank  = team_data.get("xgf_pct_rank", "?")
-    sp_rank   = team_data.get("sp_pct_rank", "?")
-    wins      = team_data.get("wins", 0)
-    losses    = team_data.get("losses", 0)
+    rank = team_data["rank"]
+    gp = team_data["gp"]
+    pts_pct = team_data["pts_pct"] * 100
+    gd_pg = team_data["gd_pg"]
+    xgf_pct = team_data.get("xgf_pct")
+    pp_pct = team_data.get("pp_pct", 0) * 100
+    pk_pct = team_data.get("pk_pct", 0) * 100
+    l10 = team_data.get("l10", "?-?-?")
+    l10_pct = team_data.get("l10_pts_pct", 0) * 100
+    pts_rank = team_data.get("pts_pct_rank", "?")
+    l10_rank = team_data.get("l10_pts_pct_rank", "?")
+    gd_rank = team_data.get("gd_pg_rank", "?")
+    xgf_rank = team_data.get("xgf_pct_rank", "?")
+    sp_rank = team_data.get("sp_pct_rank", "?")
+    wins = team_data.get("wins", 0)
+    losses = team_data.get("losses", 0)
     ot_losses = team_data.get("ot_losses", 0)
 
     # Movement
@@ -453,11 +478,11 @@ def build_power_rankings_prompt(
     # Top players block — only names from this list may be referenced
     player_lines = []
     for p in top_players[:5]:
-        pid  = p.get("player_id")
+        pid = p.get("player_id")
         name = player_names.get(pid, f"Player {pid}")
-        war  = p.get("war")
-        pts  = p.get("points") or 0
-        pgp  = p.get("games_played") or 0
+        war = p.get("war")
+        pts = p.get("points") or 0
+        pgp = p.get("games_played") or 0
         war_str = f"WAR {war:+.2f}" if war is not None else "WAR n/a"
         player_lines.append(f"  {name}: {pts}pts in {pgp}GP | {war_str}")
 
@@ -465,10 +490,10 @@ def build_power_rankings_prompt(
 
     # Full rankings snapshot (top 10 + this team's neighbourhood)
     def rank_line(t):
-        xgf_str = f"{t['xgf_pct']*100:.1f}%" if t.get("xgf_pct") else "—"
+        xgf_str = f"{t['xgf_pct'] * 100:.1f}%" if t.get("xgf_pct") else "—"
         return (
             f"  {t['rank']:2}. {t['team']}  "
-            f"Pts% {t['pts_pct']*100:.1f}%  "
+            f"Pts% {t['pts_pct'] * 100:.1f}%  "
             f"GD/GP {t['gd_pg']:+.2f}  "
             f"xGF% {xgf_str}  "
             f"W-L-OT {t['wins']}-{t['losses']}-{t['ot_losses']}"
@@ -482,8 +507,7 @@ def build_power_rankings_prompt(
             neighbours.append(rank_line(t))
 
     all_32_summary = "\n".join(
-        f"  {t['rank']:2}. {t['team']} ({t['wins']}-{t['losses']}-{t['ot_losses']})"
-        for t in ranked
+        f"  {t['rank']:2}. {t['team']} ({t['wins']}-{t['losses']}-{t['ot_losses']})" for t in ranked
     )
 
     prompt = f"""POWER RANKINGS NARRATIVE — {team}
@@ -497,7 +521,7 @@ COMPONENT BREAKDOWN FOR {team}:
   Points %:      {pts_pct:.1f}% (rank {pts_rank}/32)
   L10 points %:  {l10_pct:.1f}% — last 10: {l10} (rank {l10_rank}/32)
   Goal diff/GP:  {gd_pg:+.2f} (rank {gd_rank}/32)
-  5v5 xGF%:      {f"{xgf_pct*100:.1f}%" if xgf_pct else "no data yet"} (rank {xgf_rank}/32)
+  5v5 xGF%:      {f"{xgf_pct * 100:.1f}%" if xgf_pct else "no data yet"} (rank {xgf_rank}/32)
   Special teams: PP {pp_pct:.1f}% / PK {pk_pct:.1f}% (rank {sp_rank}/32)
 
 TOP PLAYERS ON {team} ROSTER (by WAR — ONLY reference players listed here):
@@ -532,36 +556,38 @@ Plain text only. No bullet points. No markdown. 80-120 words exactly."""
 
 # ── Upsert helpers ────────────────────────────────────────────────────────────
 
+
 def upsert_roster_war_scores(war_scores: dict[str, float], season: int) -> None:
     rows = [
         {"team": team, "season": season, "game_type": 2, "roster_war_score": round(score, 4)}
         for team, score in war_scores.items()
     ]
-    supabase.table("team_seasons").upsert(
-        rows, on_conflict="team,season,game_type"
-    ).execute()
+    supabase.table("team_seasons").upsert(rows, on_conflict="team,season,game_type").execute()
     print(f"  ✓ roster_war_score written for {len(rows)} teams")
 
 
-def upsert_narrative(team: str, season: int, today: date, rank: int, prior_rank: int | None, narrative: str | None) -> None:
+def upsert_narrative(
+    team: str, season: int, today: date, rank: int, prior_rank: int | None, narrative: str | None
+) -> None:
     supabase.table("power_rankings_narratives").upsert(
         {
-            "team":           team,
-            "season":         season,
+            "team": team,
+            "season": season,
             "generated_date": today.isoformat(),
-            "rank":           rank,
-            "prior_rank":     prior_rank,
-            "narrative":      narrative,
+            "rank": rank,
+            "prior_rank": prior_rank,
+            "narrative": narrative,
         },
-        on_conflict="team,season,generated_date"
+        on_conflict="team,season,generated_date",
     ).execute()
 
 
 # ── Main run ──────────────────────────────────────────────────────────────────
 
+
 def run(season: int = None, team: str = None, dry_run: bool = False, no_narrative: bool = False):
     season = season or NHL_SEASON
-    today  = date.today()
+    today = date.today()
 
     print(f"\n--- Power rankings ({season}) ---")
 
@@ -604,11 +630,11 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
             skipped += 1
             continue
 
-        rank       = team_rank_data["rank"]
+        rank = team_rank_data["rank"]
         prior_rank = prior_ranks.get(t)
         top_players = fetch_top_players_for_team(t, season, skater_rows)
-        player_ids  = [p["player_id"] for p in top_players if p.get("player_id")]
-        names       = fetch_player_names(player_ids)
+        player_ids = [p["player_id"] for p in top_players if p.get("player_id")]
+        names = fetch_player_names(player_ids)
 
         if no_narrative:
             if not dry_run:
@@ -628,9 +654,9 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
         )
 
         if dry_run:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"DRY RUN — {t} (rank {rank})")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             print(prompt)
             ok += 1
             continue
@@ -657,10 +683,12 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="EyeWall power rankings pipeline")
-    parser.add_argument("--season",       type=int,  default=None,  help="Season e.g. 20252026")
-    parser.add_argument("--team",         default=None,              help="Single team e.g. CAR")
-    parser.add_argument("--dry-run",      action="store_true",       help="Print prompts, skip DB writes")
-    parser.add_argument("--no-narrative", action="store_true",       help="Rankings only, skip AI generation")
+    parser.add_argument("--season", type=int, default=None, help="Season e.g. 20252026")
+    parser.add_argument("--team", default=None, help="Single team e.g. CAR")
+    parser.add_argument("--dry-run", action="store_true", help="Print prompts, skip DB writes")
+    parser.add_argument(
+        "--no-narrative", action="store_true", help="Rankings only, skip AI generation"
+    )
     args = parser.parse_args()
 
     run(
