@@ -54,7 +54,7 @@ jobs:
             DATA=$(curl -fsSL \
               -H "User-Agent: EyeWall-Analytics-Bot/1.0 (NHL analytics app; contact via eyewallanalytics.com)" \
               -H "Accept: application/json" \
-              "https://www.reddit.com/r/${sub}/new.json?limit=25" 2>/dev/null || echo "null")
+              "https://old.reddit.com/r/${sub}/new.json?limit=25" 2>/dev/null || echo "null")
             if [ "$DATA" = "null" ] || [ -z "$DATA" ]; then
               echo "  Skipping $abbr (fetch failed)"
               continue
