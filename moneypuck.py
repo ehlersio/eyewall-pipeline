@@ -111,6 +111,76 @@ def run_game_xg(client, season: int):
     print(f"  ✓ game_xg: {len(upserts)} rows upserted")
 
 
+def run_team_xgf_rollup(client, season: int):
+    """Aggregate game_xg into team_seasons.xgf_pct.
+
+    Sums xgf and xga across all 5v5 games per team, then computes
+    xgf_pct = xgf / (xgf + xga). This avoids the error of averaging
+    per-game percentages (which would weight short games equally).
+
+    Writes only the xgf_pct column — other team_seasons columns are
+    owned by nhl_stats.py and are not touched here.
+    """
+    print("\n--- Team XGF% rollup (game_xg → team_seasons) ---")
+    try:
+        # Supabase project cap is 999 rows — paginate with .range()
+        rows = []
+        offset = 0
+        while True:
+            batch = (
+                client.table("game_xg")
+                .select("team,xgf,xga")
+                .eq("season", season)
+                .eq("situation", "5on5")
+                .range(offset, offset + 999)
+                .execute()
+                .data
+            )
+            if not batch:
+                break
+            rows.extend(batch)
+            if len(batch) < 999:
+                break
+            offset += 999
+    except Exception as e:
+        print(f"  WARNING: Could not fetch game_xg rows: {e}")
+        return
+
+    if not rows:
+        print("  No game_xg rows found — skipping rollup")
+        return
+
+    print(f"  Fetched {len(rows)} game_xg rows")
+
+    # Sum xgf and xga per team
+    totals: dict[str, dict] = {}
+    for r in rows:
+        team = r.get("team", "")
+        if not team:
+            continue
+        t = totals.setdefault(team, {"xgf": 0.0, "xga": 0.0})
+        t["xgf"] += r.get("xgf") or 0.0
+        t["xga"] += r.get("xga") or 0.0
+
+    upserts = []
+    for team, t in totals.items():
+        total = t["xgf"] + t["xga"]
+        xgf_pct = round(t["xgf"] / total, 4) if total > 0 else None
+        upserts.append({
+            "team":      team,
+            "season":    season,
+            "game_type": 2,
+            "xgf_pct":   xgf_pct,
+        })
+
+    print(f"  Upserting xgf_pct for {len(upserts)} teams...")
+    client.table("team_seasons").upsert(
+        upserts,
+        on_conflict="team,season,game_type"
+    ).execute()
+    print(f"  ✓ team_seasons.xgf_pct: {len(upserts)} rows updated")
+
+
 def run_goalie_qs(client, season: int):
     """Compute Quality Start % from shot_events in Supabase.
 
@@ -146,9 +216,9 @@ def run_goalie_qs(client, season: int):
                 if r['event_type'] == 'shot-on-goal':
                     goalie_game_stats[key]['sv'] += 1
             total_rows += len(rows)
-            if len(rows) < 1000:
+            if len(rows) < 999:
                 break
-            offset += 1000
+            offset += 999
 
         print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
 
@@ -342,7 +412,7 @@ def run(season: int = NHL_SEASON):
                 break
             for r in rows:
                 rapm_map[r['player_id']] = r['rapm']
-            offset += 1000
+            offset += 999
         print(f"  Loaded RAPM for {len(rapm_map)} players")
     except Exception as e:
         print(f"  WARNING: Could not load RAPM values: {e}")
@@ -454,6 +524,7 @@ def run(season: int = NHL_SEASON):
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
 
     run_game_xg(client, season)
+    run_team_xgf_rollup(client, season)
     run_goalie_qs(client, season)
 
     print("\n✅ MoneyPuck analytics pipeline complete")
