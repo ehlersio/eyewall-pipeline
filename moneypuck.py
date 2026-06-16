@@ -451,7 +451,6 @@ def run(season: int = NHL_SEASON):
 
     run_game_xg(client, season)
     run_goalie_qs(client, season)
-    run_team_xg_season(client, season)
 
     print("\n✅ MoneyPuck analytics pipeline complete")
 
