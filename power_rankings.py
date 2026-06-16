@@ -87,7 +87,8 @@ def fetch_team_seasons(season: int) -> list[dict]:
             .select(
                 "team,games_played,wins,losses,ot_losses,points,"
                 "goals_for,goals_against,goals_for_pg,goals_ag_pg,"
-                "pp_pct,pk_pct,xgf_pct"
+                "pp_pct,pk_pct,xgf_pct,"
+                "l10_wins,l10_losses,l10_ot_losses"
             )
             .eq("season", season)
             .eq("game_type", 2)
@@ -314,32 +315,38 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
         pp = pp / 100 if pp > 1 else pp
         pk = pk / 100 if pk > 1 else pk
 
+        # L10 — now available from team_seasons (populated by nhl_stats.py)
+        l10w  = t.get("l10_wins")      or 0
+        l10l  = t.get("l10_losses")    or 0
+        l10ot = t.get("l10_ot_losses") or 0
+        l10gp = (l10w + l10l + l10ot) or 10  # fallback to 10 if missing
+
         teams.append({
-            "team":    team,
-            "gp":      gp,
-            "wins":    t.get("wins") or 0,
-            "losses":  t.get("losses") or 0,
-            "ot_losses": t.get("ot_losses") or 0,
-            "pts_pct": pts / (gp * 2),
-            "gd_pg":   (gf - ga) / gp,
-            "xgf_pct": t.get("xgf_pct"),      # may be None early season
-            "sp_pct":  (pp + pk) / 2,
-            "pp_pct":  pp,
-            "pk_pct":  pk,
+            "team":       team,
+            "gp":         gp,
+            "wins":       t.get("wins") or 0,
+            "losses":     t.get("losses") or 0,
+            "ot_losses":  t.get("ot_losses") or 0,
+            "pts_pct":    pts / (gp * 2),
+            "l10_pts_pct": ((l10w * 2) + l10ot) / (l10gp * 2),
+            "gd_pg":      (gf - ga) / gp,
+            "xgf_pct":    t.get("xgf_pct"),
+            "sp_pct":     (pp + pk) / 2,
+            "pp_pct":     pp,
+            "pk_pct":     pk,
             "roster_war": roster_war_norm.get(team, 0.5),
+            "l10":        f"{l10w}-{l10l}-{l10ot}",
         })
 
     # Blending alpha — based on team with most games played
     max_gp = max((t["gp"] for t in teams), default=0)
     alpha  = min(max_gp / 20.0, 1.0)
 
-    # Weights before blending (no L10 available server-side)
-    W_BASE = {"pts": 0.40, "gd": 0.25, "xgf": 0.25, "sp": 0.10}
-    # Roster WAR weight tapers from 0.15 → 0 as alpha goes 0 → 1
-    w_war = 0.15 * (1.0 - alpha)
-    # Redistribute remaining weight proportionally from base weights
-    scale = (1.0 - w_war)
-    W = {k: v * scale for k, v in W_BASE.items()}
+    # Weights — now matches frontend formula exactly (25/25/20/20/10 + WAR taper)
+    W_BASE = {"pts": 0.25, "l10": 0.25, "gd": 0.20, "xgf": 0.20, "sp": 0.10}
+    w_war  = 0.15 * (1.0 - alpha)
+    scale  = (1.0 - w_war)
+    W      = {k: v * scale for k, v in W_BASE.items()}
 
     def norm_component(key):
         vals = {t["team"]: t[key] for t in teams if t.get(key) is not None}
@@ -350,6 +357,7 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
         return lambda team: (vals[team] - mn) / rng if team in vals else 0.5
 
     n_pts = norm_component("pts_pct")
+    n_l10 = norm_component("l10_pts_pct")
     n_gd  = norm_component("gd_pg")
     n_xgf = norm_component("xgf_pct")
     n_sp  = norm_component("sp_pct")
@@ -358,6 +366,7 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
         team = t["team"]
         t["score"] = (
             n_pts(team) * W["pts"] +
+            n_l10(team) * W["l10"] +
             n_gd(team)  * W["gd"]  +
             n_xgf(team) * W["xgf"] +
             n_sp(team)  * W["sp"]  +
@@ -365,6 +374,7 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
         )
         t["component_ranks"] = {
             "pts":  n_pts(team),
+            "l10":  n_l10(team),
             "gd":   n_gd(team),
             "xgf":  n_xgf(team),
             "sp":   n_sp(team),
@@ -376,7 +386,7 @@ def compute_rankings(team_seasons: list[dict], roster_war_norm: dict[str, float]
         t["rank"] = i + 1
 
     # Add per-component rank (1=best)
-    for comp in ("pts_pct", "gd_pg", "xgf_pct", "sp_pct"):
+    for comp in ("pts_pct", "l10_pts_pct", "gd_pg", "xgf_pct", "sp_pct"):
         sorted_by = sorted(teams, key=lambda x: x.get(comp) or 0, reverse=True)
         for rank_i, t in enumerate(sorted_by):
             t[f"{comp}_rank"] = rank_i + 1
@@ -408,7 +418,10 @@ def build_power_rankings_prompt(
     xgf_pct   = team_data.get("xgf_pct")
     pp_pct    = team_data.get("pp_pct", 0) * 100
     pk_pct    = team_data.get("pk_pct", 0) * 100
+    l10       = team_data.get("l10", "?-?-?")
+    l10_pct   = team_data.get("l10_pts_pct", 0) * 100
     pts_rank  = team_data.get("pts_pct_rank", "?")
+    l10_rank  = team_data.get("l10_pts_pct_rank", "?")
     gd_rank   = team_data.get("gd_pg_rank", "?")
     xgf_rank  = team_data.get("xgf_pct_rank", "?")
     sp_rank   = team_data.get("sp_pct_rank", "?")
@@ -482,6 +495,7 @@ CURRENT RANK: {rank}/32 — {movement_str}
 
 COMPONENT BREAKDOWN FOR {team}:
   Points %:      {pts_pct:.1f}% (rank {pts_rank}/32)
+  L10 points %:  {l10_pct:.1f}% — last 10: {l10} (rank {l10_rank}/32)
   Goal diff/GP:  {gd_pg:+.2f} (rank {gd_rank}/32)
   5v5 xGF%:      {f"{xgf_pct*100:.1f}%" if xgf_pct else "no data yet"} (rank {xgf_rank}/32)
   Special teams: PP {pp_pct:.1f}% / PK {pk_pct:.1f}% (rank {sp_rank}/32)

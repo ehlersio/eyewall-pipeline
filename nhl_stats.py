@@ -120,6 +120,27 @@ def fetch_team_stats(season: int, game_type: int) -> list:
     data = nhl_get(url, params)
     return data.get('data', []) if data else []
 
+def fetch_standings_l10() -> dict:
+    """
+    Fetches current standings and returns L10 record keyed by team abbr.
+    Returns { 'CAR': {'l10_wins': 7, 'l10_losses': 2, 'l10_ot_losses': 1}, ... }
+    Only meaningful for regular season (game_type=2).
+    """
+    data = nhl_get(f'{NHL_BASE}/standings/now')
+    if not data:
+        return {}
+    result = {}
+    for t in data.get('standings', []):
+        abbr = t.get('teamAbbrev', {}).get('default') or t.get('teamAbbrev')
+        if not abbr:
+            continue
+        result[abbr] = {
+            'l10_wins':      t.get('l10Wins', 0),
+            'l10_losses':    t.get('l10Losses', 0),
+            'l10_ot_losses': t.get('l10OtLosses', 0),
+        }
+    return result
+
 def fetch_schedule(team: str, season: int) -> list:
     data = nhl_get(f'{NHL_BASE}/club-schedule-season/{team}/{season}')
     return data.get('games', []) if data else []
@@ -232,6 +253,11 @@ def run(season: int = NHL_SEASON):
     # ── 4. Team stats ─────────────────────────────────────────────
     print("\n[4/5] Fetching team stats...")
 
+    # L10 is only in the standings endpoint (not the summary endpoint).
+    # Fetch once — keyed by team abbr — and apply to game_type=2 rows only.
+    l10_map = fetch_standings_l10()
+    print(f"  L10 data: {len(l10_map)} teams from standings")
+
     # Build teamId → abbreviation map from standings endpoint
     # NHL team IDs are stable — hardcode the mapping
     TEAM_ID_TO_ABBR = {
@@ -252,23 +278,28 @@ def run(season: int = NHL_SEASON):
             abbr = TEAM_ID_TO_ABBR.get(tid, '')
             if not abbr:
                 continue  # skip if we can't identify the team
+            l10 = l10_map.get(abbr, {}) if game_type == 2 else {}
             rows.append({
-                'team':          abbr,
-                'season':        season,
-                'game_type':     game_type,
-                'games_played':  t.get('gamesPlayed'),
-                'wins':          t.get('wins'),
-                'losses':        t.get('losses'),
-                'ot_losses':     t.get('otLosses'),
-                'points':        t.get('points'),
-                'goals_for':     t.get('goalsFor'),
-                'goals_against': t.get('goalsAgainst'),
-                'goals_for_pg':  t.get('goalsForPerGame'),
-                'goals_ag_pg':   t.get('goalsAgainstPerGame'),
-                'pp_pct':        t.get('powerPlayPct'),
-                'pk_pct':        t.get('penaltyKillPct'),
-                'shots_for_pg':  t.get('shotsForPerGame'),
-                'shots_ag_pg':   t.get('shotsAgainstPerGame'),
+                'team':           abbr,
+                'season':         season,
+                'game_type':      game_type,
+                'games_played':   t.get('gamesPlayed'),
+                'wins':           t.get('wins'),
+                'losses':         t.get('losses'),
+                'ot_losses':      t.get('otLosses'),
+                'points':         t.get('points'),
+                'goals_for':      t.get('goalsFor'),
+                'goals_against':  t.get('goalsAgainst'),
+                'goals_for_pg':   t.get('goalsForPerGame'),
+                'goals_ag_pg':    t.get('goalsAgainstPerGame'),
+                'pp_pct':         t.get('powerPlayPct'),
+                'pk_pct':         t.get('penaltyKillPct'),
+                'shots_for_pg':   t.get('shotsForPerGame'),
+                'shots_ag_pg':    t.get('shotsAgainstPerGame'),
+                # L10 — regular season only (null for playoffs)
+                'l10_wins':       l10.get('l10_wins'),
+                'l10_losses':     l10.get('l10_losses'),
+                'l10_ot_losses':  l10.get('l10_ot_losses'),
             })
         # Deduplicate
         seen = set()
