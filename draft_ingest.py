@@ -11,15 +11,16 @@ Usage on draft day (PowerShell loop):
 """
 
 import argparse
+import logging
 import os
 import sys
 import time
-import logging
-import requests
 from datetime import UTC, datetime
+
+import requests
+from dotenv import load_dotenv
 from supabase import create_client
 from supabase.lib.client_options import ClientOptions
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -111,9 +112,7 @@ def seed_rankings():
     # Check if already seeded
     existing = sb.table("draft_rankings_2026").select("id", count="exact").execute()
     if existing.count and existing.count > 0:
-        log.info(
-            f"Rankings already seeded ({existing.count} rows). Use --force to re-seed."
-        )
+        log.info(f"Rankings already seeded ({existing.count} rows). Use --force to re-seed.")
         return
 
     all_rows = []
@@ -176,11 +175,7 @@ def seed_order():
     """Seed the known R1 draft order into draft_pick_order_2026."""
     sb = get_supabase()
 
-    existing = (
-        sb.table("draft_pick_order_2026")
-        .select("pick_overall", count="exact")
-        .execute()
-    )
+    existing = sb.table("draft_pick_order_2026").select("pick_overall", count="exact").execute()
     if existing.count and existing.count > 0:
         log.info(f"Pick order already seeded ({existing.count} rows).")
         return
@@ -299,9 +294,7 @@ def poll_picks():
         league = prospect.get("lastAmateurLeague") or pick.get("lastAmateurLeague", "")
         country = prospect.get("birthCountry") or pick.get("birthCountry", "")
 
-        team = pick.get("teamAbbrev") or (pick.get("teamId", {}) or {}).get(
-            "abbrev", ""
-        )
+        team = pick.get("teamAbbrev") or (pick.get("teamId", {}) or {}).get("abbrev", "")
 
         # Look up ranking
         name_key = f"{first.lower()}_{last.lower()}"
@@ -362,9 +355,7 @@ def main():
     parser.add_argument("--seed-rankings", action="store_true")
     parser.add_argument("--seed-order", action="store_true")
     parser.add_argument("--poll-picks", action="store_true")
-    parser.add_argument(
-        "--force", action="store_true", help="Re-seed even if data exists"
-    )
+    parser.add_argument("--force", action="store_true", help="Re-seed even if data exists")
     args = parser.parse_args()
 
     if not any([args.seed_rankings, args.seed_order, args.poll_picks]):
