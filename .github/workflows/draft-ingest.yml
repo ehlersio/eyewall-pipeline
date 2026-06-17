@@ -31,26 +31,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
         run: |
-          # Debug: print raw API response to diagnose auth/permission issues
           CF_RESPONSE=$(curl -s -X GET \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
             -H "Authorization: Bearer $CLOUDFLARE_API_KEY")
           echo "Cloudflare API response: $CF_RESPONSE"
 
-          NS_ID=$(echo "$CF_RESPONSE" | \
-            python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-if not data.get('success'):
-    print('API call failed:', data.get('errors'), file=sys.stderr)
-    sys.exit(1)
-ns = data['result']
-match = next((n['id'] for n in ns if n['title'] == 'eyewall-cache'), None)
-if not match:
-    print('Available namespaces:', [n['title'] for n in ns], file=sys.stderr)
-    sys.exit(1)
-print(match)
-")
+          NS_ID=$(echo "$CF_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('errors','')) or None if not d.get('success') else None; ns=d.get('result') or []; m=next((n['id'] for n in ns if n['title']=='eyewall-cache'),None); print([n['title'] for n in ns],file=sys.stderr) if not m else None; exit(1) if not m else print(m)")
+
           echo "KV namespace: $NS_ID"
 
           KEYS=$(curl -s -X GET \
