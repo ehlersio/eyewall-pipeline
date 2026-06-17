@@ -1,0 +1,34 @@
+name: Tankathon Draft Order Sync
+
+on:
+  schedule:
+    # Every Tuesday at 8:00 AM ET (noon UTC) — catches weekend trade activity
+    - cron: '0 12 * * 2'
+  workflow_dispatch: # manual trigger anytime a trade happens
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sync draft order from Tankathon
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python tankathon_ingest.py
+
+      - name: Summary
+        if: always()
+        run: echo "Tankathon draft order sync complete."
