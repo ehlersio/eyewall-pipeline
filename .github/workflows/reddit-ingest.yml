@@ -94,21 +94,30 @@ jobs:
             [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
           )
 
+          TMPDIR=$(mktemp -d)
           BUNDLE="{}"
+
           for sourceId in "${!FEEDS[@]}"; do
             feedUrl="${FEEDS[$sourceId]}"
             echo "Fetching $sourceId..."
-            XML=$(curl -fsSL \
+            TMPFILE="$TMPDIR/$sourceId.xml"
+            curl -fsSL \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
               -H "Accept: application/rss+xml,application/atom+xml,text/xml,*/*" \
-              "$feedUrl" 2>/dev/null || echo "")
-            if [ -z "$XML" ] || [ ${#XML} -lt 100 ]; then
+              "$feedUrl" -o "$TMPFILE" 2>/dev/null || true
+
+            if [ ! -s "$TMPFILE" ] || [ "$(wc -c < "$TMPFILE")" -lt 100 ]; then
               echo "  Skipping $sourceId (empty response)"
+              rm -f "$TMPFILE"
               continue
             fi
-            BUNDLE=$(echo "$BUNDLE" | jq --arg k "$sourceId" --arg v "$XML" '. + {($k): $v}')
+
+            # Use --rawfile to avoid ARG_MAX limits on large XML blobs
+            BUNDLE=$(jq --rawfile v "$TMPFILE" --arg k "$sourceId" '. + {($k): $v}' <<< "$BUNDLE")
             sleep 0.3
           done
+
+          rm -rf "$TMPDIR"
 
           FEED_COUNT=$(echo "$BUNDLE" | jq 'keys | length')
           echo "Atom bundle: $FEED_COUNT feeds"
