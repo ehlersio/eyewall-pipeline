@@ -26,6 +26,34 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Purge stale draft picks KV cache
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: |
+          NS_ID=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_KEY" | \
+            python3 -c "import sys,json; ns=json.load(sys.stdin)['result']; print(next(n['id'] for n in ns if n['title'] == 'eyewall-cache'))")
+          echo "KV namespace: $NS_ID"
+
+          KEYS=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$NS_ID/keys?prefix=draft%3Apicks%3A2026" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_KEY" | \
+            python3 -c "import sys,json; [print(k['name']) for k in json.load(sys.stdin).get('result', [])]")
+
+          if [ -z "$KEYS" ]; then
+            echo "No stale draft picks keys found — nothing to purge."
+          else
+            echo "$KEYS" | while read KEY; do
+              ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$KEY")
+              curl -s -X DELETE \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$NS_ID/keys/$ENCODED" \
+                -H "Authorization: Bearer $CLOUDFLARE_API_KEY"
+              echo "Deleted: $KEY"
+            done
+          fi
+
       - name: Poll picks until draft complete
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
