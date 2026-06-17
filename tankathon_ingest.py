@@ -117,8 +117,6 @@ def scrape_draft_order() -> list[dict]:
     log.info(f"  Fetched {len(html):,} bytes")
 
     rows = []
-    current_round = None
-
     # Split into round blocks by round-title divs
     # Each block: <div class="round-title">Nth Round</div><table ...>...</table>
     round_blocks = re.split(
@@ -211,7 +209,7 @@ def upsert_rows(rows: list[dict], only_round: int | None = None) -> None:
             on_conflict="pick_overall",
         ).execute()
         total_upserted += len(chunk)
-        log.info(f"  Upserted picks {chunk[0]['pick_overall']}–{chunk[-1]['pick_overall']}")
+        log.info(f"  Upserted picks {chunk[0]['pick_overall']}-{chunk[-1]['pick_overall']}")
 
     log.info(f"Done. {total_upserted} rows upserted into draft_pick_order_2026.")
 
