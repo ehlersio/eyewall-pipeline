@@ -330,6 +330,12 @@ def poll_picks():
 
     log.info(f"Done. {new_count} new picks inserted.")
 
+    # Signal draft complete to GH Actions loop (exit 99 = all 224 picks in Supabase)
+    total = sb.table("draft_picks_2026").select("pick_overall", count="exact").execute()
+    if total.count and total.count >= 224:
+        log.info("All 224 picks confirmed in Supabase. Draft complete.")
+        sys.exit(99)
+
 
 # ---------------------------------------------------------------------------
 # Entry point

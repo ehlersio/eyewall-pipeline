@@ -1,0 +1,50 @@
+name: Draft Day Ingest
+
+on:
+  schedule:
+    # Round 1 — 10:45 PM UTC = 6:45 PM ET June 26 (draft starts 7pm ET, buffer to catch first pick)
+    - cron: '45 22 26 6 *'
+    # Rounds 2–7 — 2:00 PM UTC = 10:00 AM ET June 27
+    - cron: '0 14 27 6 *'
+  workflow_dispatch: # manual backup trigger
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6hr GH Actions limit — covers full draft day
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Poll picks until draft complete
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          EYEWALL_POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+        run: |
+          echo "Starting draft pick polling loop..."
+          while true; do
+            python draft_ingest.py --poll-picks
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 99 ]; then
+              echo "All 224 picks inserted — draft complete. Exiting."
+              break
+            fi
+            echo "Sleeping 60s before next poll..."
+            sleep 60
+          done
+
+      - name: Summary
+        if: always()
+        run: echo "Draft ingest job finished."
