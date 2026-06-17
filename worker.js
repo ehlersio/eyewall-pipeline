@@ -2340,6 +2340,124 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     return json(result);
   }
 
+  // ── Draft rankings — serves NHL Central Scouting data from Supabase ──────────
+  // GET /draft/rankings?category=1   (1=NA Skater, 2=Intl Skater, 3=NA Goalie, 4=Intl Goalie)
+  // GET /draft/rankings              (returns all 4 categories, keyed by category_id)
+  if (url.pathname === '/draft/rankings') {
+    const category = url.searchParams.get('category');
+    const kvKey    = category ? `draft:rankings:2026:${category}` : 'draft:rankings:2026:all';
+
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+
+    const filter = category
+      ? `?category_id=eq.${category}&order=final_rank.asc&limit=300`
+      : `?order=category_id.asc,final_rank.asc&limit=600`;
+
+    const r = await fetch(`${SB_URL}/rest/v1/draft_rankings_2026${filter}`, {
+      headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` },
+    });
+    if (!r.ok) return json({ error: `Supabase ${r.status}` }, { status: 502 });
+    const rows = await r.json();
+
+    // If fetching all, group by category_id for convenient frontend consumption
+    let result;
+    if (!category) {
+      result = { 1: [], 2: [], 3: [], 4: [] };
+      for (const row of rows) result[row.category_id].push(row);
+    } else {
+      result = rows;
+    }
+
+    // Rankings are stable — cache 24hr
+    await kvPut(env, kvKey, result, 24 * 3600);
+    return json(result);
+  }
+
+  // ── Draft picks — live during draft, stored forever in Supabase ───────────────
+  // GET /draft/picks              — all picks (post-draft: full board)
+  // GET /draft/picks?team=CAR     — filtered by team
+  // GET /draft/picks?round=1      — filtered by round
+  if (url.pathname === '/draft/picks') {
+    const team  = url.searchParams.get('team')?.toUpperCase();
+    const round = url.searchParams.get('round');
+
+    const kvKey  = `draft:picks:2026:${team || 'all'}:${round || 'all'}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+
+    let filter = '?order=pick_overall.asc&limit=300';
+    if (team)  filter += `&team_abbrev=eq.${team}`;
+    if (round) filter += `&round=eq.${round}`;
+
+    const r = await fetch(`${SB_URL}/rest/v1/draft_picks_2026${filter}`, {
+      headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` },
+    });
+    if (!r.ok) return json({ error: `Supabase ${r.status}` }, { status: 502 });
+    const rows = await r.json();
+
+    // Short TTL during draft (60s), long after (24hr)
+    // Detect draft-in-progress: picks exist but count < 224
+    const ttl = rows.length > 0 && rows.length < 224 ? 60 : 24 * 3600;
+    await kvPut(env, kvKey, rows, ttl);
+    return json(rows);
+  }
+
+  // ── Draft pick order — projected slots pre-draft ──────────────────────────────
+  // GET /draft/order              — full R1 order (all 32 teams)
+  // GET /draft/order?team=CAR     — just this team's known slots
+  if (url.pathname === '/draft/order') {
+    const team   = url.searchParams.get('team')?.toUpperCase();
+    const kvKey  = `draft:order:2026:${team || 'all'}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+
+    let filter = '?order=pick_overall.asc&limit=32';
+    if (team) filter += `&team_abbrev=eq.${team}`;
+
+    const r = await fetch(`${SB_URL}/rest/v1/draft_pick_order_2026${filter}`, {
+      headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` },
+    });
+    if (!r.ok) return json({ error: `Supabase ${r.status}` }, { status: 502 });
+    const rows = await r.json();
+
+    await kvPut(env, kvKey, rows, 24 * 3600);
+    return json(rows);
+  }
+
+  // ── Draft pick AI analysis ────────────────────────────────────────────────────
+  // POST /draft/analyze  (secret-protected, called by draft_ingest.py on draft day)
+  // Body: { prompt: string }
+  // Returns: { analysis: string }
+  if (url.pathname === '/draft/analyze' && request.method === 'POST') {
+    const secret = request.headers.get('X-Poll-Secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+
+    let body;
+    try {
+      body = await request.json();
+      if (!body?.prompt) throw new Error('prompt required');
+    } catch (e) {
+      return new Response(`Bad request: ${e.message}`, { status: 400 });
+    }
+
+    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
+      messages: [
+        {
+          role: 'system',
+          content: `You are Sticks, the EyeWall Analytics draft analyst. You give sharp, specific 2-3 sentence pick analyses. Focus on value relative to rank, team fit, and player type. No filler. No "This is a great pick" openers. Be direct.`,
+        },
+        { role: 'user', content: body.prompt },
+      ],
+    });
+
+    const analysis = aiResponse.response?.trim() || '';
+    if (!analysis) return json({ error: 'Empty AI response' }, { status: 502 });
+
+    console.log(`Draft analyze: ${analysis.slice(0, 80)}...`);
+    return json({ analysis });
+  }
+
   return new Response('EyeWall Poller', { status: 200 });
 }
 
