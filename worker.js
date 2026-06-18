@@ -2457,16 +2457,16 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     console.log(`Draft analyze: ${analysis.slice(0, 80)}...`);
     return json({ analysis });
   }
-  // ── PWHL endpoints ────────────────────────────────────────────────────────────────────────────
+  // ── PWHL endpoints ───────────────────────────────────────────────────────────────────────────────────────────
   //
   // All PWHL data lives in Supabase (pwhl_* tables).
-  // No KV polling — data is populated by pwhl_stats.py and pwhl_shot_events.py
-  // via GitHub Actions. Worker reads Supabase, caches in KV, serves to frontend.
+  // Tables use team_id (integer) not team_code. Frontend passes ?teamId=1 so the
+  // Worker can filter by integer ID without needing a lookup table here.
   //
-  // Cache TTLs:
-  //   Standings / player stats: 1hr  (updated nightly by GH Actions)
-  //   Shot events:              6hr  (large payload, rarely changes mid-day)
-  //   Schedule / game log:      30min (scores update after games)
+  // Verified table names: pwhl_team_seasons, pwhl_player_seasons,
+  //   pwhl_goalie_seasons, pwhl_shot_events, pwhl_game_log
+  //
+  // Cache TTLs: standings/players 1hr, shots 6hr, schedule 30min
 
   // GET /pwhl/standings?season=8
   if (url.pathname === '/pwhl/standings') {
@@ -2475,7 +2475,7 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
     const r = await fetch(
-      `${SB_URL}/rest/v1/pwhl_team_stats?season_id=eq.${season}&order=points.desc&limit=12`,
+      `${SB_URL}/rest/v1/pwhl_team_seasons?season_id=eq.${season}&season_type=eq.regular&order=points.desc&limit=12`,
       { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
     );
     if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
@@ -2484,21 +2484,21 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     return json(rows);
   }
 
-  // GET /pwhl/players?team=BOS&season=8
+  // GET /pwhl/players?teamId=1&season=8
   if (url.pathname === '/pwhl/players') {
     const season = parseInt(url.searchParams.get('season') || '8', 10);
-    const team   = url.searchParams.get('team')?.toUpperCase() || null;
-    if (!team) return new Response(JSON.stringify({ error: 'team param required' }), { status: 400, headers: corsHeaders() });
-    const kvKey  = `pwhl:players:${team}:${season}`;
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:players:${teamId}:${season}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
     const [skatersRes, goaliesRes] = await Promise.all([
       fetch(
-        `${SB_URL}/rest/v1/pwhl_skater_stats?team_code=eq.${team}&season_id=eq.${season}&order=points.desc&limit=40`,
+        `${SB_URL}/rest/v1/pwhl_player_seasons?team_id=eq.${teamId}&season_id=eq.${season}&season_type=eq.regular&order=points.desc&limit=40`,
         { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
       ),
       fetch(
-        `${SB_URL}/rest/v1/pwhl_goalie_stats?team_code=eq.${team}&season_id=eq.${season}&order=games_played.desc&limit=5`,
+        `${SB_URL}/rest/v1/pwhl_goalie_seasons?team_id=eq.${teamId}&season_id=eq.${season}&season_type=eq.regular&order=gp.desc&limit=5`,
         { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
       ),
     ]);
@@ -2506,53 +2506,165 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
       return new Response(JSON.stringify({ error: 'Supabase error' }), { status: 502, headers: corsHeaders() });
     }
     const [skaters, goalies] = await Promise.all([skatersRes.json(), goaliesRes.json()]);
-    const result = { skaters, goalies };
-    await kvPut(env, kvKey, result, 3600);
-    return json(result);
+    await kvPut(env, kvKey, { skaters, goalies }, 3600);
+    return json({ skaters, goalies });
   }
 
-  // GET /pwhl/shots?team=BOS&season=8
+  // GET /pwhl/shots?teamId=1&season=8
+  // Paginates through all rows in batches of 1000 to bypass Supabase row cap.
   if (url.pathname === '/pwhl/shots') {
     const season = parseInt(url.searchParams.get('season') || '8', 10);
-    const team   = url.searchParams.get('team')?.toUpperCase() || null;
-    if (!team) return new Response(JSON.stringify({ error: 'team param required' }), { status: 400, headers: corsHeaders() });
-    const kvKey  = `pwhl:shots:${team}:${season}`;
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:shots:${teamId}:${season}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
-    const r = await fetch(
-      `${SB_URL}/rest/v1/pwhl_shot_events?team_code=eq.${team}&season_id=eq.${season}&order=game_id.asc`,
-      {
-        headers: {
-          'apikey':        SB_ANON,
-          'Authorization': `Bearer ${SB_ANON}`,
-          'Range':         '0-9999',
-          'Range-Unit':    'items',
-          'Prefer':        'count=none',
-        },
-      }
-    );
-    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
-    const rows = await r.json();
-    await kvPut(env, kvKey, rows, 6 * 3600);
-    return json(rows);
+    const PAGE = 1000;
+    const allRows = [];
+    let offset = 0;
+    while (true) {
+      const r = await fetch(
+        `${SB_URL}/rest/v1/pwhl_shot_events?team_id=eq.${teamId}&season_id=eq.${season}&order=game_id.asc`,
+        {
+          headers: {
+            'apikey':        SB_ANON,
+            'Authorization': `Bearer ${SB_ANON}`,
+            'Range':         `${offset}-${offset + PAGE - 1}`,
+            'Range-Unit':    'items',
+            'Prefer':        'count=none',
+          },
+        }
+      );
+      if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+      const rows = await r.json();
+      allRows.push(...rows);
+      if (rows.length < PAGE) break; // last page
+      offset += PAGE;
+    }
+    await kvPut(env, kvKey, allRows, 3600); // 1hr TTL
+    console.log(`PWHL shots: teamId=${teamId} season=${season} total=${allRows.length}`);
+    return json(allRows);
   }
 
-  // GET /pwhl/schedule?team=BOS&season=8
+  // GET /pwhl/schedule?teamId=1&season=8
+  // game_log has home_team_id / away_team_id — filter both sides with OR
   if (url.pathname === '/pwhl/schedule') {
     const season = parseInt(url.searchParams.get('season') || '8', 10);
-    const team   = url.searchParams.get('team')?.toUpperCase() || null;
-    if (!team) return new Response(JSON.stringify({ error: 'team param required' }), { status: 400, headers: corsHeaders() });
-    const kvKey  = `pwhl:schedule:${team}:${season}`;
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:schedule:${teamId}:${season}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
     const r = await fetch(
-      `${SB_URL}/rest/v1/pwhl_game_log?team_code=eq.${team}&season_id=eq.${season}&order=game_date.asc&limit=150`,
+      `${SB_URL}/rest/v1/pwhl_game_log?season_id=eq.${season}&or=(home_team_id.eq.${teamId},away_team_id.eq.${teamId})&order=game_date.asc&limit=150`,
       { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
     );
     if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
     const rows = await r.json();
     await kvPut(env, kvKey, rows, 1800);
     return json(rows);
+  }
+
+  // GET /pwhl/roster?teamId=1
+  // Returns player list for name resolution in shot map tooltips.
+  if (url.pathname === '/pwhl/roster') {
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:roster:${teamId}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const r = await fetch(
+      `${SB_URL}/rest/v1/pwhl_players?team_id=eq.${teamId}&select=player_id,first_name,last_name,position,jersey_number&limit=60`,
+      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+    );
+    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+    const rows = await r.json();
+    await kvPut(env, kvKey, rows, 24 * 3600); // 24hr — roster rarely changes
+    return json(rows);
+  }
+
+  // GET /pwhl/lastgame?teamId=1&season=8
+  // Returns the most recent completed game with opponent abbr resolved.
+  if (url.pathname === '/pwhl/lastgame') {
+    const PWHL_TEAM_CODES = {1:'BOS',2:'MIN',3:'MTL',4:'NY',5:'OTT',6:'TOR',8:'SEA',9:'VAN'};
+    const season = parseInt(url.searchParams.get('season') || '8', 10);
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:lastgame:${teamId}:${season}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const r = await fetch(
+      `${SB_URL}/rest/v1/pwhl_game_log?season_id=eq.${season}&game_state=eq.Final&or=(home_team_id.eq.${teamId},away_team_id.eq.${teamId})&order=game_id.desc&limit=1`,
+      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+    );
+    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+    const rows = await r.json();
+    if (!rows.length) return json(null);
+    const g = rows[0];
+    const isHome    = g.home_team_id === teamId;
+    const oppId     = isHome ? g.away_team_id : g.home_team_id;
+    const teamScore = isHome ? g.home_score   : g.away_score;
+    const oppScore  = isHome ? g.away_score   : g.home_score;
+    const result = {
+      gameId:    g.game_id,
+      isHome,
+      teamScore,
+      oppScore,
+      oppId,
+      oppAbbr:   PWHL_TEAM_CODES[oppId] || String(oppId),
+      ot:        g.ot,
+      shootout:  g.shootout,
+      gameState: g.game_state,
+      won:       teamScore > oppScore,
+    };
+    await kvPut(env, kvKey, result, 1800);
+    return json(result);
+  }
+
+
+  // GET /pwhl/pbp?gameId=213
+  // Returns all PBP events (hits, penalties, faceoffs, goalie changes) for a
+  // completed game, ordered by period and time. Shot events are in /pwhl/shots.
+  // TTL: 1 hour — game data is immutable once Final.
+  if (url.pathname === '/pwhl/pbp') {
+    const gameId = parseInt(url.searchParams.get('gameId') || '0', 10);
+    if (!gameId) return new Response(JSON.stringify({ error: 'gameId param required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:pbp:${gameId}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const r = await fetch(
+      `${SB_URL}/rest/v1/pwhl_pbp_events?game_id=eq.${gameId}&order=period_id.asc,time_seconds.asc&limit=500`,
+      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+    );
+    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+    const rows = await r.json();
+    await kvPut(env, kvKey, rows, 3600);
+    return json(rows);
+  }
+
+  // POST /pwhl/cache/bust?secret=&teamId=&season=
+  // Force-invalidates PWHL KV caches for a team so fresh data is served.
+  // Call after pipeline ingestion or when data looks stale.
+  if (url.pathname === '/pwhl/cache/bust' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    const season = parseInt(url.searchParams.get('season') || '8', 10);
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId required' }), { status: 400, headers: corsHeaders() });
+    const keys = [
+      `pwhl:shots:${teamId}:${season}`,
+      `pwhl:players:${teamId}:${season}`,
+      `pwhl:schedule:${teamId}:${season}`,
+      `pwhl:lastgame:${teamId}:${season}`,
+      `pwhl:roster:${teamId}`,
+      `pwhl:standings:${season}`,
+    ];
+    // Also bust all pwhl:pbp:* keys — keyed by gameId not teamId so we list them
+    const pbpList = await env.CACHE.list({ prefix: 'pwhl:pbp:' });
+    const pbpKeys = pbpList.keys.map(k => k.name);
+    await Promise.all([...keys, ...pbpKeys].map(k => env.CACHE.delete(k)));
+    console.log(`PWHL cache busted: teamId=${teamId} season=${season} (${keys.length} team keys + ${pbpKeys.length} PBP keys)`);
+    return json({ ok: true, busted: [...keys, ...pbpKeys] });
   }
 
   return new Response('EyeWall Poller', { status: 200 });
