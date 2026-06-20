@@ -383,6 +383,8 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
         log.warning("  No team stat data")
         return
 
+
+
     rows_raw = extract_rows(data)
     rows = []
 
@@ -395,22 +397,23 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
             log.warning(f"  Unknown team_code: '{raw_code}' — skipping")
             continue
 
-        # wins = regulation_wins + non_reg_wins (OT/SO wins)
-        reg_wins = int(t.get("regulation_wins", 0) or 0)
+        # PWHL uses 3-2-1-0 system: reg_wins=3pts, non_reg_wins=2pts, ot_losses=1pt, losses=0pts
+        reg_wins     = int(t.get("regulation_wins", 0) or 0)
         non_reg_wins = int(t.get("non_reg_wins", 0) or 0)
-        wins = reg_wins + non_reg_wins
-        # ot_losses = non_reg_losses (OT/SO losses)
-        ot_losses = int(t.get("non_reg_losses", 0) or 0)
+        wins         = reg_wins + non_reg_wins
+        ot_losses    = int(t.get("non_reg_losses", 0) or 0)
 
         rows.append({
-            "team_id": int(team_id),
-            "season_id": int(season_id),
+            "team_id":     int(team_id),
+            "season_id":   int(season_id),
             "season_type": season_type,
-            "gp": int(t.get("games_played", 0) or 0),
-            "wins": wins,
-            "losses": int(t.get("losses", 0) or 0),
-            "ot_losses": ot_losses,
-            "points": int(t.get("points", 0) or 0),
+            "gp":          int(t.get("games_played", 0) or 0),
+            "wins":        wins,
+            "reg_wins":    reg_wins,
+            "non_reg_wins": non_reg_wins,
+            "losses":      int(t.get("losses", 0) or 0),
+            "ot_losses":   ot_losses,
+            "points":      int(t.get("points", 0) or 0),
             "goals_for": int(t.get("goals_for", 0) or 0),
             "goals_against": int(t.get("goals_against", 0) or 0),
             "pp_pct": None,   # not available in standings endpoint
@@ -425,6 +428,43 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
 
 
 # ── Game Log ──────────────────────────────────────────────────────────────────
+
+
+# ── Season start year map (Oct-Dec of this year → Jan-Jun of next) ────────────
+SEASON_START_YEAR = {
+    "1": 2024, "2": 2024, "3": 2024,
+    "4": 2024, "5": 2024, "6": 2025,
+    "7": 2025, "8": 2025, "9": 2026,
+}
+
+_MONTH_ABBR = {
+    "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+}
+
+def _parse_game_date(date_str: str | None, season_id: int) -> str | None:
+    """Convert 'Fri, Nov 21' to 'YYYY-MM-DD' using season start year heuristic."""
+    if not date_str:
+        return None
+    # Handle ISO date already (YYYY-MM-DD)
+    if len(date_str) >= 10 and date_str[4] == '-':
+        return date_str[:10]
+    # Parse "Fri, Nov 21" or "Nov 21"
+    try:
+        parts = date_str.replace(",", "").split()
+        # parts may be ["Fri", "Nov", "21"] or ["Nov", "21"]
+        month_str = next((p for p in parts if p in _MONTH_ABBR), None)
+        day_str   = next((p for p in parts if p.isdigit()), None)
+        if not month_str or not day_str:
+            return None
+        month = _MONTH_ABBR[month_str]
+        day   = int(day_str)
+        start = SEASON_START_YEAR.get(str(season_id), 2024)
+        # Oct, Nov, Dec → start year; Jan–Sep → start year + 1
+        year  = start if month >= 10 else start + 1
+        return f"{year}-{month:02d}-{day:02d}"
+    except Exception:
+        return None
 
 def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
@@ -441,6 +481,7 @@ def fetch_game_log(sb, season_id: str) -> None:
         return
 
     rows_raw = extract_rows(data)
+
     rows = []
 
     for g in rows_raw:
@@ -457,10 +498,25 @@ def fetch_game_log(sb, season_id: str) -> None:
         status = g.get("game_status", "") or g.get("status", "") or ""
         is_final = "final" in status.lower()
 
+        # Venue: "Grand Casino Arena | St. Paul" → name + city
+        venue_raw  = g.get("venue_name", "") or ""
+        venue_parts = [p.strip() for p in venue_raw.split("|")]
+        venue_name  = venue_parts[0] if venue_parts else None
+        venue_city  = venue_parts[1] if len(venue_parts) > 1 else None
+
+        # Date: "Fri, Nov 21" — no year in feed; store as-is for display,
+        # reconstruct ISO date using season year heuristic (Oct-Dec = season start year,
+        # Jan-Jun = season start year + 1). Season 8 = 2025-26 → start year 2025.
+        date_with_day = g.get("date_with_day") or g.get("date_played") or g.get("date") or None
+        game_date     = _parse_game_date(date_with_day, int(season_id))
+
         rows.append({
             "game_id": int(gid),
             "season_id": int(season_id),
-            "game_date": g.get("date_played") or g.get("date") or None,
+            "game_date": game_date,
+            "date_with_day": date_with_day,
+            "venue_name": venue_name or None,
+            "venue_city": venue_city or None,
             "home_team_id": int(home_id) if home_id else None,
             "away_team_id": int(away_id) if away_id else None,
             "home_score": int(g.get("home_goal_count", 0) or 0),

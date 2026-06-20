@@ -2492,22 +2492,48 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     const kvKey  = `pwhl:players:${teamId}:${season}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
-    const [skatersRes, goaliesRes] = await Promise.all([
+    const sbHeaders = { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` };
+    const [skatersRes, goaliesRes, rosterRes] = await Promise.all([
       fetch(
         `${SB_URL}/rest/v1/pwhl_player_seasons?team_id=eq.${teamId}&season_id=eq.${season}&season_type=eq.regular&order=points.desc&limit=40`,
-        { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+        { headers: sbHeaders }
       ),
       fetch(
         `${SB_URL}/rest/v1/pwhl_goalie_seasons?team_id=eq.${teamId}&season_id=eq.${season}&season_type=eq.regular&order=gp.desc&limit=5`,
-        { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+        { headers: sbHeaders }
+      ),
+      fetch(
+        `${SB_URL}/rest/v1/pwhl_players?team_id=eq.${teamId}&select=player_id,first_name,last_name,position,jersey_number,birth_date,birth_city,shoots&limit=80`,
+        { headers: sbHeaders }
       ),
     ]);
-    if (!skatersRes.ok || !goaliesRes.ok) {
+    if (!skatersRes.ok || !goaliesRes.ok || !rosterRes.ok) {
       return new Response(JSON.stringify({ error: 'Supabase error' }), { status: 502, headers: corsHeaders() });
     }
-    const [skaters, goalies] = await Promise.all([skatersRes.json(), goaliesRes.json()]);
-    await kvPut(env, kvKey, { skaters, goalies }, 3600);
-    return json({ skaters, goalies });
+    const [skaters, goalies, roster] = await Promise.all([skatersRes.json(), goaliesRes.json(), rosterRes.json()]);
+    // Build player_id -> bio map
+    const nameMap = {};
+    for (const p of roster) {
+      nameMap[p.player_id] = {
+        player_name:   `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+        first_name:    p.first_name || null,
+        last_name:     p.last_name  || null,
+        position:      p.position   || null,
+        jersey_number: p.jersey_number || null,
+        birth_date:    p.birth_date || null,
+        birth_city:    p.birth_city || null,
+        shoots:        p.shoots     || null,
+        headshot:      `https://assets.leaguestat.com/pwhl/240x240/${p.player_id}.jpg`,
+      };
+    }
+    const skatersWithNames = skaters.map(s => ({ ...s, ...nameMap[s.player_id] }));
+    const goaliesWithNames = goalies.map(g => ({ ...g, ...nameMap[g.player_id] }));
+    // Full roster array for Roster tab (sorted by jersey number)
+    const rosterFull = roster.map(p => ({ ...p, headshot: `https://assets.leaguestat.com/pwhl/240x240/${p.player_id}.jpg` }))
+      .sort((a,b) => (a.jersey_number||99) - (b.jersey_number||99));
+    const result = { skaters: skatersWithNames, goalies: goaliesWithNames, roster: rosterFull };
+    await kvPut(env, kvKey, result, 3600);
+    return json(result);
   }
 
   // GET /pwhl/shots?teamId=1&season=8
@@ -2624,7 +2650,7 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
 
   // GET /pwhl/pbp?gameId=213
   // Returns all PBP events (hits, penalties, faceoffs, goalie changes) for a
-  // completed game, ordered by period and time. Shot events are in /pwhl/shots.
+  // completed game with player names joined. Shot events are in /pwhl/shots.
   // TTL: 1 hour — game data is immutable once Final.
   if (url.pathname === '/pwhl/pbp') {
     const gameId = parseInt(url.searchParams.get('gameId') || '0', 10);
@@ -2632,12 +2658,129 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     const kvKey  = `pwhl:pbp:${gameId}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
-    const r = await fetch(
-      `${SB_URL}/rest/v1/pwhl_pbp_events?game_id=eq.${gameId}&order=period_id.asc,time_seconds.asc&limit=500`,
-      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
-    );
-    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
-    const rows = await r.json();
+    const sbH = { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` };
+    // Fetch PBP events + game log (for team IDs) in parallel
+    const [pbpRes, gameRes] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/pwhl_pbp_events?game_id=eq.${gameId}&order=period_id.asc,time_seconds.asc&limit=500`, { headers: sbH }),
+      fetch(`${SB_URL}/rest/v1/pwhl_game_log?game_id=eq.${gameId}&select=home_team_id,away_team_id&limit=1`, { headers: sbH }),
+    ]);
+    if (!pbpRes.ok || !gameRes.ok) return new Response(JSON.stringify({ error: 'Supabase error' }), { status: 502, headers: corsHeaders() });
+    const [rows, gameRows] = await Promise.all([pbpRes.json(), gameRes.json()]);
+    // Join player names, fetch shots + gameSummary — all in one block
+    const gameRow = gameRows[0];
+    // Hoist playerMap so it's available to both the PBP annotation pass and the shots/summary pass
+    const playerMap = {};
+    if (gameRow) {
+      const teamIds = [gameRow.home_team_id, gameRow.away_team_id].filter(Boolean);
+      const rosterRes = await fetch(
+        `${SB_URL}/rest/v1/pwhl_players?team_id=in.(${teamIds.join(',')})&select=player_id,first_name,last_name,team_id&limit=120`,
+        { headers: sbH }
+      );
+      if (rosterRes.ok) {
+        const roster = await rosterRes.json();
+        for (const p of roster) {
+          playerMap[p.player_id] = {
+            name:    `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+            team_id: p.team_id,
+          };
+        }
+        const homeTeamId = gameRow.home_team_id;
+        const awayTeamId = gameRow.away_team_id;
+        for (const row of rows) {
+          const pm = row.player_id ? playerMap[row.player_id] : null;
+          if (pm?.name) row.player_name = pm.name;
+          const sm = row.secondary_player_id ? playerMap[row.secondary_player_id] : null;
+          if (sm?.name) row.secondary_player_name = sm.name;
+          if (row.team_id == null && pm?.team_id) row.team_id = pm.team_id;
+          row._home_team_id = homeTeamId;
+          row._away_team_id = awayTeamId;
+        }
+      }
+    }
+    if (gameRow) {
+      const HT_BASE = 'https://lscluster.hockeytech.com/feed/index.php';
+      const HT_KEY  = '446521baf8c38984';
+      const HT_HDR  = { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.thepwhl.com/' };
+
+      // Fetch shot events + gameSummary in parallel
+      const [allShotsRes, summaryRes] = await Promise.all([
+        fetch(
+          `${SB_URL}/rest/v1/pwhl_shot_events?game_id=eq.${gameId}&select=shooter_id,team_id,event_type,period_id,time_seconds,x_norm,y_norm,is_home&limit=400`,
+          { headers: sbH }
+        ),
+        fetch(
+          `${HT_BASE}?feed=statviewfeed&view=gameSummary&game_id=${gameId}&key=${HT_KEY}&client_code=pwhl&lang=en&league_id=`,
+          { headers: HT_HDR }
+        ),
+      ]);
+
+      // All shots for both teams (for OPP rink + drill-downs)
+      const allShots = allShotsRes.ok ? await allShotsRes.json() : [];
+      const namedShots = allShots.map(s => ({
+        ...s,
+        shooter_name: s.shooter_id && playerMap[s.shooter_id]
+          ? playerMap[s.shooter_id].name
+          : null,
+      }));
+
+      // gameSummary: faceoff wins per skater + goalie stats
+      let faceoffStats = {};   // { player_id: { name, wins, attempts } }
+      let goalieStats  = [];   // [{ team_id, name, gp, saves, shots_against, toi }]
+
+      if (summaryRes.ok) {
+        try {
+          let summaryText = await summaryRes.text();
+          if (summaryText.includes('(')) summaryText = summaryText.slice(summaryText.indexOf('(')+1, summaryText.lastIndexOf(')'));
+          const summary = JSON.parse(summaryText);
+
+          // Faceoffs: summary.skaters (array), each has .id, .stats.faceoffWins, .stats.faceoffAttempts
+          const skaters = summary.skaters || summary.homeTeam?.skaters?.concat(summary.visitingTeam?.skaters || []) || [];
+          for (const sk of skaters) {
+            const pid = sk.info?.id || sk.id;
+            const wins = parseInt(sk.stats?.faceoffWins || 0);
+            const att  = parseInt(sk.stats?.faceoffAttempts || sk.stats?.faceoffTaken || 0);
+            if (att > 0 && pid) {
+              faceoffStats[pid] = {
+                name:     playerMap[pid]?.name || sk.info?.firstName + ' ' + sk.info?.lastName || `#${pid}`,
+                wins,
+                attempts: att,
+                losses:   att - wins,
+              };
+            }
+          }
+
+          // Goalies: summary.homeTeam/visitingTeam → goalies array
+          const processGoalies = (teamObj, team_id) => {
+            const goalies = teamObj?.goalies || [];
+            for (const g of goalies) {
+              const pid = g.info?.id || g.id;
+              goalieStats.push({
+                team_id,
+                player_id:    pid,
+                name:         playerMap[pid]?.name || `${g.info?.firstName || ''} ${g.info?.lastName || ''}`.trim() || `#${pid}`,
+                saves:        parseInt(g.stats?.saves || 0),
+                shots_against: parseInt(g.stats?.shotsAgainst || g.stats?.shots || 0),
+                goals_against: parseInt(g.stats?.goalsAgainst || 0),
+                toi:          g.stats?.toi || g.stats?.timeOnIce || null,
+              });
+            }
+          };
+          processGoalies(summary.homeTeam    || summary.home,      gameRow.home_team_id);
+          processGoalies(summary.visitingTeam || summary.visiting,  gameRow.away_team_id);
+        } catch (_) { /* gameSummary parse failure — carry on */ }
+      }
+
+      const payload = {
+        events:         rows,
+        opp_shots:      namedShots,
+        home_team_id:   gameRow.home_team_id,
+        away_team_id:   gameRow.away_team_id,
+        faceoff_stats:  faceoffStats,
+        goalie_stats:   goalieStats,
+      };
+      await kvPut(env, kvKey, payload, 3600);
+      return json(payload);
+    }
     await kvPut(env, kvKey, rows, 3600);
     return json(rows);
   }
@@ -2659,12 +2802,9 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
       `pwhl:roster:${teamId}`,
       `pwhl:standings:${season}`,
     ];
-    // Also bust all pwhl:pbp:* keys — keyed by gameId not teamId so we list them
-    const pbpList = await env.CACHE.list({ prefix: 'pwhl:pbp:' });
-    const pbpKeys = pbpList.keys.map(k => k.name);
-    await Promise.all([...keys, ...pbpKeys].map(k => env.CACHE.delete(k)));
-    console.log(`PWHL cache busted: teamId=${teamId} season=${season} (${keys.length} team keys + ${pbpKeys.length} PBP keys)`);
-    return json({ ok: true, busted: [...keys, ...pbpKeys] });
+    await Promise.all(keys.map(k => env.CACHE.delete(k)));
+    console.log(`PWHL cache busted: teamId=${teamId} season=${season} (${keys.length} keys)`);
+    return json({ ok: true, busted: keys });
   }
 
   return new Response('EyeWall Poller', { status: 200 });

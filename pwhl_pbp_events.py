@@ -196,14 +196,33 @@ def _parse_penalty(d: dict, game_id: int, season_id: int, season_type: str,
 
 def _parse_faceoff(d: dict, game_id: int, season_id: int, season_type: str,
                    period: int | None, time_seconds: int | None,
-                   home_team_id: int) -> dict:
-    home_win     = bool(d.get("homeWin", False))
+                   home_team_id: int, away_team_id: int | None = None,
+                   player_team_map: dict | None = None) -> dict:
+    # NOTE: HockeyTech's homeWin field is unreliable (often always True).
+    # Instead derive winning team from the winning player's team via player_team_map.
+    # player_team_map: { player_id (int) -> team_id (int) }
     home_player  = d.get("homePlayer")      or {}
     visit_player = d.get("visitingPlayer")  or {}
-    winner = home_player  if home_win else visit_player
-    loser  = visit_player if home_win else home_player
-    # team_id = winning team; secondary = losing player
-    team_id = home_team_id if home_win else None   # away team_id not passed in — null is acceptable
+
+    # Determine winner: HockeyTech marks winner differently per game version.
+    # Try homeWin first; if player_team_map available, override with roster lookup.
+    home_win_flag = str(d.get("homeWin", "0")).strip() == "1"
+    winner = home_player  if home_win_flag else visit_player
+    loser  = visit_player if home_win_flag else home_player
+
+    # Resolve winner's team from roster if available — more reliable than homeWin
+    winner_pid = _safe_int(winner.get("id"))
+    if player_team_map and winner_pid:
+        winner_team = player_team_map.get(winner_pid)
+        if winner_team in (home_team_id, away_team_id):
+            # Confirmed by roster — use this
+            team_id = winner_team
+        else:
+            # Not in roster (opponent player or unknown) — fall back to homeWin
+            team_id = home_team_id if home_win_flag else (away_team_id or None)
+    else:
+        team_id = home_team_id if home_win_flag else (away_team_id or None)
+
     return {
         "game_id":               game_id,
         "season_id":             season_id,
@@ -212,7 +231,7 @@ def _parse_faceoff(d: dict, game_id: int, season_id: int, season_type: str,
         "period_id":             period,
         "time_seconds":          time_seconds,
         "team_id":               team_id,
-        "player_id":             _safe_int(winner.get("id")),
+        "player_id":             winner_pid,
         "player_name":           (winner.get("name") or "").strip() or None,
         "secondary_player_id":   _safe_int(loser.get("id")),
         "secondary_player_name": (loser.get("name") or "").strip() or None,
@@ -253,7 +272,8 @@ def _parse_goalie_change(d: dict, game_id: int, season_id: int, season_type: str
 # ── Main parser ───────────────────────────────────────────────────────────────
 
 def parse_pbp(game_id: int, season_id: str, season_type: str,
-              home_team_id: int, events: list) -> list:
+              home_team_id: int, events: list, away_team_id: int | None = None,
+              player_team_map: dict | None = None) -> list:
     rows    = []
     unknown = []
 
@@ -283,7 +303,8 @@ def parse_pbp(game_id: int, season_id: str, season_type: str,
                                        period, time_seconds, team_id))
         elif event_type == "faceoff":
             rows.append(_parse_faceoff(d, game_id, int(season_id), season_type,
-                                       period, time_seconds, home_team_id))
+                                       period, time_seconds, home_team_id, away_team_id,
+                                       player_team_map))
         elif event_type == "goalie_change":
             rows.append(_parse_goalie_change(d, game_id, int(season_id), season_type,
                                              period, time_seconds, team_id))
@@ -341,14 +362,26 @@ def mark_skipped(sb, game_id: int, reason: str) -> None:
 
 # ── Ingest one game ───────────────────────────────────────────────────────────
 
-def ingest_game(sb, gid: int, home_team_id: int, season_id: str, season_type: str) -> int:
+def ingest_game(sb, gid: int, home_team_id: int, season_id: str, season_type: str, away_team_id: int | None = None) -> int:
     events = fetch_pbp(gid)
     if not events:
         log.warning("    No PBP — skipping")
         mark_skipped(sb, gid, "no_pbp")
         return 0
 
-    rows = parse_pbp(gid, season_id, season_type, home_team_id, events)
+    # Build player→team map from both teams' rosters for accurate faceoff winner resolution
+    player_team_map: dict[int, int] = {}
+    team_ids = [t for t in (home_team_id, away_team_id) if t]
+    if team_ids:
+        try:
+            roster_res = sb.table("pwhl_players")                 .select("player_id,team_id")                 .in_("team_id", team_ids)                 .execute()
+            for p in (roster_res.data or []):
+                if p.get("player_id") and p.get("team_id"):
+                    player_team_map[p["player_id"]] = p["team_id"]
+        except Exception as e:
+            log.warning(f"    Could not fetch player roster for team map: {e}")
+
+    rows = parse_pbp(gid, season_id, season_type, home_team_id, events, away_team_id, player_team_map)
     if not rows:
         log.info("    No owned PBP events")
         mark_skipped(sb, gid, "no_pbp_events")
@@ -407,8 +440,9 @@ def run(season_id: str | None = None, force: bool = False, single_game: int | No
     for i, game in enumerate(todo):
         gid     = game["game_id"]
         home_id = game["home_team_id"] or 0
+        away_id = game["away_team_id"] or None
         log.info(f"  [{i + 1}/{len(todo)}] game {gid}")
-        total_rows += ingest_game(sb, gid, home_id, season_id, season_type)
+        total_rows += ingest_game(sb, gid, home_id, season_id, season_type, away_id)
         time.sleep(0.5)
 
     log.info(f"=== PWHL PBP Events complete — {total_rows} total rows ===")
