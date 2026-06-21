@@ -44,6 +44,12 @@ jobs:
         if: failure()
         run: echo "Pipeline failed — check logs above"
 
+      - name: Fetch PWHL news and push to Worker
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.POLL_SECRET }}
+        run: python pwhl_news.py
+
       - name: Ingest PWHL PBP events (current season)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

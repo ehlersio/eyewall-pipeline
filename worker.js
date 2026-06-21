@@ -1465,50 +1465,59 @@ function parseNHLNews(data) {
 
 const PWHL_NEWS_SOURCES = [
   {
-    id:    'pwhl-official',
-    name:  'PWHL',
-    color: '#FFFFFF',
-    bg:    '#001F5B',
-    url:   'https://www.thepwhl.com/en/rss/news',
-    type:  'rss',
+    // ESPN women's hockey RSS — works from Cloudflare IPs
+    id:     'espn-pwhl',
+    name:   'ESPN',
+    color:  '#FFFFFF',
+    bg:     '#cc0000',
+    url:    'https://www.espn.com/espn/rss/hockey/news',
+    type:   'espn',
+    filter: ['pwhl', "women's hockey", 'women', 'walter cup', 'frost', 'fleet', 'sceptres', 'victoire', 'sirens', 'charge', 'torrent', 'goldeneyes'],
   },
   {
-    id:    'espn-womens',
-    name:  'ESPN',
-    color: '#FFFFFF',
-    bg:    '#cc0000',
-    url:   'https://www.espn.com/espn/rss/hockey/news',
-    type:  'espn',
-    filter: ['pwhl','women','iihf'],
+    // The Score hockey — works from Cloudflare IPs, filtered for PWHL
+    id:     'thescore-pwhl',
+    name:   'The Score',
+    color:  '#FFFFFF',
+    bg:     '#e8000d',
+    url:    'https://origin-feeds.thescore.com/hockey.rss',
+    type:   'rss',
+    filter: ['pwhl', 'walter cup', 'women'],
   },
   {
-    id:    'sportsnet-pwhl',
-    name:  'Sportsnet',
-    color: '#000000',
-    bg:    '#d4a017',
-    url:   'https://origin-feeds.thescore.com/hockey.rss',
-    type:  'rss',
-    filter: ['pwhl','women'],
+    // The Athletic hockey via NYT — works from Cloudflare IPs
+    id:     'athletic-pwhl',
+    name:   'The Athletic',
+    color:  '#FFFFFF',
+    bg:     '#222222',
+    url:    'https://theathletic.com/rss/feed/?sport_name=nhl',
+    type:   'rss',
+    filter: ['pwhl', "women's hockey", 'walter cup', 'women'],
   },
   {
-    id:    'iihf',
-    name:  'IIHF',
-    color: '#FFFFFF',
-    bg:    '#003087',
-    url:   'https://www.iihf.com/en/rss/news',
-    type:  'rss',
-    filter: ['women','pwhl'],
+    // Sportsnet — Canadian outlet with strong PWHL coverage
+    id:     'sportsnet-pwhl',
+    name:   'Sportsnet',
+    color:  '#000000',
+    bg:     '#d4a017',
+    url:    'https://www.sportsnet.ca/feed/',
+    type:   'rss',
+    filter: ['pwhl', 'walter cup', 'women'],
   },
 ];
 
 async function fetchPWHLNews(env) {
   const allItems = [];
   for (const source of PWHL_NEWS_SOURCES) {
+    // atom types require GH Actions (CF IPs blocked) — skip for now
+    if (source.type === 'atom') continue;
     try {
+      console.log(`PWHL news: fetching ${source.id} from ${source.url}`);
       const res = await fetch(source.url, {
         headers: { 'User-Agent': 'EyeWall-Analytics/1.0', 'Accept': 'application/rss+xml,text/xml,*/*' },
         cf: { cacheTtl: 0 },
       });
+      console.log(`PWHL news: ${source.id} status=${res.status}`);
       if (!res.ok) { console.warn(`PWHL news: ${source.id} failed ${res.status}`); continue; }
       const xml = await res.text();
       let parsed = source.type === 'espn' ? parseESPN(xml, source) : parseRSS(xml, source);
@@ -2905,6 +2914,15 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     return json(rows);
   }
 
+  // POST /pwhl/news/bust — invalidate news cache so next GET triggers fresh fetch
+  if (url.pathname === '/pwhl/news/bust' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    await env.CACHE.delete('pwhl:news');
+    console.log('PWHL news cache busted');
+    return json({ ok: true, busted: ['pwhl:news'] });
+  }
+
   // POST /pwhl/cache/bust?secret=&teamId=&season=
   // Force-invalidates PWHL KV caches for a team so fresh data is served.
   // Call after pipeline ingestion or when data looks stale.
@@ -2926,6 +2944,31 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     await Promise.all(keys.map(k => env.CACHE.delete(k)));
     console.log(`PWHL cache busted: teamId=${teamId} season=${season} (${keys.length} keys)`);
     return json({ ok: true, busted: keys });
+  }
+
+  // POST /pwhl/news/ingest — accepts PWHL articles from GitHub Actions
+  // GH Actions runner IPs are not blocked by RSS sources; Worker IPs are.
+  if (url.pathname === '/pwhl/news/ingest' && request.method === 'POST') {
+    const secret = url.searchParams.get('secret') || request.headers.get('x-ingest-secret');
+    if (secret !== env.POLL_SECRET) return new Response('Unauthorized', { status: 401 });
+    let articles;
+    try {
+      articles = await request.json();
+      if (!Array.isArray(articles)) throw new Error('Expected array');
+    } catch (e) {
+      return new Response(`Bad request: ${e.message}`, { status: 400 });
+    }
+    // Merge with any existing articles, deduplicate, sort newest first
+    const existing = (await kvGet(env, 'pwhl:news')) || [];
+    const existingIds = new Set(existing.map(a => a.id));
+    const merged = [
+      ...articles,
+      ...existing.filter(a => !articles.find(n => n.id === a.id)),
+    ].sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))
+      .slice(0, 60);
+    await kvPut(env, 'pwhl:news', merged, 1800); // 30min cache
+    console.log(`PWHL news ingest: ${articles.length} new → ${merged.length} total`);
+    return json({ ok: true, received: articles.length, total: merged.length });
   }
 
   // GET /pwhl/salaries?teamId=1&season=2025-26
