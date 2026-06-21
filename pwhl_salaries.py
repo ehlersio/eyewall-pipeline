@@ -20,13 +20,17 @@ Usage:
 import argparse
 import io
 import logging
+import os
 import re
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pdfplumber
+from dotenv import load_dotenv
 from supabase import create_client
+
+load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -35,10 +39,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-import os
-from dotenv import load_dotenv
-load_dotenv()
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_KEY"]
 
@@ -253,7 +253,7 @@ def match_players(sb, salary_rows: list[dict]) -> list[dict]:
 
 def upsert_salaries(sb, rows: list[dict]) -> None:
     """Upsert salary rows to pwhl_salaries table."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     records = [
         {
             "first_name":  r["first_name"],
@@ -315,10 +315,10 @@ def main():
     log.info(f"Total rows: {len(rows)}")
     log.info(f"Matched:    {sum(1 for r in rows if r.get('player_id'))}")
     log.info(f"Unmatched:  {sum(1 for r in rows if not r.get('player_id'))}")
-    log.info(f"Teams: {sorted(set(r['team_name'] for r in rows))}")
+    log.info(f"Teams: {sorted({r['team_name'] for r in rows})}")
     if rows:
         salaries = [r['salary'] for r in rows]
-        log.info(f"Salary range: ${min(salaries):,.2f} – ${max(salaries):,.2f}")
+        log.info(f"Salary range: ${min(salaries):,.2f} - ${max(salaries):,.2f}")
         log.info(f"Sample: {rows[0]['first_name']} {rows[0]['last_name']} → ${rows[0]['salary']:,.2f}")
 
     if args.dry_run:
