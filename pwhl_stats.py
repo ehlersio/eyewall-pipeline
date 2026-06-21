@@ -365,6 +365,46 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
 
 # ── Team Stats + Standings ────────────────────────────────────────────────────
 
+# Maps season_id → the calendar year the season STARTS in (for date parsing)
+SEASON_YEAR_MAP = {
+    "1": 2023, "2": 2023, "3": 2024,   # 2023-24 regular / playoffs
+    "5": 2024, "6": 2025,               # 2024-25 regular / playoffs
+    "8": 2025, "9": 2025,               # 2025-26 regular / playoffs
+}
+
+def _parse_game_date(date_with_day: str, season_id: str) -> str | None:
+    """Convert 'Fri, Nov 21' to 'YYYY-MM-DD' using season year context."""
+    if not date_with_day:
+        return None
+    import re as _re
+    # Strip weekday prefix: "Fri, Nov 21" → "Nov 21"
+    m = _re.search(r'([A-Za-z]+ \d+)$', date_with_day.strip())
+    if not m:
+        return None
+    date_str = m.group(1)  # e.g. "Nov 21"
+    start_year = SEASON_YEAR_MAP.get(str(season_id), 2025)
+    # Months Oct-Dec are in start_year; Jan-Jun are in start_year+1
+    try:
+        from datetime import datetime as _dt
+        parsed = _dt.strptime(date_str, "%b %d")
+        year = start_year if parsed.month >= 9 else start_year + 1
+        return _dt(year, parsed.month, parsed.day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _parse_pct(s) -> float | None:
+    """Convert '23.0%' or '0.230' to float 0.23."""
+    if s is None:
+        return None
+    s = str(s).strip().replace("%", "")
+    try:
+        v = float(s)
+        return round(v / 100, 6) if v > 1 else round(v, 6)
+    except ValueError:
+        return None
+
+
 def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
     """Fetch standings and upsert to pwhl_team_seasons."""
     log.info(f"Fetching team stats (season {season_id})...")
@@ -383,7 +423,24 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
         log.warning("  No team stat data")
         return
 
-
+    # Also fetch special teams data (PP%, PK%)
+    data_special = ht_get({
+        "view": "teams",
+        "season": season_id,
+        "context": "overall",
+        "groupTeamsBy": "division",
+        "sort": "points",
+        "special": "true",
+        "conference_id": "-1",
+        "division_id": "-1",
+    })
+    # Build special teams map: team_code → row
+    special_map = {}
+    if data_special:
+        for r in extract_rows(data_special):
+            raw = r.get("team_code", "")
+            code = raw.split(" - ")[-1].strip()
+            special_map[code] = r
 
     rows_raw = extract_rows(data)
     rows = []
@@ -397,27 +454,33 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
             log.warning(f"  Unknown team_code: '{raw_code}' — skipping")
             continue
 
-        # PWHL uses 3-2-1-0 system: reg_wins=3pts, non_reg_wins=2pts, ot_losses=1pt, losses=0pts
-        reg_wins     = int(t.get("regulation_wins", 0) or 0)
+        # wins = regulation_wins + non_reg_wins (OT/SO wins)
+        reg_wins = int(t.get("regulation_wins", 0) or 0)
         non_reg_wins = int(t.get("non_reg_wins", 0) or 0)
-        wins         = reg_wins + non_reg_wins
-        ot_losses    = int(t.get("non_reg_losses", 0) or 0)
+        wins = reg_wins + non_reg_wins
+        # ot_losses = non_reg_losses (OT/SO losses)
+        ot_losses = int(t.get("non_reg_losses", 0) or 0)
 
         rows.append({
-            "team_id":     int(team_id),
-            "season_id":   int(season_id),
+            "team_id": int(team_id),
+            "season_id": int(season_id),
             "season_type": season_type,
-            "gp":          int(t.get("games_played", 0) or 0),
-            "wins":        wins,
-            "reg_wins":    reg_wins,
-            "non_reg_wins": non_reg_wins,
-            "losses":      int(t.get("losses", 0) or 0),
-            "ot_losses":   ot_losses,
-            "points":      int(t.get("points", 0) or 0),
+            "gp": int(t.get("games_played", 0) or 0),
+            "wins": wins,
+            "losses": int(t.get("losses", 0) or 0),
+            "ot_losses": ot_losses,
+            "points": int(t.get("points", 0) or 0),
             "goals_for": int(t.get("goals_for", 0) or 0),
             "goals_against": int(t.get("goals_against", 0) or 0),
-            "pp_pct": None,   # not available in standings endpoint
-            "pk_pct": None,   # not available in standings endpoint
+            # Special teams from separate HockeyTech call (special=true)
+            "pp_pct": _parse_pct(special_map.get(team_code, {}).get("power_play_pct")),
+            "pk_pct": _parse_pct(special_map.get(team_code, {}).get("penalty_kill_pct")),
+            "pp_goals": int(special_map.get(team_code, {}).get("power_play_goals", 0) or 0),
+            "pp_opportunities": int(special_map.get(team_code, {}).get("power_plays", 0) or 0),
+            "pk_goals_against": int(special_map.get(team_code, {}).get("power_play_goals_against", 0) or 0),
+            "times_shorthanded": int(special_map.get(team_code, {}).get("times_short_handed", 0) or 0),
+            "sh_goals_for": int(special_map.get(team_code, {}).get("short_handed_goals_for", 0) or 0),
+            "sh_goals_against": int(special_map.get(team_code, {}).get("short_handed_goals_against", 0) or 0),
             "shots_for_pg": None,
             "shots_against_pg": None,
             "updated_at": datetime.now(UTC).isoformat(),
@@ -429,42 +492,88 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
 
 # ── Game Log ──────────────────────────────────────────────────────────────────
 
+def run_team_shot_totals(sb, season_id: str, season_type: str = "regular") -> None:
+    """
+    Compute Corsi/Fenwick for each team from pwhl_shot_events and upsert to pwhl_team_seasons.
 
-# ── Season start year map (Oct-Dec of this year → Jan-Jun of next) ────────────
-SEASON_START_YEAR = {
-    "1": 2024, "2": 2024, "3": 2024,
-    "4": 2024, "5": 2024, "6": 2025,
-    "7": 2025, "8": 2025, "9": 2026,
-}
+    Definitions (all at even strength + special teams combined — full-game):
+      Corsi For  (CF)  = shots + goals + blocked_shots by our team
+      Corsi Against (CA) = shots + goals + blocked_shots by opponents in our games
+      Fenwick For  (FF) = shots + goals by our team (unblocked attempts — no missed shot data)
+      Fenwick Against (FA) = shots + goals by opponents in our games
 
-_MONTH_ABBR = {
-    "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
-}
+    No missed shots in HockeyTech data, so FF is SOG-based Fenwick proxy.
+    """
+    log.info(f"Computing team shot totals (season {season_id}, {season_type})...")
 
-def _parse_game_date(date_str: str | None, season_id: int) -> str | None:
-    """Convert 'Fri, Nov 21' to 'YYYY-MM-DD' using season start year heuristic."""
-    if not date_str:
-        return None
-    # Handle ISO date already (YYYY-MM-DD)
-    if len(date_str) >= 10 and date_str[4] == '-':
-        return date_str[:10]
-    # Parse "Fri, Nov 21" or "Nov 21"
-    try:
-        parts = date_str.replace(",", "").split()
-        # parts may be ["Fri", "Nov", "21"] or ["Nov", "21"]
-        month_str = next((p for p in parts if p in _MONTH_ABBR), None)
-        day_str   = next((p for p in parts if p.isdigit()), None)
-        if not month_str or not day_str:
-            return None
-        month = _MONTH_ABBR[month_str]
-        day   = int(day_str)
-        start = SEASON_START_YEAR.get(str(season_id), 2024)
-        # Oct, Nov, Dec → start year; Jan–Sep → start year + 1
-        year  = start if month >= 10 else start + 1
-        return f"{year}-{month:02d}-{day:02d}"
-    except Exception:
-        return None
+    # Fetch all shot events for the season
+    res = sb.table("pwhl_shot_events")         .select("game_id,team_id,event_type")         .eq("season_id", int(season_id))         .eq("season_type", season_type)         .limit(50000)         .execute()
+    events = res.data or []
+    if not events:
+        log.warning(f"  No shot events for season {season_id}/{season_type}")
+        return
+
+    # Fetch game log to know which teams played in each game
+    res2 = sb.table("pwhl_game_log")         .select("game_id,home_team_id,away_team_id")         .eq("season_id", int(season_id))         .eq("game_state", "Final")         .limit(500)         .execute()
+    games = {g["game_id"]: g for g in (res2.data or [])}
+
+    # Build per-game, per-team shot counts
+    # game_shots[game_id][team_id] = {shot, goal, blocked_shot}
+    from collections import defaultdict
+    game_shots = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    for e in events:
+        game_shots[e["game_id"]][e["team_id"]][e["event_type"]] += 1
+
+    # Aggregate per team across all games
+    team_totals = defaultdict(lambda: {"cf":0,"ca":0,"ff":0,"fa":0,"gp":0})
+
+    for game_id, game in games.items():
+        home_id = game["home_team_id"]
+        away_id = game["away_team_id"]
+        if not home_id or not away_id:
+            continue
+
+        for our_id, opp_id in [(home_id, away_id), (away_id, home_id)]:
+            our  = game_shots[game_id][our_id]
+            opp  = game_shots[game_id][opp_id]
+
+            cf = our.get("shot",0) + our.get("goal",0) + our.get("blocked_shot",0)
+            ca = opp.get("shot",0) + opp.get("goal",0) + opp.get("blocked_shot",0)
+            ff = our.get("shot",0) + our.get("goal",0)
+            fa = opp.get("shot",0) + opp.get("goal",0)
+
+            team_totals[our_id]["cf"] += cf
+            team_totals[our_id]["ca"] += ca
+            team_totals[our_id]["ff"] += ff
+            team_totals[our_id]["fa"] += fa
+            team_totals[our_id]["gp"] += 1
+
+    if not team_totals:
+        log.warning("  No team totals computed")
+        return
+
+    log.info(f"  Computed shot totals for {len(team_totals)} teams")
+    for tid, t in sorted(team_totals.items()):
+        gp  = t["gp"] or 1
+        cfp = t["cf"] / (t["cf"] + t["ca"]) * 100 if (t["cf"] + t["ca"]) > 0 else 0
+        ffp = t["ff"] / (t["ff"] + t["fa"]) * 100 if (t["ff"] + t["fa"]) > 0 else 0
+        log.info(f"    team {tid}: CF={t['cf']} CA={t['ca']} CF%={cfp:.1f}% "
+                 f"FF={t['ff']} FA={t['fa']} FF%={ffp:.1f}% GP={gp}")
+
+        # Upsert into pwhl_team_seasons
+        sb.table("pwhl_team_seasons")             .update({
+                "corsi_for":       t["cf"],
+                "corsi_against":   t["ca"],
+                "corsi_for_pct":   round(cfp, 4),
+                "fenwick_for":     t["ff"],
+                "fenwick_against": t["fa"],
+                "fenwick_for_pct": round(ffp, 4),
+                "corsi_for_pg":    round(t["cf"] / gp, 2),
+                "corsi_against_pg":round(t["ca"] / gp, 2),
+            })             .eq("team_id", tid)             .eq("season_id", int(season_id))             .eq("season_type", season_type)             .execute()
+
+    log.info(f"  Shot totals upserted for season {season_id}/{season_type}")
+
 
 def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
@@ -481,7 +590,6 @@ def fetch_game_log(sb, season_id: str) -> None:
         return
 
     rows_raw = extract_rows(data)
-
     rows = []
 
     for g in rows_raw:
@@ -498,25 +606,10 @@ def fetch_game_log(sb, season_id: str) -> None:
         status = g.get("game_status", "") or g.get("status", "") or ""
         is_final = "final" in status.lower()
 
-        # Venue: "Grand Casino Arena | St. Paul" → name + city
-        venue_raw  = g.get("venue_name", "") or ""
-        venue_parts = [p.strip() for p in venue_raw.split("|")]
-        venue_name  = venue_parts[0] if venue_parts else None
-        venue_city  = venue_parts[1] if len(venue_parts) > 1 else None
-
-        # Date: "Fri, Nov 21" — no year in feed; store as-is for display,
-        # reconstruct ISO date using season year heuristic (Oct-Dec = season start year,
-        # Jan-Jun = season start year + 1). Season 8 = 2025-26 → start year 2025.
-        date_with_day = g.get("date_with_day") or g.get("date_played") or g.get("date") or None
-        game_date     = _parse_game_date(date_with_day, int(season_id))
-
         rows.append({
             "game_id": int(gid),
             "season_id": int(season_id),
-            "game_date": game_date,
-            "date_with_day": date_with_day,
-            "venue_name": venue_name or None,
-            "venue_city": venue_city or None,
+            "game_date": _parse_game_date(g.get("date_with_day",""), season_id) or g.get("date_played") or None,
             "home_team_id": int(home_id) if home_id else None,
             "away_team_id": int(away_id) if away_id else None,
             "home_score": int(g.get("home_goal_count", 0) or 0),
@@ -548,6 +641,7 @@ def run(season_id: str | None = None) -> None:
     fetch_skater_stats(sb, season_id, season_type)
     fetch_goalie_stats(sb, season_id, season_type)
     fetch_team_stats(sb, season_id, season_type)
+    run_team_shot_totals(sb, season_id, season_type)
     fetch_game_log(sb, season_id)
 
     log.info("=== PWHL Stats pipeline complete ===")

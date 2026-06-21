@@ -1463,6 +1463,75 @@ function parseNHLNews(data) {
   })).filter(a => a.title);
 }
 
+const PWHL_NEWS_SOURCES = [
+  {
+    id:    'pwhl-official',
+    name:  'PWHL',
+    color: '#FFFFFF',
+    bg:    '#001F5B',
+    url:   'https://www.thepwhl.com/en/rss/news',
+    type:  'rss',
+  },
+  {
+    id:    'espn-womens',
+    name:  'ESPN',
+    color: '#FFFFFF',
+    bg:    '#cc0000',
+    url:   'https://www.espn.com/espn/rss/hockey/news',
+    type:  'espn',
+    filter: ['pwhl','women','iihf'],
+  },
+  {
+    id:    'sportsnet-pwhl',
+    name:  'Sportsnet',
+    color: '#000000',
+    bg:    '#d4a017',
+    url:   'https://origin-feeds.thescore.com/hockey.rss',
+    type:  'rss',
+    filter: ['pwhl','women'],
+  },
+  {
+    id:    'iihf',
+    name:  'IIHF',
+    color: '#FFFFFF',
+    bg:    '#003087',
+    url:   'https://www.iihf.com/en/rss/news',
+    type:  'rss',
+    filter: ['women','pwhl'],
+  },
+];
+
+async function fetchPWHLNews(env) {
+  const allItems = [];
+  for (const source of PWHL_NEWS_SOURCES) {
+    try {
+      const res = await fetch(source.url, {
+        headers: { 'User-Agent': 'EyeWall-Analytics/1.0', 'Accept': 'application/rss+xml,text/xml,*/*' },
+        cf: { cacheTtl: 0 },
+      });
+      if (!res.ok) { console.warn(`PWHL news: ${source.id} failed ${res.status}`); continue; }
+      const xml = await res.text();
+      let parsed = source.type === 'espn' ? parseESPN(xml, source) : parseRSS(xml, source);
+      if (source.filter?.length) {
+        parsed = parsed.filter(item => {
+          const text = (item.title + ' ' + (item.excerpt || '')).toLowerCase();
+          return source.filter.some(kw => text.includes(kw));
+        });
+      }
+      allItems.push(...parsed);
+      console.log(`PWHL news: ${source.id} → ${parsed.length} items`);
+    } catch (err) {
+      console.warn(`PWHL news: ${source.id} error: ${err.message}`);
+    }
+  }
+  const seenIds = new Set();
+  const deduped = allItems
+    .filter(item => { if (seenIds.has(item.id)) return false; seenIds.add(item.id); return true; })
+    .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+  if (deduped.length > 0) await kvPut(env, 'pwhl:news', deduped, 1800);
+  return deduped;
+}
+
 async function fetchNews(env, teamAbbr = TEAM_ABBR) {
   const allItems = [];
   const sources  = getNewsSources(teamAbbr);
@@ -2474,14 +2543,49 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     const kvKey  = `pwhl:standings:${season}`;
     const cached = await kvGet(env, kvKey);
     if (cached) return json(cached);
-    const r = await fetch(
-      `${SB_URL}/rest/v1/pwhl_team_seasons?season_id=eq.${season}&season_type=eq.regular&order=points.desc&limit=12`,
-      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
-    );
-    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
-    const rows = await r.json();
-    await kvPut(env, kvKey, rows, 3600);
-    return json(rows);
+    const sbH = { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` };
+    const [standRes, gameRes] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/pwhl_team_seasons?season_id=eq.${season}&season_type=eq.regular&order=points.desc&limit=12`, { headers: sbH }),
+      fetch(`${SB_URL}/rest/v1/pwhl_game_log?season_id=eq.${season}&game_state=eq.Final&order=game_id.desc&limit=500&select=game_id,home_team_id,away_team_id,home_score,away_score,ot,shootout`, { headers: sbH }),
+    ]);
+    if (!standRes.ok) return new Response(JSON.stringify({ error: `Supabase ${standRes.status}` }), { status: 502, headers: corsHeaders() });
+    const rows  = await standRes.json();
+    const games = gameRes.ok ? await gameRes.json() : [];
+
+    // Compute L10 and streak per team from recent game log
+    const teamStats = {};
+    for (const g of games) {
+      for (const [tid, oppId, myScore, oppScore] of [
+        [g.home_team_id, g.away_team_id, g.home_score, g.away_score],
+        [g.away_team_id, g.home_team_id, g.away_score, g.home_score],
+      ]) {
+        if (!tid) continue;
+        if (!teamStats[tid]) teamStats[tid] = { games: [], streak: 0, streakType: '' };
+        const won   = myScore > oppScore;
+        const extra = g.ot || g.shootout;
+        const result = won ? 'W' : extra ? 'O' : 'L'; // O = OT loss
+        teamStats[tid].games.push(result);
+      }
+    }
+    // L10: last 10 games (already desc by game_id, so first 10 = most recent)
+    const enriched = rows.map(r => {
+      const ts = teamStats[r.team_id];
+      if (!ts) return r;
+      const last10 = ts.games.slice(0, 10);
+      const l10W   = last10.filter(x => x === 'W').length;
+      const l10OTL = last10.filter(x => x === 'O').length;
+      const l10L   = last10.filter(x => x === 'L').length;
+      // Streak: consecutive same result from most recent
+      let streak = 0, streakType = '';
+      for (const res of ts.games) {
+        if (!streakType) { streakType = res === 'W' ? 'W' : 'L'; streak = 1; }
+        else if ((res === 'W' && streakType === 'W') || (res !== 'W' && streakType === 'L')) streak++;
+        else break;
+      }
+      return { ...r, l10W, l10OTL, l10L, streakType, streakCount: streak };
+    });
+    await kvPut(env, kvKey, enriched, 3600);
+    return json(enriched);
   }
 
   // GET /pwhl/players?teamId=1&season=8
@@ -2502,6 +2606,7 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
         `${SB_URL}/rest/v1/pwhl_goalie_seasons?team_id=eq.${teamId}&season_id=eq.${season}&season_type=eq.regular&order=gp.desc&limit=5`,
         { headers: sbHeaders }
       ),
+      // Fetch current team roster (for Roster tab) AND all players (for name resolution across seasons)
       fetch(
         `${SB_URL}/rest/v1/pwhl_players?team_id=eq.${teamId}&select=player_id,first_name,last_name,position,jersey_number,birth_date,birth_city,shoots&limit=80`,
         { headers: sbHeaders }
@@ -2510,10 +2615,18 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     if (!skatersRes.ok || !goaliesRes.ok || !rosterRes.ok) {
       return new Response(JSON.stringify({ error: 'Supabase error' }), { status: 502, headers: corsHeaders() });
     }
-    const [skaters, goalies, roster] = await Promise.all([skatersRes.json(), goaliesRes.json(), rosterRes.json()]);
-    // Build player_id -> bio map
+    const [skaters, goalies, rosterRaw] = await Promise.all([skatersRes.json(), goaliesRes.json(), rosterRes.json()]);
+
+    // Also fetch all players for name resolution (past season players may have moved teams)
+    const allPlayersRes = await fetch(
+      `${SB_URL}/rest/v1/pwhl_players?select=player_id,first_name,last_name,position,jersey_number,birth_date,birth_city,shoots&limit=500`,
+      { headers: sbHeaders }
+    );
+    const allPlayers = allPlayersRes.ok ? await allPlayersRes.json() : rosterRaw;
+
+    // Build player_id -> bio map from all players (not just current team)
     const nameMap = {};
-    for (const p of roster) {
+    for (const p of allPlayers) {
       nameMap[p.player_id] = {
         player_name:   `${p.first_name || ''} ${p.last_name || ''}`.trim(),
         first_name:    p.first_name || null,
@@ -2528,9 +2641,16 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
     }
     const skatersWithNames = skaters.map(s => ({ ...s, ...nameMap[s.player_id] }));
     const goaliesWithNames = goalies.map(g => ({ ...g, ...nameMap[g.player_id] }));
-    // Full roster array for Roster tab (sorted by jersey number)
-    const rosterFull = roster.map(p => ({ ...p, headshot: `https://assets.leaguestat.com/pwhl/240x240/${p.player_id}.jpg` }))
-      .sort((a,b) => (a.jersey_number||99) - (b.jersey_number||99));
+
+    // Roster tab: current team players sorted by jersey number (nulls last)
+    const rosterFull = rosterRaw
+      .map(p => ({ ...p, headshot: `https://assets.leaguestat.com/pwhl/240x240/${p.player_id}.jpg` }))
+      .sort((a,b) => {
+        if (a.jersey_number == null && b.jersey_number == null) return 0;
+        if (a.jersey_number == null) return 1;
+        if (b.jersey_number == null) return -1;
+        return a.jersey_number - b.jersey_number;
+      });
     const result = { skaters: skatersWithNames, goalies: goaliesWithNames, roster: rosterFull };
     await kvPut(env, kvKey, result, 3600);
     return json(result);
@@ -2801,10 +2921,133 @@ Write the analysis now. Mention the single most decisive factor, one risk or con
       `pwhl:lastgame:${teamId}:${season}`,
       `pwhl:roster:${teamId}`,
       `pwhl:standings:${season}`,
+      `pwhl:leagueplayers:${season}`,
     ];
     await Promise.all(keys.map(k => env.CACHE.delete(k)));
     console.log(`PWHL cache busted: teamId=${teamId} season=${season} (${keys.length} keys)`);
     return json({ ok: true, busted: keys });
+  }
+
+  // GET /pwhl/salaries?teamId=1&season=2025-26
+  if (url.pathname === '/pwhl/salaries') {
+    const teamId = parseInt(url.searchParams.get('teamId') || '0', 10);
+    const season = url.searchParams.get('season') || '2025-26';
+    if (!teamId) return new Response(JSON.stringify({ error: 'teamId required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:salaries:${teamId}:${season}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const r = await fetch(
+      `${SB_URL}/rest/v1/pwhl_salaries?team_id=eq.${teamId}&season=eq.${encodeURIComponent(season)}&order=salary.desc&limit=60`,
+      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+    );
+    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+    const rows = await r.json();
+    await kvPut(env, kvKey, rows, 3600 * 24); // 24hr cache — salaries update annually
+    return json(rows);
+  }
+
+  // GET /pwhl/league-players?season=8 — all teams' skaters + goalies for Leaders tab
+  if (url.pathname === '/pwhl/league-players') {
+    const season = parseInt(url.searchParams.get('season') || '8', 10);
+    const kvKey  = `pwhl:leagueplayers:${season}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const sbH = { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` };
+    const [skatersRes, goaliesRes] = await Promise.all([
+      fetch(`${SB_URL}/rest/v1/pwhl_player_seasons?season_id=eq.${season}&season_type=eq.regular&select=player_id,team_id,goals,assists,points,gp,shots,shot_pct,pp_goals,sh_goals,gw_goals,pim,plus_minus&order=points.desc&limit=300`, { headers: sbH }),
+      fetch(`${SB_URL}/rest/v1/pwhl_goalie_seasons?season_id=eq.${season}&season_type=eq.regular&select=player_id,team_id,gp,wins,losses,ot_losses,gaa,sv_pct,shutouts,saves,goals_against&order=sv_pct.desc&limit=50`, { headers: sbH }),
+    ]);
+    const [skaters, goalies] = await Promise.all([skatersRes.json(), goaliesRes.json()]);
+
+    // Fetch all player names
+    const pidsAll = [...new Set([...skaters.map(p=>p.player_id), ...goalies.map(g=>g.player_id)])];
+    const nameRes = await fetch(
+      `${SB_URL}/rest/v1/pwhl_players?select=player_id,first_name,last_name,position,team_id&limit=500`,
+      { headers: sbH }
+    );
+    const nameRows = nameRes.ok ? await nameRes.json() : [];
+    const nameMap = {};
+    for (const p of nameRows) {
+      nameMap[p.player_id] = {
+        player_name: `${p.first_name||''} ${p.last_name||''}`.trim(),
+        first_name: p.first_name, last_name: p.last_name, position: p.position,
+      };
+    }
+    const enrichSkaters = skaters.map(s => ({ ...s, ...nameMap[s.player_id] }));
+    const enrichGoalies = goalies.map(g => ({ ...g, ...nameMap[g.player_id] }));
+    const result = { skaters: enrichSkaters, goalies: enrichGoalies };
+    await kvPut(env, kvKey, result, 3600 * 2);
+    return json(result);
+  }
+
+  // POST /pwhl/scout — generate AI scouting report for a PWHL player
+  if (url.pathname === '/pwhl/scout' && request.method === 'POST') {
+    let body;
+    try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: corsHeaders() }); }
+    const { name, position, stats, isGoalie, seasonLabel } = body;
+    if (!name) return new Response(JSON.stringify({ error: 'name required' }), { status: 400, headers: corsHeaders() });
+
+    const statsLine = isGoalie
+      ? `GP: ${stats.gp ?? '—'}, W: ${stats.wins ?? '—'}, L: ${stats.losses ?? '—'}, OTL: ${stats.ot_losses ?? '—'}, SV%: ${stats.sv_pct != null ? Number(stats.sv_pct).toFixed(3) : '—'}, GAA: ${stats.gaa != null ? Number(stats.gaa).toFixed(2) : '—'}, SO: ${stats.shutouts ?? '—'}`
+      : `GP: ${stats.gp ?? '—'}, G: ${stats.goals ?? '—'}, A: ${stats.assists ?? '—'}, PTS: ${stats.points ?? '—'}, +/-: ${stats.plus_minus ?? '—'}, PPG: ${stats.pp_goals ?? '—'}, SHG: ${stats.sh_goals ?? '—'}, SOG: ${stats.shots ?? '—'}, S%: ${stats.shot_pct != null ? Number(stats.shot_pct).toFixed(1) + '%' : '—'}, PIM: ${stats.pim ?? '—'}`;
+
+    const prompt = `You are a hockey analyst writing a concise scouting report for a PWHL player.
+Player: ${name} (${position})
+Season: ${seasonLabel} PWHL Regular Season
+Stats: ${statsLine}
+
+Write a 2-3 sentence scouting report highlighting their strengths, style of play, and impact this season. Be specific and use the stats. Do not use generic filler phrases. Write in plain text, no markdown.`;
+
+    try {
+      const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const blurb = aiResponse.response?.trim() || '';
+      if (!blurb) return json({ error: 'Empty AI response' });
+      return json({ blurb });
+    } catch (e) {
+      console.error('PWHL scout AI error:', e);
+      return new Response(JSON.stringify({ error: 'AI generation failed' }), { status: 502, headers: corsHeaders() });
+    }
+  }
+
+  // GET /pwhl/player-shots?playerId=36&season=8
+  if (url.pathname === '/pwhl/player-shots') {
+    const playerId = parseInt(url.searchParams.get('playerId') || '0', 10);
+    const season   = parseInt(url.searchParams.get('season')   || '8', 10);
+    if (!playerId) return new Response(JSON.stringify({ error: 'playerId required' }), { status: 400, headers: corsHeaders() });
+    const kvKey  = `pwhl:pshots:${playerId}:${season}`;
+    const cached = await kvGet(env, kvKey);
+    if (cached) return json(cached);
+    const r = await fetch(
+      `${SB_URL}/rest/v1/pwhl_shot_events?shooter_id=eq.${playerId}&season_id=eq.${season}&select=event_type,period_id,time_seconds,x_norm,y_norm&limit=500`,
+      { headers: { 'apikey': SB_ANON, 'Authorization': `Bearer ${SB_ANON}` } }
+    );
+    if (!r.ok) return new Response(JSON.stringify({ error: `Supabase ${r.status}` }), { status: 502, headers: corsHeaders() });
+    const rows = await r.json();
+    const typeMap = { 'goal': 'g', 'shot_on_goal': 'g', 'missed_shot': 'm', 'blocked_shot': 'b' };
+    // Normalise coordinates: fold to positive x (attacking direction)
+    const shots = rows.map(r => {
+      let x = parseFloat(r.x_norm), y = parseFloat(r.y_norm);
+      if (x < 0) { x = -x; y = -y; }
+      return {
+        x: Math.min(Math.abs(x), 99),
+        y: Math.max(-42, Math.min(42, y)),
+        t: r.event_type === 'goal' ? 'g' : r.event_type === 'blocked_shot' ? 'b' : r.event_type === 'missed_shot' ? 'm' : 's',
+        p: r.period_id,
+      };
+    }).filter(s => !isNaN(s.x) && !isNaN(s.y));
+    const result = { shots, total: shots.length };
+    await kvPut(env, kvKey, result, 3600 * 6); // 6hr cache
+    return json(result);
+  }
+
+  // GET /pwhl/news
+  if (url.pathname === '/pwhl/news' && request.method === 'GET') {
+    const cached = await kvGet(env, 'pwhl:news');
+    if (cached) return json(cached);
+    ctx.waitUntil(fetchPWHLNews(env).catch(e => console.warn('PWHL news bg fetch:', e.message)));
+    return json([]);
   }
 
   return new Response('EyeWall Poller', { status: 200 });
