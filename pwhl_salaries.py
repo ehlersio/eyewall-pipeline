@@ -43,29 +43,30 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_KEY"]
 
 SALARY_GUIDE_URL = "https://www.pwhlpa.com/salary-guide"
-SEASON_LABEL     = "2025-26"
+SEASON_LABEL = "2025-26"
 
 # Map PWHLPA team names → our team IDs
 TEAM_NAME_MAP = {
-    "Boston":    1,
+    "Boston": 1,
     "Minnesota": 2,
-    "Montreal":  3,
-    "New York":  4,
-    "Ottawa":    5,
-    "Toronto":   6,
-    "Seattle":   8,
+    "Montreal": 3,
+    "New York": 4,
+    "Ottawa": 5,
+    "Toronto": 6,
+    "Seattle": 8,
     "Vancouver": 9,
 }
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Referer": "https://www.pwhlpa.com/",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
 
 # ── PDF fetch ─────────────────────────────────────────────────────────────────
+
 
 def find_pdf_url() -> str:
     """Scrape the salary guide page to find the current PDF download URL."""
@@ -99,6 +100,7 @@ def download_pdf(pdf_url: str) -> bytes:
 
 # ── PDF parsing ───────────────────────────────────────────────────────────────
 
+
 def parse_salary_pdf(pdf_bytes: bytes) -> list[dict]:
     """
     Extract salary rows from the PDF.
@@ -124,8 +126,8 @@ def parse_salary_pdf(pdf_bytes: bytes) -> list[dict]:
                     if first.upper() in ("FIRST NAME", "FIRST", ""):
                         continue
 
-                    last   = (row[1] or "").strip()
-                    team   = (row[2] or "").strip()
+                    last = (row[1] or "").strip()
+                    team = (row[2] or "").strip()
                     salary = (row[3] or "").strip()
 
                     if not first or not last or not salary:
@@ -138,14 +140,16 @@ def parse_salary_pdf(pdf_bytes: bytes) -> list[dict]:
 
                     team_id = _match_team(team)
 
-                    rows.append({
-                        "first_name":  first,
-                        "last_name":   last,
-                        "team_name":   team,
-                        "team_id":     team_id,
-                        "salary":      salary_val,
-                        "season":      SEASON_LABEL,
-                    })
+                    rows.append(
+                        {
+                            "first_name": first,
+                            "last_name": last,
+                            "team_name": team,
+                            "team_id": team_id,
+                            "salary": salary_val,
+                            "season": SEASON_LABEL,
+                        }
+                    )
 
     log.info(f"Parsed {len(rows)} salary rows from PDF")
     return rows
@@ -165,14 +169,16 @@ def _parse_text_page(text: str, page_num: int) -> list[dict]:
         salary_val = _parse_salary(m.group(4))
         if salary_val is None:
             continue
-        rows.append({
-            "first_name": m.group(1).strip(),
-            "last_name":  m.group(2).strip(),
-            "team_name":  m.group(3).strip(),
-            "team_id":    TEAM_NAME_MAP.get(m.group(3).strip()),
-            "salary":     salary_val,
-            "season":     SEASON_LABEL,
-        })
+        rows.append(
+            {
+                "first_name": m.group(1).strip(),
+                "last_name": m.group(2).strip(),
+                "team_name": m.group(3).strip(),
+                "team_id": TEAM_NAME_MAP.get(m.group(3).strip()),
+                "salary": salary_val,
+                "season": SEASON_LABEL,
+            }
+        )
     if rows:
         log.info(f"  Page {page_num} (text fallback): {len(rows)} rows")
     return rows
@@ -198,14 +204,15 @@ def _match_team(name: str) -> int | None:
 # ── Name alias map (PWHLPA legal name → HockeyTech nickname) ─────────────────
 # Key: (first_name_lower, last_name_lower), Value: first_name to use for matching
 NAME_ALIASES = {
-    ("abigail", "boreen"):      "Abby",
-    ("jennifer", "gardiner"):   "Jenn",
-    ("gabrielle", "hughes"):    "Gabbie",
-    ("abigail", "levy"):        "Abbey",
-    ("kimberly", "newell"):     "Kim",
+    ("abigail", "boreen"): "Abby",
+    ("jennifer", "gardiner"): "Jenn",
+    ("gabrielle", "hughes"): "Gabbie",
+    ("abigail", "levy"): "Abbey",
+    ("kimberly", "newell"): "Kim",
 }
 
 # ── Player matching ───────────────────────────────────────────────────────────
+
 
 def match_players(sb, salary_rows: list[dict]) -> list[dict]:
     """
@@ -213,10 +220,12 @@ def match_players(sb, salary_rows: list[dict]) -> list[dict]:
     Returns enriched rows with player_id where found.
     """
     log.info("Fetching player roster for name matching…")
-    res = sb.table("pwhl_players") \
-        .select("player_id,first_name,last_name,team_id") \
-        .limit(500) \
+    res = (
+        sb.table("pwhl_players")
+        .select("player_id,first_name,last_name,team_id")
+        .limit(500)
         .execute()
+    )
     players = res.data or []
 
     # Build lookup: normalised "first last" → player_id
@@ -243,7 +252,9 @@ def match_players(sb, salary_rows: list[dict]) -> list[dict]:
             matched += 1
         else:
             unmatched += 1
-            log.warning(f"  No player_id match: {row['first_name']} {row['last_name']} ({row['team_name']})")
+            log.warning(
+                f"  No player_id match: {row['first_name']} {row['last_name']} ({row['team_name']})"
+            )
 
     log.info(f"Player matching: {matched} matched, {unmatched} unmatched")
     return salary_rows
@@ -251,19 +262,20 @@ def match_players(sb, salary_rows: list[dict]) -> list[dict]:
 
 # ── Supabase upsert ───────────────────────────────────────────────────────────
 
+
 def upsert_salaries(sb, rows: list[dict]) -> None:
     """Upsert salary rows to pwhl_salaries table."""
     now = datetime.now(UTC).isoformat()
     records = [
         {
-            "first_name":  r["first_name"],
-            "last_name":   r["last_name"],
-            "player_id":   r.get("player_id"),
-            "team_id":     r.get("team_id"),
-            "team_name":   r["team_name"],
-            "salary":      r["salary"],
-            "season":      r["season"],
-            "updated_at":  now,
+            "first_name": r["first_name"],
+            "last_name": r["last_name"],
+            "player_id": r.get("player_id"),
+            "team_id": r.get("team_id"),
+            "team_name": r["team_name"],
+            "salary": r["salary"],
+            "season": r["season"],
+            "updated_at": now,
         }
         for r in rows
     ]
@@ -272,10 +284,8 @@ def upsert_salaries(sb, rows: list[dict]) -> None:
     chunk_size = 50
     total = 0
     for i in range(0, len(records), chunk_size):
-        chunk = records[i:i+chunk_size]
-        sb.table("pwhl_salaries") \
-            .upsert(chunk, on_conflict="first_name,last_name,season") \
-            .execute()
+        chunk = records[i : i + chunk_size]
+        sb.table("pwhl_salaries").upsert(chunk, on_conflict="first_name,last_name,season").execute()
         total += len(chunk)
         log.info(f"  Upserted {total}/{len(records)} rows")
 
@@ -283,6 +293,7 @@ def upsert_salaries(sb, rows: list[dict]) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape PWHL salary data from PWHLPA PDF")
@@ -298,7 +309,7 @@ def main():
         with open(args.pdf, "rb") as f:
             pdf_bytes = f.read()
     else:
-        pdf_url  = find_pdf_url()
+        pdf_url = find_pdf_url()
         pdf_bytes = download_pdf(pdf_url)
 
     # Parse
@@ -311,20 +322,24 @@ def main():
     rows = match_players(sb, rows)
 
     # Print summary
-    log.info(f"\n{'='*50}")
+    log.info(f"\n{'=' * 50}")
     log.info(f"Total rows: {len(rows)}")
     log.info(f"Matched:    {sum(1 for r in rows if r.get('player_id'))}")
     log.info(f"Unmatched:  {sum(1 for r in rows if not r.get('player_id'))}")
     log.info(f"Teams: {sorted({r['team_name'] for r in rows})}")
     if rows:
-        salaries = [r['salary'] for r in rows]
+        salaries = [r["salary"] for r in rows]
         log.info(f"Salary range: ${min(salaries):,.2f} - ${max(salaries):,.2f}")
-        log.info(f"Sample: {rows[0]['first_name']} {rows[0]['last_name']} → ${rows[0]['salary']:,.2f}")
+        log.info(
+            f"Sample: {rows[0]['first_name']} {rows[0]['last_name']} → ${rows[0]['salary']:,.2f}"
+        )
 
     if args.dry_run:
         log.info("Dry run — skipping upsert")
         for r in rows[:10]:
-            print(f"  {r['first_name']:15} {r['last_name']:20} {r['team_name']:12} ${r['salary']:>10,.2f}  pid={r.get('player_id')}")
+            print(
+                f"  {r['first_name']:15} {r['last_name']:20} {r['team_name']:12} ${r['salary']:>10,.2f}  pid={r.get('player_id')}"
+            )
         return
 
     upsert_salaries(sb, rows)

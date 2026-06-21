@@ -45,10 +45,10 @@ ROUND_STARTS = {1: 1, 2: 33, 3: 65, 4: 97, 5: 129, 6: 161, 7: 193}
 # Tankathon SVG filenames don't always match NHL abbrevs exactly.
 # Map the ones that differ.
 SVG_TO_ABBR = {
-    "sj":  "SJS",
-    "nj":  "NJD",
-    "tb":  "TBL",
-    "la":  "LAK",
+    "sj": "SJS",
+    "nj": "NJD",
+    "tb": "TBL",
+    "la": "LAK",
     "mon": "MTL",
     "van": "VAN",
     "chi": "CHI",
@@ -159,14 +159,16 @@ def scrape_draft_order() -> list[dict]:
             # Second logo (if present and not forfeited) = original team
             original_team = svg_to_abbr(logos[1]) if len(logos) > 1 and not forfeited else None
 
-            rows.append({
-                "pick_overall":  pick_overall,
-                "round":         round_num,
-                "pick_in_round": pick_in_round,
-                "team_abbrev":   team_abbrev,
-                "original_team": original_team,
-                "forfeited":     forfeited,
-            })
+            rows.append(
+                {
+                    "pick_overall": pick_overall,
+                    "round": round_num,
+                    "pick_in_round": pick_in_round,
+                    "team_abbrev": team_abbrev,
+                    "original_team": original_team,
+                    "forfeited": forfeited,
+                }
+            )
             picks_found += 1
 
         log.info(f"    Found {picks_found} picks in Round {round_num}")
@@ -192,10 +194,7 @@ def upsert_rows(rows: list[dict], only_round: int | None = None) -> None:
     if forfeited_picks:
         log.info(f"  Forfeited picks (will upsert with holder as original team): {forfeited_picks}")
 
-    db_rows = [
-        {k: v for k, v in r.items() if k != "forfeited"}
-        for r in rows
-    ]
+    db_rows = [{k: v for k, v in r.items() if k != "forfeited"} for r in rows]
 
     # Upsert in chunks of 50 to stay well within Supabase limits
     chunk_size = 50
@@ -214,8 +213,12 @@ def upsert_rows(rows: list[dict], only_round: int | None = None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EyeWall Tankathon draft order ingest")
-    parser.add_argument("--dry-run", action="store_true", help="Print rows without writing to Supabase")
-    parser.add_argument("--round", type=int, default=None, help="Only upsert a specific round (1-7)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print rows without writing to Supabase"
+    )
+    parser.add_argument(
+        "--round", type=int, default=None, help="Only upsert a specific round (1-7)"
+    )
     args = parser.parse_args()
 
     rows = scrape_draft_order()
@@ -226,7 +229,9 @@ def main() -> None:
         for r in filter_rows:
             traded = f" (via {r['original_team']})" if r["original_team"] else ""
             forfeit = " [FORFEITED]" if r.get("forfeited") else ""
-            print(f"R{r['round']} #{r['pick_overall']:3d} (#{r['pick_in_round']:2d} in round)  {r['team_abbrev']}{traded}{forfeit}")
+            print(
+                f"R{r['round']} #{r['pick_overall']:3d} (#{r['pick_in_round']:2d} in round)  {r['team_abbrev']}{traded}{forfeit}"
+            )
         print(f"\nTotal: {len(filter_rows)} rows")
         return
 
