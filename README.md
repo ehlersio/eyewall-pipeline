@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, and AI-generated game summaries, predictions, matchup analysis, and player scouting blurbs.
+Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs, PWHL salary data, and PWHL news.
 
 ## Setup
 
@@ -9,7 +9,7 @@ Nightly data pipeline that populates Supabase with NHL stats, MoneyPuck analytic
 pip install -r requirements.txt
 ```
 
-Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`, `python-dotenv`
+Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`, `python-dotenv`, `pdfplumber`
 
 ### 2. Create your .env file
 ```bash
@@ -24,328 +24,329 @@ NHL_SEASON=20252026
 PRIMARY_TEAM_ABBR=CAR
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_KEY=your_cloudflare_api_key
+WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
+POLL_SECRET=your_worker_poll_secret
 ```
 
 ### 3. Run the pipeline
 ```bash
-# Run everything (nightly order)
+# NHL — run everything (nightly order)
 python run.py
 
-# Run individual modules
+# Run individual NHL modules
 python run.py nhl              # NHL stats only
 python run.py shots            # Shot events (incremental)
 python run.py shifts           # Shift charts (incremental)
-python run.py shifts 20242025  # Shift charts backfill for a specific season
 python run.py zones            # Zone starts (incremental)
-python run.py zones 20242025   # Zone starts backfill for a specific season
 python run.py rapm             # RAPM regression only
-python run.py rapm 20242025    # RAPM backfill for a specific season
 python run.py moneypuck        # MoneyPuck WAR + percentiles only
 python run.py lines            # Line combinations only
 python run.py rankings         # Power rankings + AI narratives only
-python run.py validate         # Internal RAPM sanity checks (run after rapm.py)
-python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV (quarterly)
-python run.py ai               # Run full AI pipeline (summaries + scouting + predictions)
+python run.py validate         # RAPM sanity checks
 
-# AI pipeline — run individually
-python ai_summaries.py                          # Post-game summaries for all unprocessed games
-python ai_summaries.py --game 2025030414        # Single game
-python ai_summaries.py --game 2025030414 --force  # Regenerate even if exists
-python ai_predictions.py                        # Pre-game predictions for today's games
-python ai_predictions.py --game 2025030417 --home CAR --away VGK  # Single game
-python ai_predictions.py --force                # Regenerate all upcoming games
-python ai_scouting.py                           # Player scouting blurbs (all 32 teams)
-python ai_scouting.py --team CAR                # One team only
-python ai_scouting.py --missing                 # Only generate missing blurbs
+# AI pipeline
+python ai_summaries.py                           # Post-game summaries
+python ai_summaries.py --game 2025030414 --force # Single game, force regenerate
+python ai_predictions.py                         # Pre-game predictions
+python ai_scouting.py --missing                  # Missing scouting blurbs only
+python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
 
-# Power rankings — run individually
-python power_rankings.py                        # All 32 teams — rankings + AI narratives
-python power_rankings.py --team CAR             # One team only
-python power_rankings.py --dry-run --team CAR   # Preview prompt, no DB writes
-python power_rankings.py --no-narrative         # Rankings only, skip AI generation
-
-# Backfill prior seasons — nhl_stats.py and moneypuck.py accept a season argument
-python nhl_stats.py 20242025   # populate player_seasons rows for a prior season
-python moneypuck.py 20242025   # populate WAR/percentiles for a prior season
+# PWHL — run individually (no orchestrator yet)
+python pwhl_stats.py 8         # 2025-26 regular season stats
+python pwhl_stats.py 9         # 2025-26 playoffs stats
+python pwhl_pbp_events.py      # Current season PBP events (defaults to season 8)
+python pwhl_pbp_events.py 9    # Specific playoff season
+python pwhl_pbp_events.py --force  # Re-ingest already-processed games
+python pwhl_shot_events.py     # Shot events
+python pwhl_salaries.py        # Salary scraper (PWHLPA PDF)
+python pwhl_salaries.py --dry-run  # Parse only, don't upsert
+python pwhl_news.py            # Fetch PWHL news and POST to Worker
 ```
 
-## Pipeline modules
+---
+
+## NHL Pipeline Modules
 
 ### Run order (nightly, via `run.py`)
-
 ```
-nhl_stats → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings
-```
-
-AI pipeline runs after the data pipeline (needs fresh `player_seasons`):
-
-```
-game_scoring → ai_summaries → ai_scouting
-```
-
-AI predictions run separately on a morning cron (`ai_pipeline.yml`):
-
-```
-ai_predictions
+nhl_stats → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting
 ```
 
 ### `nhl_stats.py`
-- Fetches rosters for all 32 NHL teams
-- Fetches skater, goalie, and team stats
-- Fetches CAR game log
-- Accepts optional season argument: `python nhl_stats.py 20242025`
-- Runtime: ~2-3 minutes
+Rosters, skater/goalie/team stats, game log for all 32 teams. Accepts season argument: `python nhl_stats.py 20242025`. Runtime: ~2-3 min.
 
-### `shot_events.py` *(league-wide)*
-- Fetches PBP for all 32 teams' completed games
-- Extracts shot coordinates, event type, situation code, goalie in net
-- Stores real team abbreviations (e.g. `BOS`, `TBL`) + `car_game` flag
-- Incremental — skips already processed games
-- Runtime: ~10-15 minutes per season (one-time backfill), ~2 min nightly
+### `shot_events.py`
+League-wide shot coordinates from PBP. Incremental. Runtime: ~2 min nightly, ~10-15 min backfill.
 
-### `shift_data.py` *(league-wide)*
-- Fetches shift charts from NHL Stats API for all league games
-- Falls back to NHL HTML shift reports when JSON API returns no data
-- Stores per-player shift start/end times for both teams
-- Used by `rapm.py` to determine on-ice players per shot event
-- Incremental — skips already processed games
-- Runtime: ~10-15 minutes per season (one-time backfill), ~2 min nightly
+### `shift_data.py`
+Per-player shift start/end times. Falls back to HTML shift reports when JSON API returns no data. Used by `rapm.py`. Incremental.
 
-### `zone_starts.py` *(league-wide)*
-- Fetches PBP faceoff data for all league games
-- Falls back to NHL HTML shift reports when JSON shift chart API returns no data
-- Records offensive/defensive/neutral zone start counts per player per game
-- Away team zones flipped (NHL API reports from home team perspective)
-- Used by `rapm.py` for zone-start adjustment
-- Incremental — skips already processed games
-- Runtime: ~15-20 minutes per season (one-time backfill), ~3 min nightly
+### `zone_starts.py`
+OZ/DZ/NZ faceoff start counts per player per game. Away team zones flipped. Used by `rapm.py`.
 
 ### `score_state.py`
-- Computes per-player expected weights based on score state distribution
-- Used by `rapm.py` for score-state adjustment
-- Accepts optional season argument: `python score_state.py 20242025`
+Per-player expected weights by score state. Used by `rapm.py` for score-state normalization.
 
 ### `rapm.py`
-- Builds 3-year rolling ridge regression RAPM (current + 2 prior seasons)
-- 5v5 only — uses `situation_code='1551'` filter on shot events
-- Zone-start adjusted (players with DZ-heavy deployment upweighted)
-- Signed xG formulation — measures xG differential, not raw xG
-- Writes `rapm` column to `player_seasons` for current season
-- Accepts optional season argument: `python rapm.py 20242025`
-- **Beta model** — score-state adjustment pending
-- Runtime: ~8-10 minutes (dominated by loading shift rows)
+3-year rolling ridge regression RAPM (alpha=2500). 5v5 only. Zone-start adjusted. Signed xG differential formulation. Writes `rapm` column to `player_seasons`. See RAPM methodology section.
 
 ### `validate_rapm.py`
-- **Internal checks** (no external data): distribution mean, position balance, known elite player rankings, year-over-year stability (r=0.90 for 20252026 vs 20242025)
-- **EH comparison** (manual, quarterly): loads a manually exported Evolving Hockey RAPM CSV, computes Pearson correlation, identifies outliers
-- Writes results to `rapm_validation` Supabase table
-- Pass threshold: r ≥ 0.85 vs EH; Warn: r ≥ 0.75; Fail: r < 0.75
-- Not included in nightly `run.py` — run manually after full-season pipeline runs
-- See `VALIDATION_STEPS.md` for step-by-step instructions
+Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
 
 ### `moneypuck.py`
-- Computes WAR using RAPM as the EV component (falls back to xGoals if RAPM unavailable)
-- Computes percentile rankings vs all NHL forwards/defensemen
-- Computes goalie GSAX, danger-zone SV%, percentiles
-- Aggregates per-game `game_xg` rows into `team_seasons.xgf_pct` (5v5 season xGF% per team) — used by power rankings
-- Writes analytics columns to `player_seasons`, `goalie_seasons`, and `team_seasons`
-- Accepts optional season argument: `python moneypuck.py 20242025`
-- Runtime: ~30-60 seconds
+WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, `team_seasons.xgf_pct`. Accepts season argument.
 
 ### `line_combinations.py`
-- Infers forward lines and D pairs from shift + shot event data
-- Computes per-unit xGF% and TOI together
-- Writes to `line_combinations` table
-- Must run after `shift_data` and `shot_events`
+Forward lines and D pairs inferred from shift + shot events. Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
 
 ### `power_rankings.py`
-- Computes nightly 32-team power rankings using five weighted, normalised components
-- Adds an early-season roster WAR prior (tapers from 15% → 0% weight by game 20)
-- Generates a personalised AI narrative per team via Cloudflare Workers AI ("Sticks" persona)
-- Narratives are team-specific: each references that team's rank, component breakdown, top players by WAR, and recent movement
-- Accuracy rules enforced in prompt: only named players from top-5 WAR list may be mentioned, no invented stats or game results
-- Writes `roster_war_score` to `team_seasons`, ranks + narratives to `power_rankings_narratives`
-- History retained — one row per team per day, used for movement arrows (▲/▼) in UI
-- Must run after `moneypuck` (needs fresh WAR and xGF%)
-- Runtime: ~2-3 minutes (32 AI calls at ~0.5s each + Supabase reads/writes)
+32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via Workers AI ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
-**Power rankings formula:**
+**Formula:**
 
-| Component | Full-season weight | Source |
-|-----------|-------------------|--------|
+| Component | Weight | Source |
+|-----------|--------|--------|
 | Points % | 25% | `team_seasons` |
 | L10 points % | 25% | NHL standings API (frontend) |
 | Goal diff/GP | 20% | `team_seasons` |
 | 5v5 xGF% | 20% | `team_seasons.xgf_pct` |
 | Special teams avg | 10% | `team_seasons` |
-| Roster WAR | 0–15% (early season) | `player_seasons.war` aggregated |
+| Roster WAR | 0–15% (early season) | `player_seasons.war` |
 
-Note: L10 is only available from the live standings API, so the backend ranking (used for `prior_rank` storage) substitutes extra weight on Points% instead. The frontend recomputes rankings using L10 from the live standings call.
+### `special_teams.py`
+PP/PK unit inference from shift + shot events → `special_teams_units` table.
 
-### `ai_summaries.py`
-- Generates post-game summaries for completed games (both teams)
-- Two Workers AI calls per game: full `summary_text` (250-400 words) + short `card_text` (50 words for export card)
-- Writes to `game_summaries` table
-- Incremental — skips already-generated summaries unless `--force`
-- Runtime: ~2-4 seconds per game
+### `draft_ingest.py`
+Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `--poll-picks` loops every 60s, exits code 99 when all 224 picks complete.
 
-### `ai_predictions.py`
-- Generates pre-game predictions for today's upcoming games
-- Two Workers AI calls per game: `prediction_text` (200-350 words) + `matchup_text` (line-by-line matchup analysis, 200-300 words)
-- Uses standings, recent form, and player stats from Supabase
-- Writes to `game_predictions` table
-- Runtime: ~4-6 seconds per game
+### `tankathon_ingest.py`
+2026 draft pick order scraper → `draft_pick_order_2026`.
 
-### `ai_scouting.py`
-- Generates player scouting blurbs for all 32 teams
-- One Workers AI call per player: `scouting_text` (150-250 words)
-- Uses `player_seasons` RAPM/WAR/percentile data as context
-- Writes to `player_scouting` table
-- `--missing` flag: only generate for players without existing blurbs
-- Runtime: ~1-2 seconds per player; ~30-60 min for all 32 teams
+### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_persona.py`, `ai_context.py`)
+See original documentation — unchanged.
 
-### `ai_persona.py`
-- Defines the Sticks persona (system prompt) and all prompt templates
-- No model calls — pure string formatters
-- Functions: `build_game_summary_prompt`, `build_game_card_prompt`, `build_prediction_prompt`, `build_matchup_prompt`, `build_player_scouting_prompt`
-- Power rankings prompts are built inline in `power_rankings.py` (same persona, different context structure)
+---
 
-**Accuracy rules enforced in all prompts:**
-- Only reference stats, scores, and player names explicitly provided in the data
-- Never invent stats, scores, or outcomes
-- Power rankings prompts additionally restrict: only name players from the provided TOP PLAYERS list; do not reference specific games unless listed; enforce correct season context (early/mid/late season language gated on GP count)
+## PWHL Pipeline Modules
 
-### `ai_context.py`
-- Pulls and structures Supabase data for AI prompt input
-- No model calls — pure data fetchers
-- Functions: `build_game_summary_context`, `build_prediction_context`, `build_matchup_context`, `get_line_combos`, `get_scouting_blurbs`
+All PWHL modules use HockeyTech API (no authentication required) and write to `pwhl_*` Supabase tables.
 
-## Database schema
+### `pwhl_stats.py`
+Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 regular, `9` for 2025-26 playoffs).
 
-| Table | Description |
-|-------|-------------|
-| `players` | Player master (id, name, position) |
-| `player_seasons` | Per-player per-season stats + analytics (war, rapm, percentiles) |
-| `goalie_seasons` | Per-goalie per-season stats + analytics (gsax, sv%, percentiles) |
-| `team_seasons` | Per-team per-season stats + `xgf_pct` (5v5 xGF%, nightly) + `roster_war_score` (normalised 0–1, nightly) |
-| `game_log` | CAR game-by-game results |
-| `shot_events` | League-wide shot coordinates (car_game flag for CAR-specific queries) |
-| `shift_events` | League-wide per-player shift start/end times |
-| `zone_starts` | Per-player OZ/DZ/NZ start counts per game |
-| `player_score_state_dist` | Per-player score state distribution weights (used by rapm.py) |
-| `skipped_games` | Games with no source data, per pipeline, to avoid retrying |
-| `rapm_validation` | RAPM validation run history (internal checks + EH correlation) |
-| `game_summaries` | AI post-game summaries (`summary_text`, `card_text`) per team per game |
-| `game_predictions` | AI pre-game predictions (`prediction_text`, `matchup_text`) per game |
-| `player_scouting` | AI player scouting blurbs (`scouting_text`) per player per season |
-| `game_scoring` | Goal-by-goal scoring data (scorer, assists, situation, score after) |
-| `game_xg` | Per-game expected goals by team and situation |
-| `line_combinations` | Inferred forward lines and D pairs (xGF%, TOI) per team per season |
-| `power_rankings_narratives` | Nightly AI power ranking narrative per team per day (rank, prior_rank, narrative). History retained — used for movement arrows (▲/▼) in the app. |
+**What it does:**
+- `fetch_roster()` — upserts to `pwhl_players`
+- `fetch_skater_stats()` — upserts to `pwhl_player_seasons`
+- `fetch_goalie_stats()` — upserts to `pwhl_goalie_seasons`
+- `fetch_team_stats()` — two HockeyTech calls (`special=false` + `special=true`): standings + PP%/PK%/special teams raw counts → `pwhl_team_seasons`
+- `run_team_shot_totals()` — computes CF/CA/FF/FA from `pwhl_shot_events` joined to `pwhl_game_log` → `pwhl_team_seasons`
+- `fetch_game_log()` — upserts to `pwhl_game_log` including `game_date` (parsed from `date_with_day` via `_parse_game_date()`), `venue_name`, `venue_city`
 
-See `schema.sql` for full definitions.
+**Special teams note:** HockeyTech `view=teams&special=true` returns PP%/PK% as strings like `"23.0%"`. `_parse_pct()` converts to float (0.23).
 
-## Required migrations (run once in Supabase SQL editor)
+**Game date note:** HockeyTech returns `"Fri, Apr 30"` not a full ISO date. `_parse_game_date()` uses `SEASON_YEAR_MAP` to infer the year — months Sep-Dec use start year, Jan-Aug use start year + 1.
 
-```sql
--- Add xGF% and roster WAR score to team_seasons
-ALTER TABLE team_seasons ADD COLUMN IF NOT EXISTS xgf_pct numeric;
-ALTER TABLE team_seasons ADD COLUMN IF NOT EXISTS roster_war_score numeric;
-
--- Power rankings narrative history
-CREATE TABLE IF NOT EXISTS power_rankings_narratives (
-  id             serial primary key,
-  team           text        not null,
-  season         integer     not null,
-  generated_date date        not null,
-  rank           integer     not null,
-  prior_rank     integer,
-  narrative      text,
-  UNIQUE (team, season, generated_date)
-);
-CREATE INDEX IF NOT EXISTS prn_team_season_date
-  ON power_rankings_narratives (team, season, generated_date DESC);
+**Backfill:**
+```bash
+python pwhl_stats.py 1   # 2023-24 regular
+python pwhl_stats.py 3   # 2023-24 playoffs
+python pwhl_stats.py 5   # 2024-25 regular
+python pwhl_stats.py 6   # 2024-25 playoffs
+python pwhl_stats.py 8   # 2025-26 regular
+python pwhl_stats.py 9   # 2025-26 playoffs
 ```
 
-## Scheduling
-
-GitHub Actions runs two workflows:
-
-**`nightly.yml`** — 3AM ET (7AM UTC): Full data pipeline in order:
-`nhl_stats` → `shot_events` → `shift_data` → `zone_starts` → `rapm` → `moneypuck` → `line_combinations` → `power_rankings` → `ai_summaries` → `ai_scouting`
-
-Incremental — only new completed games are processed by shot/shift/zone modules. Full runtime after backfill: ~10-15 minutes.
-
-**`ai_pipeline.yml`** — Two jobs:
-- **Night job** (8AM UTC / 4AM ET): `ai_summaries.py` (post-game summaries for last night's games) + `ai_scouting.py --missing` (any players without blurbs)
-- **Morning job** (2PM UTC / 10AM ET): `ai_predictions.py` (pre-game predictions for tonight's games)
-- Manual dispatch via `workflow_dispatch` with `job` input (`night`, `morning`, or `all`)
-- Also runnable locally: `python run.py ai`
-
-All AI inference via Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct-fp8-fast`).
-
-## RAPM methodology
-
-True Regularized Adjusted Plus-Minus via ridge regression (alpha=2500):
-
-- **Pool:** 3-year rolling window (current + 2 prior seasons)
-- **Events:** ~420k 5v5 shot attempts across all 32 teams
-- **Matrix:** (n_shots × n_players), +1 for shooting team, -1 for defending team
-- **Outcome y:** Signed xG — positive for alphabetically-first team, negative for the other. This measures xG *differential* so forwards and defensemen are treated symmetrically.
-- **Zone-start adjustment:** Players with low OZS% (DZ-heavy) get upward weight per shot event. Weight = 1.0 + (0.50 - OZS%) × 0.5
-- **Score-state adjustment:** Pending — requires `home_team` in `shot_events` table for non-CAR games
-- **Minimum sample:** 150 minutes EV ice time across 3-season pool
-- **Validation:** Periodic correlation check vs Evolving Hockey public RAPM (target r ≥ 0.85); YoY stability r=0.90 (742 shared players, 20252026 vs 20242025)
-
-## One-time backfill (first run)
-
-Run these before the first nightly run to populate historical data:
+### `pwhl_pbp_events.py`
+Ingests PWHL PBP events (faceoffs, hits, penalties, goalie changes) from HockeyTech. Incremental by default — skips already-processed games.
 
 ```bash
-# NHL stats (populates player_seasons rows needed by rapm.py upsert)
-python nhl_stats.py 20222023
-python nhl_stats.py 20232024
-python nhl_stats.py 20242025
-python nhl_stats.py 20252026
-
-# Shot events (league-wide, all 4 seasons)
-python shot_events.py 20222023
-python shot_events.py 20232024
-python shot_events.py 20242025
-python shot_events.py 20252026
-
-# Shift charts (league-wide, all 4 seasons)
-python shift_data.py 20222023
-python shift_data.py 20232024
-python shift_data.py 20242025
-python shift_data.py 20252026
-
-# Zone starts (all 4 seasons)
-python zone_starts.py 20222023
-python zone_starts.py 20232024
-python zone_starts.py 20242025
-python zone_starts.py 20252026
-
-# Score state (all 4 seasons)
-python score_state.py 20222023
-python score_state.py 20232024
-python score_state.py 20242025
-python score_state.py 20252026
-
-# RAPM (current season — uses all 4 seasons as pool)
-python rapm.py
-
-# MoneyPuck WAR + percentiles + xGF% aggregation
-python moneypuck.py
-
-# Power rankings baseline (no narrative — establishes prior_rank for movement arrows)
-python power_rankings.py --no-narrative
+python pwhl_pbp_events.py          # Current season (defaults to PWHL_SEASON env or "8")
+python pwhl_pbp_events.py 9        # Specific season
+python pwhl_pbp_events.py --force  # Re-ingest all games
+python pwhl_pbp_events.py --game 338  # Single game (debug)
 ```
 
-## Known limitations
+**Important:** `PWHL_SEASON` env var must be non-empty or script defaults to `"8"`. If the GH Actions secret is empty, the default applies correctly via `.strip() or "8"`.
 
-- **UTA missing from `team_seasons`:** Utah not yet populated by `nhl_stats.py` — excluded from power rankings until their row appears.
-- **Power rankings L10:** L10 points % is only available from the live NHL standings API, not from Supabase. The backend ranking (used for `prior_rank` storage) weights Points% higher to compensate. The frontend recomputes rankings with L10 from the live API call.
-- **RAPM non-primary-team players:** Players on other teams only appear in 2–5 games vs the primary team per season. RAPM estimates have high variance — validation thresholds are relaxed accordingly.
-- **RAPM linemate collinearity:** Draisaitl and Makar rank anomalously low due to dominant co-deployment. Documented in `validate_rapm.py` — treat as known artifact, not pipeline error.
-- **Transactions / Injuries:** No reliable free NHL API endpoint. Deferred pending PuckPedia API access.
+### `pwhl_shot_events.py`
+Ingests PWHL shot coordinates from HockeyTech PBP. Writes to `pwhl_shot_events` with `x_norm`, `y_norm`, `event_type`, `shooter_id`, `team_id`, `period_id`, `time_seconds`.
+
+**Coordinate note:** `x_norm` is inverted vs NHL convention (positive = defending end). Frontend negates x before folding to attacking half. A pipeline-level fix is deferred.
+
+### `pwhl_salaries.py`
+Scrapes PWHLPA salary guide PDF and upserts to `pwhl_salaries`.
+
+```bash
+python pwhl_salaries.py            # Download latest PDF and upsert
+python pwhl_salaries.py --dry-run  # Parse only, print matches, no upsert
+python pwhl_salaries.py --pdf path/to/local.pdf  # Use local PDF (skip download)
+```
+
+**How it works:**
+1. Fetches `https://www.pwhlpa.com/salary-guide` to find current PDF URL
+2. Downloads PDF, parses with `pdfplumber`
+3. Matches players to `pwhl_players` by name (with alias map for legal vs nickname mismatches)
+4. Upserts to `pwhl_salaries` on `(first_name, last_name, season)`
+
+**Name alias map** (in `NAME_ALIASES` dict): Abigail→Abby Boreen, Jennifer→Jenn Gardiner, Gabrielle→Gabbie Hughes, Abigail→Abbey Levy, Kimberly→Kim Newell. Update if new mismatches appear.
+
+**2025-26 results:** 194 rows parsed, 190 matched (97.9%). 4 unmatched (Kaley Doyle, Kristyna Kaltounkova, Kimberly Newell, Megan Warrener) — in `pwhl_salaries` with `player_id = null`.
+
+**PWHL CBA:** Average target $58,349.50/player (±10%), team ceiling ~$1.3M, increases 3%/yr through 2031.
+
+### `pwhl_news.py`
+Fetches PWHL news from RSS sources and POSTs to the Worker's `/pwhl/news/ingest` endpoint.
+
+**Why GH Actions and not the Worker directly:** Cloudflare datacenter IPs are blocked by most RSS sources (ESPN 503, IIHF 403, Sportsnet varies). GH Actions runner IPs are not blocked.
+
+```bash
+python pwhl_news.py    # Fetch and POST to Worker
+```
+
+**Sources:** Sportsnet (`sportsnet.ca/feed/`), ESPN hockey RSS, The Score hockey RSS, The Hockey Writers. Filtered by PWHL keywords (team names, player names, "pwhl", "walter cup").
+
+**Worker endpoint:** `POST /pwhl/news/ingest` — merges new articles with existing cached articles, deduplicates by ID, keeps top 60, stores in `pwhl:news` KV with 30-min TTL.
+
+---
+
+## PWHL Season ID Map
+
+| ID | Season | Type |
+|----|--------|------|
+| 1 | 2023-24 | Regular |
+| 3 | 2023-24 | Playoffs |
+| 5 | 2024-25 | Regular |
+| 6 | 2024-25 | Playoffs |
+| 8 | 2025-26 | Regular |
+| 9 | 2025-26 | Playoffs |
+
+IDs 2, 4, 7 don't exist or have no data (likely preseason/gaps in HockeyTech numbering).
+
+---
+
+## PWHL Analytics Roadmap (post-launch)
+
+The PWHL currently has no equivalent to MoneyPuck WAR/RAPM. Building it requires:
+
+### What we have
+- ✅ `pwhl_shot_events` — coordinates, event_type, shooter_id, team_id, game_id, period, time (~6,000+ shots/season)
+- ✅ `pwhl_pbp_events` — faceoffs, hits, penalties, goalie changes
+- ✅ 3 seasons of data (2023-24, 2024-25, 2025-26)
+
+### Build plan
+
+**Step 1 — PWHL xG model** (`pwhl_xg.py`)
+Train logistic regression on `pwhl_shot_events`: distance + angle → goal probability. Store per-shot xG in new `xg` column on `pwhl_shot_events`. ~6,000 shots/season is sufficient for a basic model.
+
+**Step 2 — Shift data** (`pwhl_shift_data.py`)
+Check if HockeyTech PBP includes `player_change` events — if so, derive shift intervals (on-ice rosters per second). This is the hard part; availability from HockeyTech unconfirmed.
+
+**Alternative:** Use lineup-based approach — derive approximate on-ice time from faceoff events + penalties from `pwhl_pbp_events`. Less accurate but buildable from existing data.
+
+**Step 3 — Zone starts** (`pwhl_zone_starts.py`)
+Count OZ/DZ/NZ faceoffs per player from `pwhl_pbp_events`.
+
+**Step 4 — RAPM** (`pwhl_rapm.py`)
+Ridge regression marginal xG/60 at 5v5. Mirror `rapm.py`. Needs shift data from Step 2.
+
+**Step 5 — Surface in UI**
+Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-term alternative: surface team-level Corsi/Fenwick rankings (already in `pwhl_team_seasons`) as a League Analytics view.
+
+**Estimated effort:** 3-4 sessions. Recommend October 2026 when new season data starts accumulating.
+
+---
+
+## Database Schema
+
+### NHL Tables
+| Table | Description |
+|-------|-------------|
+| `players` | Player master |
+| `player_seasons` | Per-player stats + WAR/RAPM/percentiles |
+| `goalie_seasons` | Per-goalie stats + GSAX/percentiles |
+| `team_seasons` | Per-team stats + `xgf_pct` + `roster_war_score` |
+| `game_log` | CAR game-by-game results |
+| `shot_events` | League-wide shot coordinates |
+| `shift_events` | Per-player shift times |
+| `zone_starts` | OZ/DZ/NZ start counts |
+| `player_score_state_dist` | Score state distribution weights |
+| `skipped_games` | Games skipped per pipeline module |
+| `rapm_validation` | RAPM validation history |
+| `game_summaries` | AI post-game summaries |
+| `game_predictions` | AI pre-game predictions |
+| `player_scouting` | AI scouting blurbs |
+| `game_scoring` | Goal-by-goal scoring data |
+| `game_xg` | Per-game expected goals |
+| `line_combinations` | Inferred lines and D pairs |
+| `power_rankings_narratives` | Nightly rankings + AI narrative history |
+| `special_teams_units` | PP/PK unit inference |
+| `draft_rankings_2026` | NHL Central Scouting rankings |
+| `draft_picks_2026` | Live/completed draft picks |
+| `draft_pick_order_2026` | Pick order per team (Tankathon) |
+
+### PWHL Tables
+| Table | Description |
+|-------|-------------|
+| `pwhl_players` | Player master (player_id, first_name, last_name, position, team_id) |
+| `pwhl_player_seasons` | Per-player per-season stats (GP, G, A, PTS, shots, PP/SH/GW goals, +/-, PIM, shot_pct) |
+| `pwhl_goalie_seasons` | Per-goalie per-season stats (GP, W, L, OTL, GAA, SV%, SO, saves, GA) |
+| `pwhl_team_seasons` | Per-team per-season stats + PP%/PK%/special teams + Corsi/Fenwick + reg_wins/non_reg_wins |
+| `pwhl_game_log` | Game results with scores, dates, venue, OT/SO flags |
+| `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time |
+| `pwhl_pbp_events` | PBP events: faceoffs (homeWin string), hits, penalties, goalie changes |
+| `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
+
+---
+
+## GitHub Actions Workflows
+
+| Workflow | Schedule | Description |
+|----------|----------|-------------|
+| `nightly.yml` | 3 AM ET daily | NHL pipeline + PWHL news (`pwhl_news.py`) + PWHL PBP events |
+| `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
+| `reddit-ingest.yml` | Every 30 min | Reddit (32 subreddits) + SBNation atom feeds → Worker |
+| `tankathon-sync.yml` | Weekly (Tue 8am ET) | Tankathon draft order scrape |
+| `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
+
+---
+
+## October Season Prep
+
+### NHL
+1. Update `NHL_SEASON` GH Actions secret to `20262027`
+2. Update `MP_SEASON` in `moneypuck.py`
+3. Run `python tankathon_ingest.py` for new draft year
+
+### PWHL
+1. Update `PWHL_SEASON` GH Actions secret to new regular season ID (verify with HockeyTech)
+2. Update `SEASON_YEAR_MAP` in `pwhl_stats.py` for new season IDs
+3. Update `PWHL_CURRENT_SEASON` in frontend `pwhlConfig.js`
+4. Add expansion team IDs to `pwhlConfig.js` once HockeyTech assigns them (DET, HAM, LAS, SJS)
+5. Run `python pwhl_salaries.py` when PWHLPA publishes 2026-27 salary guide
+6. Run backfill for new season: `python pwhl_stats.py {new_season_id}`
+
+---
+
+## RAPM Methodology
+
+True RAPM via ridge regression (alpha=2500):
+- **Pool:** 3-year rolling window (~420k 5v5 shot attempts, all 32 teams)
+- **Formulation:** Signed xG differential; zone-start adjusted
+- **Minimum sample:** 150 min EV ice time
+- **Validation:** r ≥ 0.85 vs Evolving Hockey; YoY stability r=0.90
+
+**Known limitations:**
+- Draisaitl/Makar rank anomalously low due to dominant linemate collinearity — documented artifact
+- Non-primary-team players have high variance (only 2-5 games in pool)
+
+---
+
+## Known Limitations
+
+- **PWHL news:** CF datacenter IPs blocked by RSS sources. GH Actions runner fetches successfully. Low volume in offseason.
+- **PWHL Corsi/Fenwick:** No missed shots in HockeyTech — FF% is SOG-based proxy only.
+- **PWHL expansion teams:** DET, HAM, LAS, SJS deferred until HockeyTech assigns season IDs (October 2026).
+- **`nhl_stats.py` fragile loop:** `for game_type in [2, 3]` body references `game_type` as if a parameter — works via Python scoping but fragile. Fix before next major pipeline work.
+- **UTA missing from `team_seasons`:** Excluded from power rankings until their row appears.
+- **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
+- **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
