@@ -48,7 +48,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
         run: python pwhl_pbp_events.py
         # Skips games already in pwhl_pbp_events (idempotent by default).
         # Only processes new completed games since last run.

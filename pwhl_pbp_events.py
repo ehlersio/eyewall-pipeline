@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(me
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-PWHL_SEASON = os.environ.get("PWHL_SEASON", "8")
+PWHL_SEASON = os.environ.get("PWHL_SEASON", "").strip() or "8"
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
 HOCKEYTECH_KEY = "446521baf8c38984"
@@ -488,7 +488,7 @@ def ingest_game(
 
 
 def run(season_id: str | None = None, force: bool = False, single_game: int | None = None) -> None:
-    season_id = season_id or PWHL_SEASON
+    season_id = (season_id or "").strip() or PWHL_SEASON
     season_type = SEASON_TYPE_MAP.get(season_id, "regular")
 
     log.info(f"=== PWHL PBP Events -- season {season_id} ===")
