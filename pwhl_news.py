@@ -94,14 +94,6 @@ SOURCES = [
         "filter": True,
     },
     {
-        "id": "thescore-pwhl",
-        "name": "The Score",
-        "bg": "#e8000d",
-        "url": "https://origin-feeds.thescore.com/hockey.rss",
-        "type": "rss",
-        "filter": True,
-    },
-    {
         "id": "sportsnet-pwhl",
         "name": "Sportsnet",
         "bg": "#d4a017",
