@@ -30,7 +30,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 WORKER_URL = os.environ.get("WORKER_URL", "https://eyewall-poller.billowing-queen-bf23.workers.dev")
-POLL_SECRET = os.environ["POLL_SECRET"]
+POLL_SECRET = os.environ["EYEWALL_POLL_SECRET"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

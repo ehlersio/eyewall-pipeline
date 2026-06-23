@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: .   # adjust if pipeline files are in a subdirectory
+        working-directory: .
 
     steps:
       - name: Checkout repo
@@ -43,21 +43,3 @@ jobs:
       - name: Notify on failure
         if: failure()
         run: echo "Pipeline failed — check logs above"
-
-      - name: Fetch PWHL news and push to Worker
-        env:
-          WORKER_URL: ${{ secrets.WORKER_URL }}
-          POLL_SECRET: ${{ secrets.POLL_SECRET }}
-        run: python pwhl_news.py
-
-      - name: Ingest PWHL PBP events (current season)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python pwhl_pbp_events.py
-        # Skips games already in pwhl_pbp_events (idempotent by default).
-        # Only processes new completed games since last run.
-        # For the initial full backfill, run locally:
-        #   python pwhl_pbp_events.py 6
-        #   python pwhl_pbp_events.py 7
-        #   python pwhl_pbp_events.py 8 --force
