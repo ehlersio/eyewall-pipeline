@@ -38,7 +38,8 @@ HEADERS = {
     "Accept": "application/rss+xml,text/xml,application/xml,*/*",
 }
 
-# PWHL keyword filter — article must contain at least one
+# PWHL keyword filter — article must contain at least one.
+# Applied to all sources except osc-pwhl (PWHL-only feed, no filter needed).
 PWHL_KEYWORDS = [
     "pwhl",
     "women's hockey",
@@ -90,6 +91,7 @@ SOURCES = [
         "bg": "#cc0000",
         "url": "https://www.espn.com/espn/rss/hockey/news",
         "type": "rss",
+        "filter": True,
     },
     {
         "id": "thescore-pwhl",
@@ -97,6 +99,7 @@ SOURCES = [
         "bg": "#e8000d",
         "url": "https://origin-feeds.thescore.com/hockey.rss",
         "type": "rss",
+        "filter": True,
     },
     {
         "id": "sportsnet-pwhl",
@@ -104,20 +107,34 @@ SOURCES = [
         "bg": "#d4a017",
         "url": "https://www.sportsnet.ca/feed/",
         "type": "rss",
-    },
-    {
-        "id": "tsn-pwhl",
-        "name": "TSN",
-        "bg": "#004f9f",
-        "url": "https://www.tsn.ca/rss/tsn.rss",
-        "type": "rss",
+        "filter": True,
     },
     {
         "id": "hockeynews-pwhl",
-        "name": "Hockey News",
+        "name": "Hockey Writers",
         "bg": "#c8102e",
         "url": "https://thehockeywriters.com/feed/",
         "type": "rss",
+        "filter": True,
+    },
+    {
+        # Dedicated women's hockey editorial site — strong PWHL coverage
+        "id": "whl-pwhl",
+        "name": "Women's Hockey Life",
+        "bg": "#6a0dad",
+        "url": "https://womenshockeylife.com/feed",
+        "type": "rss",
+        "filter": True,
+    },
+    {
+        # PWHL-only press releases: game recaps, signings, roster moves.
+        # No keyword filter needed — every item is PWHL.
+        "id": "osc-pwhl",
+        "name": "OurSports Central",
+        "bg": "#1a1a2e",
+        "url": "https://www.oursportscentral.com/feeds/l277.xml",
+        "type": "rss",
+        "filter": False,
     },
 ]
 
@@ -153,8 +170,6 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
         log.warning(f"  XML parse error for {source['id']}: {e}")
         return []
 
-    # Handle both RSS and Atom
-
     channel = root.find("channel")
     raw_items = channel.findall("item") if channel is not None else root.findall(".//item")
 
@@ -184,7 +199,6 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
                 except Exception:
                     pass
 
-        # Unique ID
         import hashlib
 
         uid = source["id"] + "-" + hashlib.md5(link.encode()).hexdigest()[:16]
@@ -247,7 +261,10 @@ def main():
             continue
         parsed = parse_rss(xml, source)
         log.info(f"  {source['id']}: {len(parsed)} raw items")
-        pwhl = [a for a in parsed if is_pwhl(a)]
+        if source.get("filter", True):
+            pwhl = [a for a in parsed if is_pwhl(a)]
+        else:
+            pwhl = parsed  # PWHL-only feed — take everything
         log.info(f"  {source['id']}: {len(pwhl)} PWHL items after filter")
         all_articles.extend(pwhl)
 
