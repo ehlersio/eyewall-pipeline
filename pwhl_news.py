@@ -14,7 +14,7 @@ import logging
 import os
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 from dotenv import load_dotenv
