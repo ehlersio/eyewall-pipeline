@@ -9,6 +9,7 @@ the combined articles to /pwhl/news/ingest on the Worker.
 Usage:
     python pwhl_news.py
 """
+
 import json
 import logging
 import os
@@ -28,71 +29,94 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-WORKER_URL   = os.environ.get("WORKER_URL", "https://eyewall-poller.billowing-queen-bf23.workers.dev")
-POLL_SECRET  = os.environ["POLL_SECRET"]
+WORKER_URL = os.environ.get("WORKER_URL", "https://eyewall-poller.billowing-queen-bf23.workers.dev")
+POLL_SECRET = os.environ["POLL_SECRET"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/rss+xml,text/xml,application/xml,*/*",
 }
 
 # PWHL keyword filter — article must contain at least one
 PWHL_KEYWORDS = [
     "pwhl",
-    "women's hockey", "womens hockey",
+    "women's hockey",
+    "womens hockey",
     "walter cup",
     # Team names (official and common)
-    "minnesota frost", "boston fleet", "montreal victoire", "montréal victoire",
-    "new york sirens", "ottawa charge", "toronto sceptres",
-    "seattle torrent", "vancouver goldeneyes",
-    "pwhl detroit", "pwhl hamilton", "pwhl las vegas", "pwhl san jose",
+    "minnesota frost",
+    "boston fleet",
+    "montreal victoire",
+    "montréal victoire",
+    "new york sirens",
+    "ottawa charge",
+    "toronto sceptres",
+    "seattle torrent",
+    "vancouver goldeneyes",
+    "pwhl detroit",
+    "pwhl hamilton",
+    "pwhl las vegas",
+    "pwhl san jose",
     # Expansion team shorthand
-    "goldeneyes", "torrent", "sceptres", "victoire",
+    "goldeneyes",
+    "torrent",
+    "sceptres",
+    "victoire",
     # Key players
-    "kelly pannek", "sarah fillier", "marie-philip poulin", "laura stacey",
-    "aerin frankel", "ann-renée desbiens", "hilary knight",
-    "natalie spooner", "brianne jenner", "jayna hefford",
-    "taylor heise", "abby boreen",
+    "kelly pannek",
+    "sarah fillier",
+    "marie-philip poulin",
+    "laura stacey",
+    "aerin frankel",
+    "ann-renée desbiens",
+    "hilary knight",
+    "natalie spooner",
+    "brianne jenner",
+    "jayna hefford",
+    "taylor heise",
+    "abby boreen",
     # Coverage keywords
-    "women's professional hockey", "professional women's hockey",
-    "female hockey", "women hockey",
+    "women's professional hockey",
+    "professional women's hockey",
+    "female hockey",
+    "women hockey",
 ]
 
 SOURCES = [
     {
-        "id":   "espn-pwhl",
+        "id": "espn-pwhl",
         "name": "ESPN",
-        "bg":   "#cc0000",
-        "url":  "https://www.espn.com/espn/rss/hockey/news",
+        "bg": "#cc0000",
+        "url": "https://www.espn.com/espn/rss/hockey/news",
         "type": "rss",
     },
     {
-        "id":   "thescore-pwhl",
+        "id": "thescore-pwhl",
         "name": "The Score",
-        "bg":   "#e8000d",
-        "url":  "https://origin-feeds.thescore.com/hockey.rss",
+        "bg": "#e8000d",
+        "url": "https://origin-feeds.thescore.com/hockey.rss",
         "type": "rss",
     },
     {
-        "id":   "sportsnet-pwhl",
+        "id": "sportsnet-pwhl",
         "name": "Sportsnet",
-        "bg":   "#d4a017",
-        "url":  "https://www.sportsnet.ca/feed/",
+        "bg": "#d4a017",
+        "url": "https://www.sportsnet.ca/feed/",
         "type": "rss",
     },
     {
-        "id":   "tsn-pwhl",
+        "id": "tsn-pwhl",
         "name": "TSN",
-        "bg":   "#004f9f",
-        "url":  "https://www.tsn.ca/rss/tsn.rss",
+        "bg": "#004f9f",
+        "url": "https://www.tsn.ca/rss/tsn.rss",
         "type": "rss",
     },
     {
-        "id":   "hockeynews-pwhl",
+        "id": "hockeynews-pwhl",
         "name": "Hockey News",
-        "bg":   "#c8102e",
-        "url":  "https://thehockeywriters.com/feed/",
+        "bg": "#c8102e",
+        "url": "https://thehockeywriters.com/feed/",
         "type": "rss",
     },
 ]
@@ -116,6 +140,7 @@ def safe_text(el, tag: str) -> str:
     # Strip CDATA and HTML tags
     text = text.replace("<![CDATA[", "").replace("]]>", "")
     import re
+
     text = re.sub(r"<[^>]+>", " ", text)
     return " ".join(text.split()).strip()
 
@@ -134,11 +159,11 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
     raw_items = channel.findall("item") if channel is not None else root.findall(".//item")
 
     for item in raw_items:
-        title   = safe_text(item, "title")
-        link    = safe_text(item, "link") or safe_text(item, "guid")
-        pub     = safe_text(item, "pubDate") or safe_text(item, "dc:date")
+        title = safe_text(item, "title")
+        link = safe_text(item, "link") or safe_text(item, "guid")
+        pub = safe_text(item, "pubDate") or safe_text(item, "dc:date")
         excerpt = safe_text(item, "description") or safe_text(item, "content:encoded")
-        image   = None
+        image = None
 
         # Try media:thumbnail
         media = item.find("{http://search.yahoo.com/mrss/}thumbnail")
@@ -161,19 +186,22 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
 
         # Unique ID
         import hashlib
+
         uid = source["id"] + "-" + hashlib.md5(link.encode()).hexdigest()[:16]
 
-        items.append({
-            "id":          uid,
-            "source":      source["id"],
-            "sourceName":  source["name"],
-            "title":       title,
-            "url":         link,
-            "excerpt":     excerpt[:200] if excerpt else "",
-            "publishedAt": pub_iso,
-            "imageUrl":    image,
-            "bg":          source.get("bg", "#333"),
-        })
+        items.append(
+            {
+                "id": uid,
+                "source": source["id"],
+                "sourceName": source["name"],
+                "title": title,
+                "url": link,
+                "excerpt": excerpt[:200] if excerpt else "",
+                "publishedAt": pub_iso,
+                "imageUrl": image,
+                "bg": source.get("bg", "#333"),
+            }
+        )
 
     return items
 
@@ -192,7 +220,7 @@ def post_to_worker(articles: list[dict]) -> None:
             "Content-Type": "application/json",
             "x-ingest-secret": POLL_SECRET,
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         },
         method="POST",
     )
