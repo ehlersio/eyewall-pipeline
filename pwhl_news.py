@@ -129,7 +129,7 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
         return []
 
     # Handle both RSS and Atom
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
+
     channel = root.find("channel")
     raw_items = channel.findall("item") if channel is not None else root.findall(".//item")
 
