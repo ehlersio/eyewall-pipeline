@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs, PWHL salary data, and PWHL news.
+Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, and PWHL news.
 
 ## Setup
 
@@ -48,7 +48,8 @@ python run.py validate         # RAPM sanity checks
 python ai_summaries.py                           # Post-game summaries
 python ai_summaries.py --game 2025030414 --force # Single game, force regenerate
 python ai_predictions.py                         # Pre-game predictions
-python ai_scouting.py --missing                  # Missing scouting blurbs only
+python ai_scouting.py --missing                  # Missing scouting blurbs only (skaters + goalies)
+python ai_scouting.py --team CAR --dry-run       # Preview prompts for one team
 python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
 
 # PWHL — run individually (no orchestrator yet)
@@ -123,7 +124,14 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 2026 draft pick order scraper → `draft_pick_order_2026`.
 
 ### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_persona.py`, `ai_context.py`)
-See original documentation — unchanged.
+
+**`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
+
+**`ai_context.py`** — Added `get_goalie_context(team, season, min_gp=5)` that pulls from `goalie_seasons` with key metrics: SV%, GAA, GSAX, GSAX/60, QS%, EV/HD/MD/PK SV%, and percentile ranks.
+
+**`ai_persona.py`** — `build_player_scouting_prompt()` now branches on `position == 'G'` to give goalies a tailored prompt.
+
+**`power_rankings.py`** — AI narratives now cached per-team in Worker KV using `narrative:{period}:{gameId}:{carAbbr}` key pattern so each team's perspective is independently cached.
 
 ---
 
@@ -203,7 +211,7 @@ Fetches PWHL news from RSS sources and POSTs to the Worker's `/pwhl/news/ingest`
 python pwhl_news.py    # Fetch and POST to Worker
 ```
 
-**Sources:** Sportsnet (`sportsnet.ca/feed/`), ESPN hockey RSS, The Score hockey RSS, The Hockey Writers. Filtered by PWHL keywords (team names, player names, "pwhl", "walter cup").
+**Sources:** Women's Hockey Life (`womenshockeylife.com/feed`) and OurSports Central (`oursportscentral.com/feeds/l277.xml`) — added after TSN (404) and The Score (0 items) were removed. WHL requires PWHL keyword filtering; OSC is PWHL-only press releases (no filter needed). Result: 1 → 22 articles per run.
 
 **Worker endpoint:** `POST /pwhl/news/ingest` — merges new articles with existing cached articles, deduplicates by ID, keeps top 60, stores in `pwhl:news` KV with 30-min TTL.
 
@@ -239,7 +247,7 @@ The PWHL currently has no equivalent to MoneyPuck WAR/RAPM. Building it requires
 Train logistic regression on `pwhl_shot_events`: distance + angle → goal probability. Store per-shot xG in new `xg` column on `pwhl_shot_events`. ~6,000 shots/season is sufficient for a basic model.
 
 **Step 2 — Shift data** (`pwhl_shift_data.py`)
-Check if HockeyTech PBP includes `player_change` events — if so, derive shift intervals (on-ice rosters per second). This is the hard part; availability from HockeyTech unconfirmed.
+HockeyTech PBP confirmed to have NO `player_change` events across all 3 seasons (checked June 2026). Cannot derive shift intervals from existing data. PWHL WAR/RAPM blocked until season 4 data becomes available in October 2026 — HockeyTech may add shift events for the expanded league.
 
 **Alternative:** Use lineup-based approach — derive approximate on-ice time from faceoff events + penalties from `pwhl_pbp_events`. Less accurate but buildable from existing data.
 
@@ -265,7 +273,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `player_seasons` | Per-player stats + WAR/RAPM/percentiles |
 | `goalie_seasons` | Per-goalie stats + GSAX/percentiles |
 | `team_seasons` | Per-team stats + `xgf_pct` + `roster_war_score` |
-| `game_log` | CAR game-by-game results |
+| `game_log` | All-team game-by-game results (one row per team per game) |
 | `shot_events` | League-wide shot coordinates |
 | `shift_events` | Per-player shift times |
 | `zone_starts` | OZ/DZ/NZ start counts |
@@ -295,6 +303,14 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time |
 | `pwhl_pbp_events` | PBP events: faceoffs (homeWin string), hits, penalties, goalie changes |
 | `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
+| `pwhl_game_summaries` | AI post-game summaries (PWHL) |
+| `pwhl_game_predictions` | AI pre-game predictions (PWHL) |
+| `pwhl_player_scouting` | AI scouting blurbs (PWHL) |
+| `pwhl_power_rankings_narratives` | PWHL nightly power rankings + AI narrative history |
+| `pwhl_seasons` | PWHL season metadata |
+| `pwhl_teams` | PWHL team master |
+| `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; WAR blocked until Oct 2026) |
+| `pwhl_skipped_games` | Games skipped per PWHL pipeline module |
 
 ---
 
@@ -302,7 +318,8 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
-| `nightly.yml` | 3 AM ET daily | NHL pipeline + PWHL news (`pwhl_news.py`) + PWHL PBP events |
+| `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) |
+| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL PBP events + PWHL news — 20 min offset to avoid Supabase contention |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
 | `reddit-ingest.yml` | Every 30 min | Reddit (32 subreddits) + SBNation atom feeds → Worker |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | Tankathon draft order scrape |
@@ -350,3 +367,5 @@ True RAPM via ridge regression (alpha=2500):
 - **UTA missing from `team_seasons`:** Excluded from power rankings until their row appears.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
 - **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
+- **Reddit ingest:** GH Actions IPs blocked by Reddit. New app registration blocked by Responsible Builder Policy. Deferred to October 2026.
+- **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
