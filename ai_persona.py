@@ -479,17 +479,27 @@ def build_game_card_prompt(ctx: dict) -> str:
 
 
 def build_player_scouting_prompt(player: dict, team: str) -> str:
+    is_goalie = player.get('position') == 'G'
     lines = [f"Player scouting data for {player.get('name')} ({player.get('position')}) — {team}:"]
     for k, v in player.items():
         if v is not None and k != "name" and k != "position":
             lines.append(f"  {k}: {v}")
 
-    return (
-        "\n".join(lines) + "\n\n"
-        "Write a scouting blurb for this player. Explain what kind of player they are, "
-        "what their stats say about their game, and where they fit on their team. "
-        "Reference specific stats from the data. Plain text only, no bullet points."
-    )
+    if is_goalie:
+        task = (
+            "Write a scouting blurb for this goalie. Explain their style and reliability, "
+            "what their save metrics say about their ability to stop shots at even strength and "
+            "in high-danger situations, and how their GSAX reflects their value above an average "
+            "goalie. Reference specific stats. Plain text only, no bullet points."
+        )
+    else:
+        task = (
+            "Write a scouting blurb for this player. Explain what kind of player they are, "
+            "what their stats say about their game, and where they fit on their team. "
+            "Reference specific stats from the data. Plain text only, no bullet points."
+        )
+
+    return "\n".join(lines) + "\n\n" + task
 
 
 # ---------------------------------------------------------------------------

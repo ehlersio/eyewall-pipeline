@@ -354,6 +354,66 @@ def get_player_context(
     return result
 
 
+
+def get_goalie_context(team: str = None, season: int = None, min_gp: int = 5) -> list:
+    """
+    Returns goalies for a team with key stats from goalie_seasons.
+    Used for AI scouting blurb generation.
+    """
+    team = team or PRIMARY_TEAM
+    season = season or NHL_SEASON
+
+    rows = (
+        supabase.table("goalie_seasons")
+        .select(
+            "player_id, team, games_played, wins, losses, ot_losses, "
+            "sv_pct, gaa, gsax, gsax_per60, qs_pct, "
+            "ev_sv_pct, hd_sv_pct, md_sv_pct, pk_sv_pct, "
+            "pct_gsax, pct_ev_sv, pct_hd_sv"
+        )
+        .eq("team", team)
+        .eq("season", season)
+        .eq("game_type", 2)
+        .gte("games_played", min_gp)
+        .order("games_played", desc=True)
+        .execute()
+        .data
+    )
+
+    if not rows:
+        return []
+
+    player_ids = [r["player_id"] for r in rows]
+    players = (
+        supabase.table("players").select("id, name").in_("id", player_ids).execute().data
+    )
+    name_map = {p["id"]: p["name"] for p in players}
+
+    result = []
+    for r in rows:
+        pid = r["player_id"]
+        result.append({
+            "name": name_map.get(pid, f"Goalie {pid}"),
+            "position": "G",
+            "games_played": r.get("games_played"),
+            "wins": r.get("wins"),
+            "losses": r.get("losses"),
+            "ot_losses": r.get("ot_losses"),
+            "sv_pct": round(r["sv_pct"], 3) if r.get("sv_pct") is not None else None,
+            "gaa": round(r["gaa"], 2) if r.get("gaa") is not None else None,
+            "gsax": round(r["gsax"], 2) if r.get("gsax") is not None else None,
+            "gsax_per60": round(r["gsax_per60"], 3) if r.get("gsax_per60") is not None else None,
+            "qs_pct": round(r["qs_pct"], 3) if r.get("qs_pct") is not None else None,
+            "ev_sv_pct": round(r["ev_sv_pct"], 3) if r.get("ev_sv_pct") is not None else None,
+            "hd_sv_pct": round(r["hd_sv_pct"], 3) if r.get("hd_sv_pct") is not None else None,
+            "md_sv_pct": round(r["md_sv_pct"], 3) if r.get("md_sv_pct") is not None else None,
+            "pk_sv_pct": round(r["pk_sv_pct"], 3) if r.get("pk_sv_pct") is not None else None,
+            "pct_gsax": r.get("pct_gsax"),
+            "pct_ev_sv": r.get("pct_ev_sv"),
+            "pct_hd_sv": r.get("pct_hd_sv"),
+        })
+    return result
+
 def get_active_goalies(game_id: int) -> dict:
     """
     Returns the goalies who actually faced shots in a game, keyed by team.

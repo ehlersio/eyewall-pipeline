@@ -24,7 +24,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from ai_context import _fmt_toi, get_player_context
+from ai_context import _fmt_toi, get_player_context, get_goalie_context
 from ai_persona import STICKS_SYSTEM_PROMPT, build_player_scouting_prompt
 
 load_dotenv()
@@ -325,6 +325,43 @@ def run_team(
             skipped += 1
         else:
             failed += 1
+
+    # ── Goalies ──────────────────────────────────────────────
+    goalies = get_goalie_context(team=team, season=int(season))
+    if goalies:
+        goalie_names = [g["name"] for g in goalies]
+        goalie_id_rows = (
+            supabase.table("players").select("id, name").in_("name", goalie_names).execute().data
+        )
+        goalie_id_map = {r["name"]: r["id"] for r in goalie_id_rows}
+
+        if missing_only:
+            gpids = [pid for pid in goalie_id_map.values() if pid]
+            existing_g = (
+                supabase.table("player_scouting")
+                .select("player_id")
+                .eq("season", season)
+                .eq("team", team)
+                .in_("player_id", gpids)
+                .execute()
+                .data
+            )
+            existing_gids = {r["player_id"] for r in existing_g}
+            goalies = [g for g in goalies if goalie_id_map.get(g["name"]) not in existing_gids]
+
+        for goalie in goalies:
+            pid = goalie_id_map.get(goalie["name"])
+            if not pid:
+                print(f"  skip  {goalie['name']} — player_id not found")
+                skipped += 1
+                continue
+            result = scout_player(goalie, team, season, pid, force, dry_run)
+            if result == "ok":
+                ok += 1
+            elif result == "skip":
+                skipped += 1
+            else:
+                failed += 1
 
     return ok, skipped, failed
 
