@@ -479,7 +479,7 @@ def build_game_card_prompt(ctx: dict) -> str:
 
 
 def build_player_scouting_prompt(player: dict, team: str) -> str:
-    is_goalie = player.get('position') == 'G'
+    is_goalie = player.get("position") == "G"
     lines = [f"Player scouting data for {player.get('name')} ({player.get('position')}) — {team}:"]
     for k, v in player.items():
         if v is not None and k != "name" and k != "position":

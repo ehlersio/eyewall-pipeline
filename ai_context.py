@@ -354,7 +354,6 @@ def get_player_context(
     return result
 
 
-
 def get_goalie_context(team: str = None, season: int = None, min_gp: int = 5) -> list:
     """
     Returns goalies for a team with key stats from goalie_seasons.
@@ -384,35 +383,38 @@ def get_goalie_context(team: str = None, season: int = None, min_gp: int = 5) ->
         return []
 
     player_ids = [r["player_id"] for r in rows]
-    players = (
-        supabase.table("players").select("id, name").in_("id", player_ids).execute().data
-    )
+    players = supabase.table("players").select("id, name").in_("id", player_ids).execute().data
     name_map = {p["id"]: p["name"] for p in players}
 
     result = []
     for r in rows:
         pid = r["player_id"]
-        result.append({
-            "name": name_map.get(pid, f"Goalie {pid}"),
-            "position": "G",
-            "games_played": r.get("games_played"),
-            "wins": r.get("wins"),
-            "losses": r.get("losses"),
-            "ot_losses": r.get("ot_losses"),
-            "sv_pct": round(r["sv_pct"], 3) if r.get("sv_pct") is not None else None,
-            "gaa": round(r["gaa"], 2) if r.get("gaa") is not None else None,
-            "gsax": round(r["gsax"], 2) if r.get("gsax") is not None else None,
-            "gsax_per60": round(r["gsax_per60"], 3) if r.get("gsax_per60") is not None else None,
-            "qs_pct": round(r["qs_pct"], 3) if r.get("qs_pct") is not None else None,
-            "ev_sv_pct": round(r["ev_sv_pct"], 3) if r.get("ev_sv_pct") is not None else None,
-            "hd_sv_pct": round(r["hd_sv_pct"], 3) if r.get("hd_sv_pct") is not None else None,
-            "md_sv_pct": round(r["md_sv_pct"], 3) if r.get("md_sv_pct") is not None else None,
-            "pk_sv_pct": round(r["pk_sv_pct"], 3) if r.get("pk_sv_pct") is not None else None,
-            "pct_gsax": r.get("pct_gsax"),
-            "pct_ev_sv": r.get("pct_ev_sv"),
-            "pct_hd_sv": r.get("pct_hd_sv"),
-        })
+        result.append(
+            {
+                "name": name_map.get(pid, f"Goalie {pid}"),
+                "position": "G",
+                "games_played": r.get("games_played"),
+                "wins": r.get("wins"),
+                "losses": r.get("losses"),
+                "ot_losses": r.get("ot_losses"),
+                "sv_pct": round(r["sv_pct"], 3) if r.get("sv_pct") is not None else None,
+                "gaa": round(r["gaa"], 2) if r.get("gaa") is not None else None,
+                "gsax": round(r["gsax"], 2) if r.get("gsax") is not None else None,
+                "gsax_per60": round(r["gsax_per60"], 3)
+                if r.get("gsax_per60") is not None
+                else None,
+                "qs_pct": round(r["qs_pct"], 3) if r.get("qs_pct") is not None else None,
+                "ev_sv_pct": round(r["ev_sv_pct"], 3) if r.get("ev_sv_pct") is not None else None,
+                "hd_sv_pct": round(r["hd_sv_pct"], 3) if r.get("hd_sv_pct") is not None else None,
+                "md_sv_pct": round(r["md_sv_pct"], 3) if r.get("md_sv_pct") is not None else None,
+                "pk_sv_pct": round(r["pk_sv_pct"], 3) if r.get("pk_sv_pct") is not None else None,
+                "pct_gsax": r.get("pct_gsax"),
+                "pct_ev_sv": r.get("pct_ev_sv"),
+                "pct_hd_sv": r.get("pct_hd_sv"),
+            }
+        )
     return result
+
 
 def get_active_goalies(game_id: int) -> dict:
     """
