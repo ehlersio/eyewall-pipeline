@@ -24,7 +24,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from ai_context import _fmt_toi, get_player_context, get_goalie_context
+from ai_context import _fmt_toi, get_goalie_context, get_player_context
 from ai_persona import STICKS_SYSTEM_PROMPT, build_player_scouting_prompt
 
 load_dotenv()
