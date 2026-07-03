@@ -18,34 +18,19 @@ Backfill after a completed draft (use /draft/picks/{year}/all, NOT /now —
 """
 
 import argparse
-import logging
 import os
 import sys
 import time
 from datetime import UTC, datetime
 
-import requests
-from dotenv import load_dotenv
-from supabase import create_client
-from supabase.lib.client_options import ClientOptions
+from pipeline_common import get_logger, get_supabase, nhl_get
 
-load_dotenv()
+log = get_logger(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%H:%M:%S",
-)
-log = logging.getLogger(__name__)
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 WORKER_URL = os.environ.get("WORKER_URL", "")  # for AI generation
 WORKER_SECRET = os.environ.get("EYEWALL_POLL_SECRET", "")
 
 DRAFT_YEAR = 2026
-
-NHL_BASE = "https://api-web.nhle.com/v1"
 
 CATEGORIES = [
     {"id": 1, "key": "north-american-skater", "label": "NA Skater"},
@@ -94,17 +79,6 @@ R1_ORDER = [
 # NOTE: Rounds 2-7 order is not hardcoded — it follows reverse standings order
 # repeating each round. We don't seed those rows since the NHL API will give us
 # the actual picks on draft day including any traded picks.
-
-
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY, options=ClientOptions())
-
-
-def nhl_get(path: str) -> dict:
-    url = f"{NHL_BASE}{path}"
-    r = requests.get(url, timeout=15)
-    r.raise_for_status()
-    return r.json()
 
 
 def _localized(field) -> str:
