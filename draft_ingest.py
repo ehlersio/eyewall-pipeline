@@ -1,13 +1,20 @@
 """
 draft_ingest.py — EyeWall Analytics draft pipeline
 
-Three modes:
-  python draft_ingest.py --seed-rankings   # Run once now, seeds NHL Central Scouting data
-  python draft_ingest.py --seed-order      # Run once now, seeds known R1 pick order
-  python draft_ingest.py --poll-picks      # Run on draft day (Jun 26-27), polls live picks
+Four modes:
+  python draft_ingest.py --seed-rankings                    # Run once now, seeds NHL Central Scouting data
+  python draft_ingest.py --seed-order                       # Run once now, seeds known R1 pick order
+  python draft_ingest.py --poll-picks                       # Run on draft day (Jun 26-27), polls live picks
+  python draft_ingest.py --backfill-picks                   # Run once after the draft, fetches ALL rounds
+  python draft_ingest.py --backfill-picks --dry-run          # Inspect raw API field names first, no writes
 
 Usage on draft day (PowerShell loop):
   while ($true) { python draft_ingest.py --poll-picks; Start-Sleep 60 }
+
+Backfill after a completed draft (use /draft/picks/{year}/all, NOT /now —
+/now only ever reflects live/current-moment picks):
+  python draft_ingest.py --backfill-picks --dry-run   # check field names first
+  python draft_ingest.py --backfill-picks             # then run for real
 """
 
 import argparse
@@ -98,6 +105,69 @@ def nhl_get(path: str) -> dict:
     r = requests.get(url, timeout=15)
     r.raise_for_status()
     return r.json()
+
+
+def _localized(field) -> str:
+    """
+    NHL API returns many string fields as localized objects, e.g.
+    {"default": "Gavin", "fr": "..."} rather than a plain string.
+    firstName/lastName on draft picks follow this pattern. Handles
+    both shapes so callers don't have to guess.
+    """
+    if isinstance(field, dict):
+        return field.get("default", "") or ""
+    return field or ""
+
+
+def parse_pick(pick: dict, rankings_by_name: dict) -> dict:
+    """
+    Build a draft_picks_2026 row from a raw NHL API pick object.
+
+    Confirmed shape (from /draft/picks/{year}/all, 2026-07-03):
+      firstName / lastName  -> {"default": "..."} localized objects, TOP-LEVEL
+                                (no "prospect" or "draftedPlayer" wrapper — that
+                                 was a wrong guess in the original implementation
+                                 and is why every name came back blank)
+      positionCode           -> plain string, top-level
+      teamAbbrev              -> plain string, top-level
+      height / weight         -> plain ints, top-level (NOT heightInInches/
+                                  weightInPounds — different key names)
+      amateurClubName          -> plain string, top-level (NOT lastAmateurClub)
+      amateurLeague            -> plain string, top-level (NOT lastAmateurLeague)
+      countryCode               -> plain string, top-level (NOT birthCountry)
+      overallPick / round / pickInRound -> plain ints, top-level
+      shootsCatches is NOT present in this payload at all.
+
+    Shared by poll_picks() and backfill_picks() so the two can't drift
+    out of sync again.
+    """
+    overall = pick.get("overallPick") or pick.get("pickOverall")
+    first = _localized(pick.get("firstName"))
+    last = _localized(pick.get("lastName"))
+    team = pick.get("teamAbbrev") or (pick.get("teamId", {}) or {}).get("abbrev", "")
+
+    name_key = f"{first.lower()}_{last.lower()}"
+    ranking = rankings_by_name.get(name_key)
+
+    row = {
+        "pick_overall": overall,
+        "round": pick.get("round") or pick.get("roundNumber"),
+        "pick_in_round": pick.get("pickInRound"),
+        "team_abbrev": team,
+        "prospect_first": first,
+        "prospect_last": last,
+        "position_code": pick.get("positionCode"),
+        "shoots_catches": pick.get("shootsCatches"),
+        "height_inches": pick.get("height") or pick.get("heightInInches"),
+        "weight_pounds": pick.get("weight") or pick.get("weightInPounds"),
+        "last_amateur_club": pick.get("amateurClubName") or pick.get("lastAmateurClub", ""),
+        "last_amateur_league": pick.get("amateurLeague") or pick.get("lastAmateurLeague", ""),
+        "birth_country": pick.get("countryCode") or pick.get("birthCountry", ""),
+        "final_rank": ranking["final_rank"] if ranking else None,
+        "midterm_rank": ranking.get("midterm_rank") if ranking else None,
+        "category_id": ranking["category_id"] if ranking else None,
+    }
+    return row, ranking
 
 
 # ---------------------------------------------------------------------------
@@ -278,46 +348,13 @@ def poll_picks():
 
     new_count = 0
     for pick in picks:
-        overall = pick.get("pickOverall") or pick.get("overallPick")
+        overall = pick.get("overallPick") or pick.get("pickOverall")
         if overall in existing_set:
             continue
 
-        # Field name discovery — NHL API field names may vary, handle both
-        prospect = pick.get("prospect") or pick.get("draftedPlayer") or {}
-        first = prospect.get("firstName") or prospect.get("firstNameWithInitials", "")
-        last = prospect.get("lastName", "")
-        pos = prospect.get("positionCode") or pick.get("positionCode")
-        sc = prospect.get("shootsCatches") or pick.get("shootsCatches")
-        ht = prospect.get("heightInInches") or pick.get("heightInInches")
-        wt = prospect.get("weightInPounds") or pick.get("weightInPounds")
-        club = prospect.get("lastAmateurClub") or pick.get("lastAmateurClub", "")
-        league = prospect.get("lastAmateurLeague") or pick.get("lastAmateurLeague", "")
-        country = prospect.get("birthCountry") or pick.get("birthCountry", "")
-
-        team = pick.get("teamAbbrev") or (pick.get("teamId", {}) or {}).get("abbrev", "")
-
-        # Look up ranking
-        name_key = f"{first.lower()}_{last.lower()}"
-        ranking = rankings_by_name.get(name_key)
-
-        row = {
-            "pick_overall": overall,
-            "round": pick.get("round") or pick.get("roundNumber"),
-            "pick_in_round": pick.get("pickInRound") or pick.get("pickInRound"),
-            "team_abbrev": team,
-            "prospect_first": first,
-            "prospect_last": last,
-            "position_code": pos,
-            "shoots_catches": sc,
-            "height_inches": ht,
-            "weight_pounds": wt,
-            "last_amateur_club": club,
-            "last_amateur_league": league,
-            "birth_country": country,
-            "final_rank": ranking["final_rank"] if ranking else None,
-            "midterm_rank": ranking.get("midterm_rank") if ranking else None,
-            "category_id": ranking["category_id"] if ranking else None,
-        }
+        row, ranking = parse_pick(pick, rankings_by_name)
+        first, last = row["prospect_first"], row["prospect_last"]
+        team, pos = row["team_abbrev"], row["position_code"]
 
         log.info(f"  New pick #{overall}: {team} selects {first} {last} ({pos})")
 
@@ -346,6 +383,88 @@ def poll_picks():
 
 
 # ---------------------------------------------------------------------------
+# --backfill-picks  (run once after a completed draft)
+# ---------------------------------------------------------------------------
+
+
+def backfill_picks(dry_run: bool = False):
+    """
+    One-time backfill for a completed draft. Fetches ALL rounds via the
+    season-scoped endpoint (/draft/picks/{year}/all) rather than /now,
+    which only ever reflects the live/current-moment picks and is why
+    poll_picks() got stuck at round 1 once the draft-day job's window
+    closed.
+
+    dry_run=True: fetch and print the first (and last) pick's raw JSON,
+    touch nothing else (no Supabase writes, no AI calls), and exit. Use
+    this to confirm field names before running the real backfill.
+    """
+    log.info(f"Fetching full {DRAFT_YEAR} draft results (all rounds)...")
+    try:
+        data = nhl_get(f"/draft/picks/{DRAFT_YEAR}/all")
+    except Exception as e:
+        log.error(f"NHL API error: {e}")
+        sys.exit(1)
+
+    picks = data.get("picks", [])
+    log.info(f"{len(picks)} total picks from API")
+
+    if dry_run:
+        import json
+
+        if not picks:
+            log.warning("No picks returned — nothing to inspect. Raw response:")
+            print(json.dumps(data, indent=2))
+            return
+        log.info("DRY RUN — first pick raw JSON (no Supabase writes, no AI calls):")
+        print(json.dumps(picks[0], indent=2))
+        if len(picks) > 1:
+            log.info("Last pick raw JSON:")
+            print(json.dumps(picks[-1], indent=2))
+        return
+
+    if len(picks) < 224:
+        log.warning(f"Expected 224 picks, got {len(picks)}. Proceeding anyway — check for gaps.")
+
+    sb = get_supabase()
+    existing = sb.table("draft_picks_2026").select("pick_overall").execute()
+    existing_set = {row["pick_overall"] for row in (existing.data or [])}
+
+    all_rankings = sb.table("draft_rankings_2026").select("*").execute()
+    rankings_by_name = {
+        f"{r['first_name'].lower()}_{r['last_name'].lower()}": r for r in all_rankings.data or []
+    }
+
+    new_count = 0
+    for pick in picks:
+        overall = pick.get("overallPick") or pick.get("pickOverall")
+        if overall in existing_set:
+            continue
+
+        row, ranking = parse_pick(pick, rankings_by_name)
+        first, last = row["prospect_first"], row["prospect_last"]
+        team, pos = row["team_abbrev"], row["position_code"]
+
+        log.info(f"  Backfill pick #{overall}: {team} selects {first} {last} ({pos})")
+
+        analysis = generate_ai_analysis(row, ranking)
+        if analysis:
+            row["ai_analysis"] = analysis
+            row["ai_generated_at"] = datetime.now(UTC).isoformat()
+            log.info(f"    AI analysis generated ({len(analysis)} chars)")
+            time.sleep(1)
+
+        sb.table("draft_picks_2026").insert(row).execute()
+        new_count += 1
+        existing_set.add(overall)
+
+    log.info(f"Backfill done. {new_count} new picks inserted.")
+
+    total = sb.table("draft_picks_2026").select("pick_overall", count="exact").execute()
+    log.info(f"Total picks now in Supabase: {total.count}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -355,10 +474,20 @@ def main():
     parser.add_argument("--seed-rankings", action="store_true")
     parser.add_argument("--seed-order", action="store_true")
     parser.add_argument("--poll-picks", action="store_true")
+    parser.add_argument(
+        "--backfill-picks",
+        action="store_true",
+        help="Fetch ALL rounds for a completed draft via /draft/picks/{year}/all and insert anything missing",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --backfill-picks: print first/last pick raw JSON and exit. No Supabase writes, no AI calls.",
+    )
     parser.add_argument("--force", action="store_true", help="Re-seed even if data exists")
     args = parser.parse_args()
 
-    if not any([args.seed_rankings, args.seed_order, args.poll_picks]):
+    if not any([args.seed_rankings, args.seed_order, args.poll_picks, args.backfill_picks]):
         parser.print_help()
         sys.exit(1)
 
@@ -368,6 +497,8 @@ def main():
         seed_order()
     if args.poll_picks:
         poll_picks()
+    if args.backfill_picks:
+        backfill_picks(dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
