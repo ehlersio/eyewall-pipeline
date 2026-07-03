@@ -1,32 +1,25 @@
 """
-pipeline_common.py — shared helpers for EyeWall Analytics pipeline scripts.
+pipeline_common.py — shared helpers NOT already covered by db.py.
 
-Centralizes what was duplicated across draft_ingest.py and milestones.py:
-Supabase client creation, the NHL API GET helper, and logging setup.
-Import from here rather than redefining these in a new script.
+db.py already provides the Supabase client (get_client), NHL_SEASON, and
+PRIMARY_TEAM_ABBR — import those directly from db.py, don't duplicate them
+here. This module only adds what db.py doesn't: an NHL API GET helper and
+shared logging setup.
 
 Usage:
-    from pipeline_common import get_supabase, nhl_get, get_logger
+    from db import get_client
+    from pipeline_common import get_logger, nhl_get
 
     log = get_logger(__name__)
-    sb = get_supabase()
+    sb = get_client()
     data = nhl_get("/draft/picks/2026/all")
 """
 
 import logging
-import os
 
 import requests
-from dotenv import load_dotenv
-from supabase import create_client
-from supabase.lib.client_options import ClientOptions
-
-load_dotenv()
 
 NHL_BASE = "https://api-web.nhle.com/v1"
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 _LOGGING_CONFIGURED = False
 
@@ -42,10 +35,6 @@ def get_logger(name: str) -> logging.Logger:
         )
         _LOGGING_CONFIGURED = True
     return logging.getLogger(name)
-
-
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY, options=ClientOptions())
 
 
 def nhl_get(path: str) -> dict:

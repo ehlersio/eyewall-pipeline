@@ -4,24 +4,15 @@ Pulls and structures data from Supabase tables for use as AI model input.
 All functions return plain dicts/lists — no model calls happen here.
 """
 
-import os
+from db import NHL_SEASON, PRIMARY_TEAM_ABBR as PRIMARY_TEAM, get_client
 
-from dotenv import load_dotenv
-from supabase import create_client
-
-load_dotenv()
-
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+supabase = get_client()
 
 
 def _fmt_toi(seconds: int | None) -> str | None:
     if seconds is None:
         return None
     return f"{seconds // 60}:{seconds % 60:02d}"
-
-
-PRIMARY_TEAM = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 
 
 # ---------------------------------------------------------------------------

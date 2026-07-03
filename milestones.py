@@ -44,7 +44,8 @@ import argparse
 import sys
 from datetime import date, datetime, timedelta
 
-from pipeline_common import get_logger, get_supabase, nhl_get
+from db import get_client
+from pipeline_common import get_logger, nhl_get
 
 log = get_logger(__name__)
 
@@ -634,7 +635,7 @@ def main():
     parser.add_argument("--since", help="Scan every date from this YYYY-MM-DD through yesterday.")
     args = parser.parse_args()
 
-    sb = get_supabase()
+    sb = get_client()
 
     if args.since:
         start = datetime.strptime(args.since, "%Y-%m-%d").date()

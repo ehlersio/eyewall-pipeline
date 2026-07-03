@@ -40,6 +40,13 @@ jobs:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
         run: python run.py
 
+      - name: Run milestones.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python milestones.py
+        continue-on-error: false
+
       - name: Notify on failure
         if: failure()
         run: echo "Pipeline failed — check logs above"

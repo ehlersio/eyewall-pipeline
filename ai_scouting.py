@@ -21,19 +21,19 @@ import time
 from datetime import UTC, datetime
 
 import requests
-from dotenv import load_dotenv
-from supabase import create_client
 
 from ai_context import _fmt_toi, get_goalie_context, get_player_context
 from ai_persona import STICKS_SYSTEM_PROMPT, build_player_scouting_prompt
+from db import get_client
 
-load_dotenv()
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+# NOTE: kept as a local string constant rather than importing db.NHL_SEASON
+# (which is int-typed) — this is used as the argparse --season default
+# below, and argparse doesn't coerce `default=`, only explicit CLI input.
+# Importing the int would make the default type inconsistent with what
+# --season <value> produces on the command line.
 NHL_SEASON = os.environ.get("NHL_SEASON", "20252026")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = get_client()
 
 
 # All 32 NHL teams — used when no --team flag is passed

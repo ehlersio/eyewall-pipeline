@@ -23,7 +23,8 @@ import sys
 import time
 from datetime import UTC, datetime
 
-from pipeline_common import get_logger, get_supabase, nhl_get
+from db import get_client
+from pipeline_common import get_logger, nhl_get
 
 log = get_logger(__name__)
 
@@ -151,7 +152,7 @@ def parse_pick(pick: dict, rankings_by_name: dict) -> dict:
 
 def seed_rankings():
     """Fetch all 4 NHL Central Scouting categories and upsert into Supabase."""
-    sb = get_supabase()
+    sb = get_client()
 
     # Check if already seeded
     existing = sb.table("draft_rankings_2026").select("id", count="exact").execute()
@@ -217,7 +218,7 @@ def seed_rankings():
 
 def seed_order():
     """Seed the known R1 draft order into draft_pick_order_2026."""
-    sb = get_supabase()
+    sb = get_client()
 
     existing = sb.table("draft_pick_order_2026").select("pick_overall", count="exact").execute()
     if existing.count and existing.count > 0:
@@ -293,7 +294,7 @@ def poll_picks():
     Poll /v1/draft/picks/now, insert any new picks into Supabase,
     generate AI analysis for each new pick.
     """
-    sb = get_supabase()
+    sb = get_client()
 
     log.info("Fetching live picks from NHL API...")
     try:
@@ -400,7 +401,7 @@ def backfill_picks(dry_run: bool = False):
     if len(picks) < 224:
         log.warning(f"Expected 224 picks, got {len(picks)}. Proceeding anyway — check for gaps.")
 
-    sb = get_supabase()
+    sb = get_client()
     existing = sb.table("draft_picks_2026").select("pick_overall").execute()
     existing_set = {row["pick_overall"] for row in (existing.data or [])}
 
