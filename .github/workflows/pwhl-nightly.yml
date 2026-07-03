@@ -31,10 +31,36 @@ jobs:
           EYEWALL_POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
         run: python pwhl_news.py
 
+      - name: Run pwhl_stats.py (rosters, player/goalie/team stats, game log)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_stats.py
+        # Populates pwhl_game_log (which games are Final), pwhl_players,
+        # pwhl_player_seasons, pwhl_goalie_seasons, pwhl_team_seasons.
+        # Everything below this step depends on pwhl_game_log/pwhl_players
+        # being current — this was NOT previously scheduled anywhere, only
+        # ever run manually, so pwhl_pbp_events.py below has been running
+        # nightly against whatever game_log snapshot was last set by hand.
+
+      - name: Ingest PWHL shot events (goals, shots, blocked shots)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_shot_events.py
+        # Skips games already in pwhl_shot_events (idempotent by default).
+        # This is the actual source of goal data for pwhl_milestones.py —
+        # separate from and unrelated to pwhl_pbp_events.py below, which
+        # explicitly skips shot/goal events (owns hits/penalties/faceoffs/
+        # goalie changes instead). Also was NOT previously scheduled.
+
       - name: Ingest PWHL PBP events (current season)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
         run: python pwhl_pbp_events.py
         # Skips games already in pwhl_pbp_events (idempotent by default).
         # Only processes new completed games since last run.
@@ -42,6 +68,17 @@ jobs:
         #   python pwhl_pbp_events.py 6
         #   python pwhl_pbp_events.py 7
         #   python pwhl_pbp_events.py 8 --force
+
+      - name: Run pwhl_milestones.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pwhl_milestones.py
+        continue-on-error: false
+        # Depends on pwhl_stats.py (pwhl_game_log, pwhl_player_seasons,
+        # pwhl_goalie_seasons) and pwhl_shot_events.py (pwhl_shot_events) —
+        # does NOT depend on pwhl_pbp_events.py, v1 doesn't read that table.
+        # Placed last regardless since it doesn't hurt to wait.
 
       - name: Notify on failure
         if: failure()
