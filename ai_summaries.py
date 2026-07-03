@@ -14,17 +14,13 @@ import os
 import time
 
 import requests
-from dotenv import load_dotenv
-from supabase import create_client
 
 from ai_context import build_game_summary_context
 from ai_persona import STICKS_SYSTEM_PROMPT, build_game_card_prompt, build_game_summary_prompt
+from db import NHL_SEASON, get_client
 
-load_dotenv()
+supabase = get_client()
 
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
-
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 REQUEST_DELAY = 1.0  # seconds between generation calls
 
 

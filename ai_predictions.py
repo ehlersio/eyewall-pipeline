@@ -16,17 +16,14 @@ import time
 from datetime import UTC, datetime
 
 import requests
-from dotenv import load_dotenv
-from supabase import create_client
 
 from ai_context import build_matchup_context, build_prediction_context
 from ai_persona import STICKS_SYSTEM_PROMPT, build_matchup_prompt, build_prediction_prompt
+from db import get_client
+from pipeline_common import nhl_get
 
-load_dotenv()
+supabase = get_client()
 
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
-
-NHL_BASE = "https://api-web.nhle.com/v1"
 REQUEST_DELAY = 1.0
 
 
@@ -67,22 +64,16 @@ def generate(prompt: str, system: str = None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def nhl_get(url: str) -> dict | None:
-    try:
-        r = requests.get(url, headers={"User-Agent": "EyeWall-Analytics/1.0"}, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"  NHL API error: {e}")
-        return None
-
-
 def get_upcoming_games() -> list:
     """
     Returns all upcoming games league-wide for today using the NHL schedule API.
     """
     today = datetime.now(UTC).date().isoformat()
-    data = nhl_get(f"{NHL_BASE}/schedule/{today}")
+    try:
+        data = nhl_get(f"/schedule/{today}")
+    except Exception as e:
+        print(f"  NHL API error: {e}")
+        return []
     if not data:
         return []
 
