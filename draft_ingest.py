@@ -23,6 +23,8 @@ import sys
 import time
 from datetime import UTC, datetime
 
+import requests
+
 from db import get_client
 from pipeline_common import get_logger, nhl_get
 

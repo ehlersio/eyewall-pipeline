@@ -4,7 +4,8 @@ Pulls and structures data from Supabase tables for use as AI model input.
 All functions return plain dicts/lists — no model calls happen here.
 """
 
-from db import NHL_SEASON, PRIMARY_TEAM_ABBR as PRIMARY_TEAM, get_client
+from db import NHL_SEASON, get_client
+from db import PRIMARY_TEAM_ABBR as PRIMARY_TEAM
 
 supabase = get_client()
 

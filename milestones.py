@@ -139,7 +139,9 @@ def detect_hat_tricks(game: dict, scoring_rows: list[dict]) -> list[dict]:
                     "game_date": game["game_date"],
                     "player_id": sid,
                     "team": a["team"],
-                    "opponent": game["away_team"] if a["team"] == game["home_team"] else game["home_team"],
+                    "opponent": game["away_team"]
+                    if a["team"] == game["home_team"]
+                    else game["home_team"],
                     "milestone_type": "natural_hat_trick",
                     "description": f"Natural hat trick — player #{sid} ({a['team']})",
                     "detail": {
@@ -602,9 +604,7 @@ def run_for_date(sb, target_date: str):
         # API call per player per night.
         crossed_tonight = {m["player_id"] for m in season_milestones}
         for pid in crossed_tonight:
-            team = next(
-                (m["team"] for m in season_milestones if m["player_id"] == pid), None
-            )
+            team = next((m["team"] for m in season_milestones if m["player_id"] == pid), None)
             all_milestones.extend(
                 detect_career_milestones(
                     game, pid, team, tonight_points.get(pid, 0), tonight_goals.get(pid, 0)
@@ -624,7 +624,9 @@ def run_for_date(sb, target_date: str):
                 m, on_conflict="game_id,player_id,milestone_type"
             ).execute()
         except Exception as e:
-            log.error(f"  Failed to upsert milestone {m['milestone_type']} for game {m['game_id']}: {e}")
+            log.error(
+                f"  Failed to upsert milestone {m['milestone_type']} for game {m['game_id']}: {e}"
+            )
 
     log.info("Done.")
 
