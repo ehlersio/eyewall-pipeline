@@ -2,8 +2,6 @@ name: AI Pipeline
 
 on:
   schedule:
-    # Night job — summaries + scouting (8AM UTC = 4AM ET, after nightly finishes)
-    - cron: "0 8 * * *"
     # Morning job — predictions (2PM UTC = 10AM ET, morning of game day)
     - cron: "0 14 * * *"
   workflow_dispatch:
@@ -29,15 +27,16 @@ env:
 jobs:
   # --------------------------------------------------------------------------
   # NIGHT JOB — post-game summaries + missing scouting blurbs
-  # Runs: nightly at 8AM UTC (4AM ET)
+  # Manual only — nightly.yml's run_all() already runs this stage every night.
+  # Use this to re-run summaries/scouting by hand if nightly.yml fails partway
+  # or you need to regenerate for a specific reason.
   # Manual: workflow_dispatch with job = "night" or "all"
   # --------------------------------------------------------------------------
   ai-night:
     name: "Night — Summaries + Scouting"
     runs-on: ubuntu-latest
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 8 * * *') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.job == 'night' || inputs.job == 'all'))
+      github.event_name == 'workflow_dispatch' && (inputs.job == 'night' || inputs.job == 'all')
 
     steps:
       - name: Checkout
