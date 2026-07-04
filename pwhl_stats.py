@@ -72,6 +72,16 @@ TEAM_ID_MAP = {
     "6": "TOR",
     "8": "SEA",
     "9": "VAN",
+    # 2026-27 expansion teams — IDs confirmed via HockeyTech's real signing
+    # data + team-filter dropdown (docs/hockeytech-api-notes.md, 2026-07-04).
+    # Not yet in bootstrap's teams[] (no roster/division assigned
+    # pre-season), so fetches for these will just come back empty until
+    # that changes — wiring the IDs in now means nothing needs a manual
+    # add once rosters exist.
+    "10": "DET",
+    "11": "HAM",
+    "12": "LV",
+    "13": "SJS",
 }
 
 # City name → team_id (used in game log responses)
@@ -85,6 +95,10 @@ CITY_TEAM_MAP = {
     "Toronto": "6",
     "Seattle": "8",
     "Vancouver": "9",
+    "Detroit": "10",
+    "Hamilton": "11",
+    "Las Vegas": "12",
+    "San Jose": "13",
 }
 
 SEASON_TYPE_MAP = {
