@@ -39,14 +39,15 @@ Known v1 gaps (confirmed against real data, not guessed):
     every gap above in one shot.
 
 PWHL-specific data quirks (confirmed against real data, 2026-07-03):
-  - time_seconds COUNTS DOWN within a period (1200 -> 0), the opposite of
-    NHL's elapsed mm:ss. Chronological sort within a game is therefore
-    (period_id ASC, time_seconds DESC) — get this backwards and natural
-    hat tricks silently detect in reverse order. detail stores the raw
-    countdown value rather than a derived elapsed clock time, since OT
-    period length (and therefore what "elapsed" would mean) isn't
-    confirmed and periods 1-4 all use the same column with no stated unit
-    change.
+  - time_seconds is ELAPSED seconds within the period (0 -> 1200), matching
+    NHL's own convention — NOT a countdown as previously documented here.
+    Corrected 2026-07-04 after cross-checking four goal times from game 261
+    (2026-01-20, SEA vs TOR) against the PWHL's own official recap: Turnbull
+    1:18 -> time_seconds=78, Compher 2:54 -> 174, Knight 9:52 -> 592, Bilka
+    13:49 -> 829 — all four match exactly under the elapsed interpretation.
+    Chronological sort within a game is (period_id ASC, time_seconds ASC).
+    detail's goal_time_seconds field (previously named
+    goal_time_seconds_remaining) stores this elapsed value directly.
   - No shootouts appear in pwhl_shot_events at all (period_id only ranges
     1-4 across the whole table) — no shootout-exclusion filter needed,
     unlike NHL's SHOOTOUT_PERIOD handling.
@@ -98,13 +99,117 @@ REGULAR_SEASON_TYPE = "regular"
 
 
 def _chrono_key(row: dict) -> tuple[int, int]:
-    """Sort key for chronological order within a game. time_seconds counts
-    DOWN within a period, so later-in-period = smaller time_seconds."""
-    return (row.get("period_id") or 0, -(row.get("time_seconds") or 0))
+    """Sort key for chronological order within a game. time_seconds is
+    ELAPSED time within the period (confirmed against official recap —
+    see module docstring), so ascending order is chronological."""
+    return (row.get("period_id") or 0, row.get("time_seconds") or 0)
 
 
 def _team_abbr(team_id: int | None) -> str | None:
     return TEAM_ID_MAP.get(str(team_id)) if team_id is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Shorthanded goal detection (v1 — NOT yet wired into any milestone output)
+#
+# Cross-references pwhl_shot_events goals against pwhl_pbp_events' real
+# is_power_play/penalty_minutes penalty data, since pwhl_shot_events'
+# situation_code is hardcoded "5v5" (see module docstring) and can't be
+# used for this at all.
+#
+# SCOPE — this is directionally correct for the common case (one team has
+# one active penalty, a goal is scored during it) but has real gaps, listed
+# here rather than silently glossed over:
+#   - Regulation periods (1-3) ONLY. OT (period_id=4) goals are NEVER
+#     flagged SH — OT period length is unconfirmed, so there's no reliable
+#     way to convert PWHL's countdown clock to elapsed time for it.
+#   - Does NOT model a power-play goal ending the opponent's minor early.
+#     In real hockey the first PP goal cancels the offending minor; this
+#     isn't tracked, so a goal shortly after an already-cancelled penalty
+#     could be misflagged SH.
+#   - Coincidental/offsetting penalties (4-on-4 play) ARE handled — only
+#     penalties HockeyTech itself flags is_power_play=True are used to
+#     build windows, so simultaneous matching minors correctly produce no
+#     SH/PP flag for either side.
+#   - Double minors are treated as one continuous 4:00 window, not two
+#     independent 2:00 penalties.
+#   - Penalties are assumed to end within the period they're taken in —
+#     no carryover across period breaks.
+#
+# Needs validation against at least one real, known SH goal before being
+# trusted for milestone thresholds. Not attempted here — flagging as the
+# next step before this goes further.
+# ---------------------------------------------------------------------------
+
+
+def _elapsed_seconds(period_id: int | None, time_seconds: int) -> int | None:
+    """time_seconds is already elapsed within the period (see module
+    docstring) — this just validates scope. Returns None outside
+    regulation (period_id not in 1-3), since OT length is unconfirmed
+    and we can't sanity-bound an elapsed value there yet."""
+    if period_id not in (1, 2, 3):
+        return None
+    return time_seconds or 0
+
+
+def get_penalties_for_game(sb, game_id: int) -> list[dict]:
+    r = (
+        sb.table("pwhl_pbp_events")
+        .select(
+            "team_id, period_id, time_seconds, penalty_minutes, is_bench_penalty, is_power_play"
+        )
+        .eq("game_id", game_id)
+        .eq("event_type", "penalty")
+        .eq("is_power_play", True)  # excludes coincidental/offsetting minors —
+        # HockeyTech already flags those isPowerPlay=False, which is a more
+        # reliable signal than trying to infer 4-on-4 from window overlap
+        # ourselves (confirmed via game 261: two simultaneous penalties,
+        # one per team, both isPowerPlay=False — a true coincidental minor,
+        # not a shorthanded situation for either side).
+        .execute()
+    )
+    return r.data or []
+
+
+def _penalty_window(penalty: dict) -> tuple[int, int, int] | None:
+    """(period_id, elapsed_start, elapsed_end) for one penalty, capped at
+    period end. Bench penalties count (they still cost the team a
+    skater) — the server just isn't tracked separately."""
+    period_id = penalty.get("period_id")
+    elapsed_start = _elapsed_seconds(period_id, penalty.get("time_seconds") or 0)
+    if elapsed_start is None:
+        return None
+    minutes = penalty.get("penalty_minutes") or 2
+    elapsed_end = min(elapsed_start + minutes * 60, PERIOD_SECONDS)
+    return period_id, elapsed_start, elapsed_end
+
+
+def detect_shorthanded_goals(sb, game: dict, ordered_goals: list[dict]) -> dict[tuple, bool]:
+    """Returns {(period_id, time_seconds, shooter_id): is_shorthanded} for
+    every goal in ordered_goals. See module-level scope note above before
+    using this for anything beyond spot-checking."""
+    penalties = get_penalties_for_game(sb, game["game_id"])
+    penalty_windows = []
+    for p in penalties:
+        w = _penalty_window(p)
+        if w is None:
+            continue
+        period_id, start, end = w
+        penalty_windows.append((p["team_id"], period_id, start, end))
+
+    sh_flags = {}
+    for goal in ordered_goals:
+        key = (goal.get("period_id"), goal.get("time_seconds"), goal.get("shooter_id"))
+        elapsed = _elapsed_seconds(goal.get("period_id"), goal.get("time_seconds") or 0)
+        if elapsed is None:
+            sh_flags[key] = False
+            continue
+        team_id = goal.get("team_id")
+        sh_flags[key] = any(
+            pid == team_id and pperiod == goal.get("period_id") and start <= elapsed < end
+            for pid, pperiod, start, end in penalty_windows
+        )
+    return sh_flags
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +297,7 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                         "goal_periods": [a["period_id"], b["period_id"], c["period_id"]],
                         # Raw countdown seconds remaining, NOT elapsed —
                         # OT period length unconfirmed, see module docstring.
-                        "goal_time_seconds_remaining": [
+                        "goal_time_seconds": [
                             a.get("time_seconds"),
                             b.get("time_seconds"),
                             c.get("time_seconds"),

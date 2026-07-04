@@ -195,6 +195,16 @@ def _parse_hit(
     }
 
 
+def _parse_penalty_minutes(val) -> int | None:
+    """HockeyTech sends minutes as a numeric string like '2.00' or '4.00'
+    (or '10.00' for a misconduct) — not a plain int, so a bare int(val)
+    raises ValueError and silently returns None via _safe_int."""
+    try:
+        return round(float(val))
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_penalty(
     d: dict,
     game_id: int,
@@ -206,6 +216,12 @@ def _parse_penalty(
 ) -> dict:
     taken_by = d.get("takenBy") or {}
     served_by = d.get("servedBy") or {}
+    # The penalized team lives under `againstTeam.id`, NOT the generic
+    # teamId/team_id fields the caller computed (those don't exist on
+    # penalty events at all — confirmed via raw feed inspection on game
+    # 261, where team_id/penalty_minutes came back None for every row).
+    against_team = d.get("againstTeam") or {}
+    penalized_team_id = _safe_int(against_team.get("id")) or team_id
     return {
         "game_id": game_id,
         "season_id": season_id,
@@ -213,7 +229,7 @@ def _parse_penalty(
         "event_type": "penalty",
         "period_id": period,
         "time_seconds": time_seconds,
-        "team_id": team_id,
+        "team_id": penalized_team_id,
         "player_id": _safe_int(taken_by.get("id")),
         "player_name": (taken_by.get("name") or "").strip() or None,
         "secondary_player_id": _safe_int(served_by.get("id")),
@@ -221,7 +237,7 @@ def _parse_penalty(
         "description": (d.get("description") or "").strip() or None,
         "is_power_play": bool(d.get("isPowerPlay", False)),
         "is_bench_penalty": bool(d.get("isBench", False)),
-        "penalty_minutes": _safe_int(d.get("minutes")),
+        "penalty_minutes": _parse_penalty_minutes(d.get("minutes")),
         "x_location": None,
         "y_location": None,
     }

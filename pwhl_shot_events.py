@@ -323,7 +323,12 @@ def run(season_id: str | None = None) -> None:
                 log.info(f"    Inserted {len(missing)} unknown player stubs: {missing}")
 
         # Deduplicate within this game before upserting — two events can share
-        # the same (game_id, event_type, period_id, time_seconds, team_id, shooter_id)
+        # the same (game_id, event_type, period_id, time_seconds, team_id,
+        # shooter_id) if a player has two distinct shots in the same recorded
+        # second. x_raw/y_raw are folded into the key to disambiguate: a real
+        # duplicate (re-parsed same event) will have identical coordinates and
+        # still collapse correctly, while two genuinely different shots will
+        # almost always differ in location.
         seen = set()
         deduped = []
         for row in rows:
@@ -334,6 +339,8 @@ def run(season_id: str | None = None) -> None:
                 row["time_seconds"],
                 row["team_id"],
                 row["shooter_id"],
+                row["x_raw"],
+                row["y_raw"],
             )
             if key not in seen:
                 seen.add(key)
@@ -344,7 +351,7 @@ def run(season_id: str | None = None) -> None:
         for j in range(0, len(deduped), 200):
             sb.table("pwhl_shot_events").upsert(
                 deduped[j : j + 200],
-                on_conflict="game_id,event_type,period_id,time_seconds,team_id,shooter_id",
+                on_conflict="game_id,event_type,period_id,time_seconds,team_id,shooter_id,x_raw,y_raw",
             ).execute()
 
         goals = sum(1 for r in rows if r["event_type"] == "goal")
