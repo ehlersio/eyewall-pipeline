@@ -30,6 +30,8 @@ import pdfplumber
 from dotenv import load_dotenv
 from supabase import create_client
 
+from season_lookup import get_pwhl_season
+
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -38,12 +40,21 @@ logging.basicConfig(
     format="%(asctime)s:%(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
 log = logging.getLogger(__name__)
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ["SUPABASE_KEY"]
 
 SALARY_GUIDE_URL = "https://www.pwhlpa.com/salary-guide"
-SEASON_LABEL = "2025-26"
+
+# Was a separately-hardcoded "2025-26" string here — same decoupled-season
+# bug shape as MP_SEASON in moneypuck.py, just a season SPAN label instead
+# of an ID. Derived from the live-resolved season instead, so it moves in
+# lockstep with everything else rather than needing its own yearly edit.
+# This feeds the DB upsert's conflict key (first_name,last_name,season),
+# so getting it right matters for correctness, not just cosmetics.
+_pwhl_live = get_pwhl_season()
+SEASON_LABEL = f"{_pwhl_live['start_year']}-{str(_pwhl_live['start_year'] + 1)[2:]}"
 
 # Map PWHLPA team names → our team IDs
 TEAM_NAME_MAP = {
@@ -55,6 +66,12 @@ TEAM_NAME_MAP = {
     "Toronto": 6,
     "Seattle": 8,
     "Vancouver": 9,
+    # 2026-27 expansion teams — IDs confirmed via HockeyTech's real signing
+    # data + team-filter dropdown (docs/hockeytech-api-notes.md, 2026-07-04).
+    "Detroit": 10,
+    "Hamilton": 11,
+    "Las Vegas": 12,
+    "San Jose": 13,
 }
 
 HEADERS = {
@@ -162,7 +179,8 @@ def _parse_text_page(text: str, page_num: int) -> list[dict]:
     pattern = re.compile(
         r"([A-ZÀ-Ž][a-zà-ž'\-]+(?:\s[A-ZÀ-Ž][a-zà-ž'\-]+)?)\s+"  # first name(s)
         r"([A-ZÀ-Ž][a-zà-ž'\-]+(?:\s[A-ZÀ-Ž][a-zà-ž'\-]+)?)\s+"  # last name(s)
-        r"(Boston|Minnesota|Montreal|New York|Ottawa|Seattle|Toronto|Vancouver)\s+"
+        r"(Boston|Minnesota|Montreal|New York|Ottawa|Seattle|Toronto|Vancouver|"
+        r"Detroit|Hamilton|Las Vegas|San Jose)\s+"
         r"\$?\s*([\d,]+\.?\d*)"
     )
     for m in pattern.finditer(text):
