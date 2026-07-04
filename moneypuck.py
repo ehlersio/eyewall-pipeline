@@ -13,7 +13,16 @@ import requests
 
 from db import NHL_SEASON, get_client
 
-MP_URL = "https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv"
+# MoneyPuck's URL scheme wants the season's START year (e.g. 2025 for the
+# 20252026 season), not the full YYYYYYYY season ID. This used to be a
+# separate hardcoded "2025" here, decoupled from NHL_SEASON — meaning a
+# correct NHL_SEASON flip alone would NOT have fixed this fetch. Deriving
+# it from NHL_SEASON instead means there's exactly one place this needs
+# to be right.
+MP_START_YEAR = int(str(NHL_SEASON)[:4])
+MP_URL = (
+    f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{MP_START_YEAR}/regular/skaters.csv"
+)
 MP_TEAM_GAMES_URL = "https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv"
 HEADERS = {
     "User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)",

@@ -36,6 +36,8 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from season_lookup import get_pwhl_season
+
 load_dotenv()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(message)s")
@@ -44,10 +46,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(me
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-PWHL_SEASON = os.environ.get("PWHL_SEASON") or "8"  # default: 2025-26 Regular
-# Note: `or` (not .get's default arg) so an empty-string secret — e.g. a
-# workflow referencing ${{ secrets.PWHL_SEASON }} before the secret exists —
-# still falls through to the default instead of crashing on int('').
+
+_pwhl_live = get_pwhl_season()  # live-resolved via Worker; falls back to PWHL_SEASON env var
+PWHL_SEASON = str(_pwhl_live["season_id"])
+# Note: previously `os.environ.get("PWHL_SEASON") or "8"` — that fallback
+# behavior (empty-string secret doesn't crash int()) now lives inside
+# season_lookup.get_pwhl_season() instead.
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/"
 HOCKEYTECH_KEY = "446521baf8c38984"
@@ -91,9 +95,14 @@ SEASON_TYPE_MAP = {
     "5": "regular",  # 2024-25 Regular Season
     "6": "playoffs",  # 2025 Playoffs
     "7": "preseason",  # 2025-26 Preseason
-    "8": "regular",  # 2025-26 Regular Season (current)
+    "8": "regular",  # 2025-26 Regular Season
     "9": "playoffs",  # 2025-26 Playoffs
 }
+# Historical IDs stay hardcoded above (no live lookup exists for past
+# seasons); the current season's type is filled in live instead of
+# needing a manual addition every October — see SEASON_YEAR_MAP's comment
+# for the failure mode this replaces.
+SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
 
 # Position group → canonical position code
 SECTION_POSITION_MAP = {
@@ -399,7 +408,14 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
 
 # ── Team Stats + Standings ────────────────────────────────────────────────────
 
-# Maps season_id → the calendar year the season STARTS in (for date parsing)
+# Maps season_id → the calendar year the season STARTS in (for date parsing).
+# Historical season IDs stay hardcoded here — HockeyTech has no live "what
+# year did season 5 start" lookup for past seasons, only for the current
+# one. The current season's entry is filled in live below instead of
+# needing a manual addition every October: previously, a brand-new
+# season_id with no entry here would have silently fallen back to the
+# `2025` default in _parse_game_date, misdating every game until someone
+# noticed and added a line.
 SEASON_YEAR_MAP = {
     "1": 2023,
     "2": 2023,
@@ -409,6 +425,7 @@ SEASON_YEAR_MAP = {
     "8": 2025,
     "9": 2025,  # 2025-26 regular / playoffs
 }
+SEASON_YEAR_MAP.setdefault(PWHL_SEASON, _pwhl_live["start_year"])
 
 
 def _parse_game_date(date_with_day: str, season_id: str) -> str | None:

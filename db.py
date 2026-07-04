@@ -8,11 +8,13 @@ from dotenv import load_dotenv
 from supabase import Client, create_client
 from supabase.lib.client_options import ClientOptions
 
+from season_lookup import get_nhl_season
+
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = get_nhl_season()  # live-resolved via Worker; falls back to NHL_SEASON env var
 PRIMARY_TEAM_ABBR = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
 
 
