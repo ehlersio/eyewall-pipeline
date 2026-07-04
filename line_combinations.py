@@ -76,13 +76,7 @@ def fetch_all(client, table, select, filters, page_size=999, cursor_col="id"):
                 q = q.in_(col, val)
             else:
                 q = q.eq(col, val)
-        batch = (
-            q.gt(cursor_col, last_val)
-            .order(cursor_col)
-            .limit(page_size)
-            .execute()
-            .data
-        )
+        batch = q.gt(cursor_col, last_val).order(cursor_col).limit(page_size).execute().data
         if not batch:
             break
         rows.extend(batch)
