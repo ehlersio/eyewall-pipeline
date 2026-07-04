@@ -8,6 +8,7 @@ against real Supabase data on 2026-07-03 rather than assumed.
 
 Detects:
   - Hat tricks / natural hat tricks       (pwhl_shot_events, event_type='goal')
+  - Shorthanded goals                     (pwhl_shot_events x pwhl_pbp_events penalties, v1 — see detect_shorthanded_goals for scope/limitations)
   - Shutouts                               (pwhl_shot_events, goalie_id)
   - Season goal milestones                 (pwhl_shot_events tally + pwhl_player_seasons)
   - Career win milestones (goalies)        (pwhl_goalie_seasons, summed across seasons)
@@ -15,28 +16,19 @@ Detects:
 Known v1 gaps (confirmed against real data, not guessed):
   - NO points-based milestones (season or career). pwhl_shot_events has
     shooter_id but no assist columns (no secondary_player_id equivalent —
-    that lives only on pwhl_pbp_events, which is unpopulated — see below).
-    Without tonight's exact points contribution, a NHL-style pre/post
-    threshold-crossing check can't be done correctly; approximating
-    "tonight's points" as "tonight's goals" would silently produce false
-    negatives (missed crossings on assist-heavy nights) with no way to
-    detect that it happened. Rather than ship that, points milestones are
-    just not included in v1.
-  - NO shorthanded goal detection. pwhl_shot_events.situation_code is a
-    text field (e.g. "5v5"), not NHL's numeric strength code — checked
-    15 real goal rows and every single one was "5v5", strongly suggesting
-    the PWHL shot-events ingestion isn't actually tagging real strength
-    state yet (statistically implausible to have zero PP goals across 282
-    games). Building SH-goal detection against a field that never varies
-    would ship dead code that looks functional but never fires. This is a
-    pwhl_shot_events ingestion gap, not something this module can fix.
+    that lives only on pwhl_pbp_events). Without tonight's exact points
+    contribution, a NHL-style pre/post threshold-crossing check can't be
+    done correctly; approximating "tonight's points" as "tonight's goals"
+    would silently produce false negatives (missed crossings on
+    assist-heavy nights) with no way to detect that it happened. Rather
+    than ship that, points milestones are just not included in v1.
   - Hat-trick `detail` has no assist list (same root cause as above).
-  - `pwhl_pbp_events` exists as a table (richer schema — player_id,
-    secondary_player_id, description, is_power_play, penalty_minutes) but
-    returned zero rows for event_type='goal' when checked — nothing
-    currently writes to it. If that ever gets built out, this whole module
-    should probably be rewritten against it instead, since it would close
-    every gap above in one shot.
+  - Shorthanded goal detection WAS blocked on pwhl_shot_events.situation_code
+    being hardcoded "5v5" — fixed 2026-07-04 by cross-referencing
+    pwhl_pbp_events penalty data instead (see detect_shorthanded_goals).
+    Validated against two real games (Adzija SH goal 2026-01-20, confirmed
+    via official PWHL recap + coach quote). Still has documented scope
+    limits — not a full strength-state model.
 
 PWHL-specific data quirks (confirmed against real data, 2026-07-03):
   - time_seconds is ELAPSED seconds within the period (0 -> 1200), matching
@@ -70,6 +62,14 @@ Usage:
   python pwhl_milestones.py                    # yesterday's games
   python pwhl_milestones.py --date 2026-03-15   # specific date
   python pwhl_milestones.py --since 2026-01-01  # date range through yesterday
+  python pwhl_milestones.py --game 261          # single game_id (debugging/spot-checks)
+
+event_key convention (added 2026-07-04, shared with milestones.py — see
+that module's docstring for full rationale): "" for once-per-game types
+(hat_trick, natural_hat_trick, shutout, career_wins_N, season_goals_N);
+a real f"{period_id}_{time_seconds}" value for shorthanded_goal, since a
+player can score more than one SH goal in a game and each needs its own
+row rather than overwriting the last.
 """
 
 import argparse
@@ -212,6 +212,49 @@ def detect_shorthanded_goals(sb, game: dict, ordered_goals: list[dict]) -> dict[
     return sh_flags
 
 
+def build_shorthanded_goal_milestones(sb, game: dict, ordered_goals: list[dict]) -> list[dict]:
+    """Wraps detect_shorthanded_goals into milestone rows. One row per SH
+    goal (a player could in principle score more than one SH goal in a
+    game — each gets its own row, same pattern as season_goals thresholds
+    firing per-crossing rather than once per game)."""
+    sh_flags = detect_shorthanded_goals(sb, game, ordered_goals)
+    home_id, away_id = game["home_team_id"], game["away_team_id"]
+
+    def opponent_of(team_id):
+        return away_id if team_id == home_id else home_id
+
+    milestones = []
+    for goal in ordered_goals:
+        key = (goal.get("period_id"), goal.get("time_seconds"), goal.get("shooter_id"))
+        if not sh_flags.get(key):
+            continue
+        sid = goal.get("shooter_id")
+        if sid is None:
+            continue
+        team_id = goal.get("team_id")
+        milestones.append(
+            {
+                "game_id": game["game_id"],
+                "season": game["season_id"],
+                "game_date": game["game_date"],
+                "player_id": sid,
+                "team": _team_abbr(team_id),
+                "opponent": _team_abbr(opponent_of(team_id)),
+                "milestone_type": "shorthanded_goal",
+                "description": f"Shorthanded goal — player #{sid} ({_team_abbr(team_id)})",
+                "detail": {
+                    "period_id": goal.get("period_id"),
+                    "time_seconds": goal.get("time_seconds"),
+                },
+                "is_pwhl": True,
+                # Real disambiguator, not "" — a player scoring TWO SH
+                # goals in one game must not collide onto one row.
+                "event_key": f"{goal.get('period_id')}_{goal.get('time_seconds')}",
+            }
+        )
+    return milestones
+
+
 # ---------------------------------------------------------------------------
 # Game discovery
 # ---------------------------------------------------------------------------
@@ -238,6 +281,29 @@ def get_games_for_date(sb, target_date: str) -> list[dict]:
         row["season_type"] = SEASON_TYPE_MAP.get(str(season_id), "regular")
         games.append(row)
     return games
+
+
+def get_game_by_id(sb, game_id: int) -> dict | None:
+    """Single game lookup by game_id, for --game (debugging/spot-checks —
+    doesn't require the game to be 'Final', unlike get_games_for_date,
+    since you may want to re-run detection on a specific game regardless
+    of state while testing)."""
+    r = (
+        sb.table("pwhl_game_log")
+        .select(
+            "game_id, season_id, game_date, home_team_id, away_team_id, "
+            "home_score, away_score, game_state"
+        )
+        .eq("game_id", game_id)
+        .limit(1)
+        .execute()
+    )
+    rows = r.data or []
+    if not rows:
+        return None
+    row = rows[0]
+    row["season_type"] = SEASON_TYPE_MAP.get(str(row["season_id"]), "regular")
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +361,6 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                     "description": f"Natural hat trick — player #{sid} ({_team_abbr(a['team_id'])})",
                     "detail": {
                         "goal_periods": [a["period_id"], b["period_id"], c["period_id"]],
-                        # Raw countdown seconds remaining, NOT elapsed —
-                        # OT period length unconfirmed, see module docstring.
                         "goal_time_seconds": [
                             a.get("time_seconds"),
                             b.get("time_seconds"),
@@ -304,6 +368,7 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                         ],
                     },
                     "is_pwhl": True,
+                    "event_key": "",
                 }
             )
             hat_trick_scorers.pop(sid, None)
@@ -322,6 +387,7 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                 "description": f"Hat trick — player #{sid} ({_team_abbr(team_id)})",
                 "detail": {"goal_count": len(rows)},
                 "is_pwhl": True,
+                "event_key": "",
             }
         )
 
@@ -397,6 +463,7 @@ def detect_shutouts(appearances: dict, game: dict) -> list[dict]:
                 "description": f"Shutout — goalie #{goalie_id} ({_team_abbr(a['team_id'])})",
                 "detail": {},
                 "is_pwhl": True,
+                "event_key": "",
             }
         )
     return milestones
@@ -452,6 +519,7 @@ def detect_goalie_win_milestones(sb, appearances: dict, game: dict) -> list[dict
                         "description": f"Goalie #{goalie_id} reaches {threshold} career wins",
                         "detail": {"career_wins": career_wins},
                         "is_pwhl": True,
+                        "event_key": "",
                     }
                 )
     return milestones
@@ -508,6 +576,7 @@ def detect_season_goal_milestones(sb, game: dict, ordered_goals: list[dict]) -> 
                         "description": f"Player #{pid} reaches {threshold} goals this season",
                         "detail": {"season_goals": season_goals},
                         "is_pwhl": True,
+                        "event_key": "",
                     }
                 )
 
@@ -527,6 +596,8 @@ def build_description(milestone_type: str, name: str, team: str | None) -> str:
         return f"Natural hat trick — {name}{team_str}"
     if milestone_type == "shutout":
         return f"Shutout — {name}{team_str}"
+    if milestone_type == "shorthanded_goal":
+        return f"Shorthanded goal — {name}{team_str}"
     if milestone_type.startswith("season_goals_"):
         n = milestone_type.rsplit("_", 1)[-1]
         return f"{name} reaches {n} goals this season"
@@ -563,9 +634,10 @@ def attach_player_names(sb, milestones: list[dict]) -> None:
         m["description"] = build_description(m["milestone_type"], name, m["team"])
 
 
-def run_for_date(sb, target_date: str):
-    log.info(f"Scanning PWHL games for {target_date}...")
-    games = get_games_for_date(sb, target_date)
+def run_for_games(sb, games: list[dict]):
+    """Shared detection + upsert logic for a list of games — used by both
+    run_for_date (date-driven) and run_for_game (--game, single game_id,
+    for spot-checks/debugging like today's SH-goal validation)."""
     if not games:
         log.info("  No games found.")
         return
@@ -580,6 +652,7 @@ def run_for_date(sb, target_date: str):
 
         all_milestones.extend(detect_hat_tricks(game, ordered_goals))
         all_milestones.extend(detect_season_goal_milestones(sb, game, ordered_goals))
+        all_milestones.extend(build_shorthanded_goal_milestones(sb, game, ordered_goals))
 
         appearances = get_goalie_appearances(sb, game)
         all_milestones.extend(detect_shutouts(appearances, game))
@@ -595,7 +668,7 @@ def run_for_date(sb, target_date: str):
     for m in all_milestones:
         try:
             sb.table("milestones").upsert(
-                m, on_conflict="game_id,player_id,milestone_type"
+                m, on_conflict="game_id,player_id,milestone_type,event_key"
             ).execute()
         except Exception as e:
             log.error(
@@ -605,15 +678,36 @@ def run_for_date(sb, target_date: str):
     log.info("Done.")
 
 
+def run_for_date(sb, target_date: str):
+    log.info(f"Scanning PWHL games for {target_date}...")
+    games = get_games_for_date(sb, target_date)
+    run_for_games(sb, games)
+
+
+def run_for_game(sb, game_id: int):
+    """Single-game path for --game. Does NOT require game_state='Final'
+    (get_games_for_date does) since you may want to re-run detection on
+    a specific game during testing regardless of its recorded state."""
+    log.info(f"Scanning PWHL game {game_id}...")
+    game = get_game_by_id(sb, game_id)
+    if game is None:
+        log.error(f"  game_id {game_id} not found in pwhl_game_log")
+        return
+    run_for_games(sb, [game])
+
+
 def main():
     parser = argparse.ArgumentParser(description="EyeWall PWHL milestone detection")
     parser.add_argument("--date", help="Specific date (YYYY-MM-DD). Default: yesterday.")
     parser.add_argument("--since", help="Scan every date from this YYYY-MM-DD through yesterday.")
+    parser.add_argument("--game", type=int, help="Single game_id (debugging/spot-checks).")
     args = parser.parse_args()
 
     sb = get_client()
 
-    if args.since:
+    if args.game:
+        run_for_game(sb, args.game)
+    elif args.since:
         start = datetime.strptime(args.since, "%Y-%m-%d").date()
         end = date.today() - timedelta(days=1)
         if start > end:

@@ -38,6 +38,20 @@ Usage:
   python milestones.py                    # yesterday's games
   python milestones.py --date 2026-06-15  # specific date
   python milestones.py --since 2026-06-01 # date range through yesterday
+
+event_key convention (added 2026-07-04, shared with pwhl_milestones.py —
+both write into the same `milestones` table, unique on
+game_id,player_id,milestone_type,event_key):
+  - "" (empty string, NOT NULL) for milestone types that are naturally
+    once-per-game-per-player (hat_trick, natural_hat_trick, shutout, and
+    every threshold type). Empty string, not NULL, because Postgres
+    treats every NULL as distinct in a unique constraint — NULL here
+    would silently let re-running the same date insert duplicates
+    instead of upserting over the existing row.
+  - A real value for event-level types where the same player can
+    legitimately trigger the same milestone_type more than once per game
+    (currently only sh_goal — f"{period}_{time_in_period}"). Without
+    this, a player's second SH goal in a game would overwrite the first.
 """
 
 import argparse
@@ -153,6 +167,7 @@ def detect_hat_tricks(game: dict, scoring_rows: list[dict]) -> list[dict]:
                         ],
                     },
                     "is_pwhl": False,
+                    "event_key": "",
                 }
             )
             # Only need to flag the first qualifying run per scorer.
@@ -174,6 +189,7 @@ def detect_hat_tricks(game: dict, scoring_rows: list[dict]) -> list[dict]:
                 "description": f"Hat trick — player #{sid} ({team})",
                 "detail": {"goal_count": len(rows)},
                 "is_pwhl": False,
+                "event_key": "",
             }
         )
 
@@ -231,6 +247,9 @@ def detect_sh_goals(game: dict, scoring_rows: list[dict]) -> list[dict]:
                         "time_in_period": row.get("time_in_period"),
                     },
                     "is_pwhl": False,
+                    # Real disambiguator, not "" — a player scoring TWO SH
+                    # goals in one game must not collide onto one row.
+                    "event_key": f"{row['period']}_{row.get('time_in_period')}",
                 }
             )
     return milestones
@@ -312,6 +331,7 @@ def detect_shutouts(appearances: dict, game: dict) -> list[dict]:
                 "description": f"Shutout — goalie #{goalie_id} ({a['team']})",
                 "detail": {},
                 "is_pwhl": False,
+                "event_key": "",
             }
         )
     return milestones
@@ -367,6 +387,7 @@ def detect_goalie_win_milestones(sb, appearances: dict, game: dict) -> list[dict
                         "description": f"Goalie #{goalie_id} reaches {threshold} career wins",
                         "detail": {"career_wins": career_wins},
                         "is_pwhl": False,
+                        "event_key": "",
                     }
                 )
     return milestones
@@ -438,6 +459,7 @@ def detect_season_milestones(sb, game: dict, scoring_rows: list[dict]) -> list[d
                         "description": f"Player #{pid} reaches {threshold} goals this season",
                         "detail": {"season_goals": season_goals},
                         "is_pwhl": False,
+                        "event_key": "",
                     }
                 )
 
@@ -457,6 +479,7 @@ def detect_season_milestones(sb, game: dict, scoring_rows: list[dict]) -> list[d
                         "description": f"Player #{pid} reaches {threshold} points this season",
                         "detail": {"season_points": season_points},
                         "is_pwhl": False,
+                        "event_key": "",
                     }
                 )
 
@@ -508,6 +531,7 @@ def detect_career_milestones(
                         "description": f"Player #{player_id} reaches {threshold} career points",
                         "detail": {"career_points": career_points},
                         "is_pwhl": False,
+                        "event_key": "",
                     }
                 )
 
@@ -621,7 +645,7 @@ def run_for_date(sb, target_date: str):
     for m in all_milestones:
         try:
             sb.table("milestones").upsert(
-                m, on_conflict="game_id,player_id,milestone_type"
+                m, on_conflict="game_id,player_id,milestone_type,event_key"
             ).execute()
         except Exception as e:
             log.error(

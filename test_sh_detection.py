@@ -58,7 +58,7 @@ def main():
         for goal in goals:
             marker = " <-- ADZIJA (player_id match)" if goal.get("shooter_id") in player_ids else ""
             print(
-                f"  period={goal['period_id']} time_remaining={goal['time_seconds']} "
+                f"  period={goal['period_id']} time_elapsed={goal['time_seconds']} "
                 f"shooter_id={goal['shooter_id']} team_id={goal['team_id']}{marker}"
             )
         print()
@@ -77,7 +77,7 @@ def main():
             is_sh = sh_flags.get(key)
             marker = " <-- ADZIJA" if goal.get("shooter_id") in player_ids else ""
             print(
-                f"  period={goal['period_id']} time_remaining={goal['time_seconds']} "
+                f"  period={goal['period_id']} time_elapsed={goal['time_seconds']} "
                 f"shooter_id={goal['shooter_id']} team_id={goal['team_id']} "
                 f"is_shorthanded={is_sh}{marker}"
             )
