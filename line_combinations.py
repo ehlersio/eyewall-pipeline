@@ -57,23 +57,38 @@ def shot_xg(event_type, x, y):
     return 0.03
 
 
-def fetch_all(client, table, select, filters, page_size=1000):
-    """Paginated Supabase fetch."""
-    rows, offset = [], 0
+def fetch_all(client, table, select, filters, page_size=999, cursor_col="id"):
+    """Cursor-based (keyset) Supabase fetch.
+
+    Uses `id > last_seen_id` + ORDER BY id instead of OFFSET pagination.
+    OFFSET cost grows with page depth (Postgres has to scan and discard
+    everything before the offset on every request), which is what caused
+    a `57014 statement timeout` on this exact table once CAR's season
+    shift_events grew past ~30 pages deep (see 2026-07-04 nightly failure).
+    Keyset pagination keeps each page's cost flat regardless of depth.
+    """
+    rows, last_val = [], 0
+    cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"
     while True:
-        q = client.table(table).select(select)
+        q = client.table(table).select(cols)
         for col, val in filters.items():
             if isinstance(val, list):
                 q = q.in_(col, val)
-            elif isinstance(val, bool):
-                q = q.eq(col, val)
             else:
                 q = q.eq(col, val)
-        batch = q.range(offset, offset + page_size - 1).execute().data
+        batch = (
+            q.gt(cursor_col, last_val)
+            .order(cursor_col)
+            .limit(page_size)
+            .execute()
+            .data
+        )
         if not batch:
             break
         rows.extend(batch)
-        offset += page_size
+        last_val = batch[-1][cursor_col]
+        if len(batch) < page_size:
+            break
     return rows
 
 
