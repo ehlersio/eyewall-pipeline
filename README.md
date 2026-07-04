@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, and PWHL news.
+Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL news, and milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds).
 
 ## Setup
 
@@ -58,7 +58,11 @@ python pwhl_stats.py 9         # 2025-26 playoffs stats
 python pwhl_pbp_events.py      # Current season PBP events (defaults to season 8)
 python pwhl_pbp_events.py 9    # Specific playoff season
 python pwhl_pbp_events.py --force  # Re-ingest already-processed games
-python pwhl_shot_events.py     # Shot events
+python pwhl_shot_events.py     # Shot events + gameSummary merge (assists, PP/SH/EN/GW flags)
+python pwhl_shot_events.py 9   # Specific season
+python pwhl_shot_events.py --backfill-goals    # Merge gameSummary onto already-ingested goal rows missing it
+python pwhl_shot_events.py --backfill-goals 9  # Backfill a specific season
+python pwhl_shot_events.py --game 338          # Single game (debug -- ingest + merge just this game)
 python pwhl_salaries.py        # Salary scraper (PWHLPA PDF)
 python pwhl_salaries.py --dry-run  # Parse only, don't upsert
 python pwhl_news.py            # Fetch PWHL news and POST to Worker
@@ -181,6 +185,23 @@ Ingests PWHL shot coordinates from HockeyTech PBP. Writes to `pwhl_shot_events` 
 
 **Coordinate note:** `x_norm` is inverted vs NHL convention (positive = defending end). Frontend negates x before folding to attacking half. A pipeline-level fix is deferred.
 
+**gameSummary merge (added Session 34):** After shot events are ingested for a game, a second fetch against `statviewfeed/gameSummary` pulls `periods[].goals[]`, which carries real assists (full player objects) and ground-truth per-goal flags the PBP feed doesn't have. Each gameSummary goal is matched to its existing `pwhl_shot_events` goal row on `(game_id, period_id, time_seconds, team_id, shooter_id)` and that row is updated in place with:
+- `assist1_id`, `assist2_id` — primary/secondary assist, NULL if unassisted
+- `is_power_play`, `is_short_handed`, `is_empty_net`, `is_game_winning_goal` — ground truth, supersedes any heuristic derivation
+- `game_goal_id` — HockeyTech's own unique-per-goal ID (reference only, not used as a dedup key)
+
+This unblocked PWHL season/career points milestones and lets `pwhl_milestones.py` use the ground-truth `is_short_handed` flag instead of its old penalty-window heuristic.
+
+**Gotcha (fixed Session 34):** gameSummary's `properties` booleans (`isPowerPlay`, `isShortHanded`, etc.) come through as the **strings** `"true"`/`"false"`, not JSON booleans — a naive `bool(val)` marks every goal `true` for every flag, since `bool("false")` is `True` in Python for any non-empty string. `_gs_parse_bool()` handles this explicitly. Worth checking any other HockeyTech boolean field before trusting a bare `bool()` call on it.
+
+```bash
+python pwhl_shot_events.py                     # Ingest current season, merge gameSummary for newly-ingested games
+python pwhl_shot_events.py 9                    # Specific season
+python pwhl_shot_events.py --backfill-goals     # Merge gameSummary onto ALREADY-ingested goal rows missing it
+python pwhl_shot_events.py --backfill-goals 9   # Backfill a specific season
+python pwhl_shot_events.py --game 338           # Single game_id (debug -- ingest + merge just this game)
+```
+
 ### `pwhl_salaries.py`
 Scrapes PWHLPA salary guide PDF and upserts to `pwhl_salaries`.
 
@@ -300,7 +321,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_goalie_seasons` | Per-goalie per-season stats (GP, W, L, OTL, GAA, SV%, SO, saves, GA) |
 | `pwhl_team_seasons` | Per-team per-season stats + PP%/PK%/special teams + Corsi/Fenwick + reg_wins/non_reg_wins |
 | `pwhl_game_log` | Game results with scores, dates, venue, OT/SO flags |
-| `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time |
+| `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time; goal rows also carry `assist1_id`/`assist2_id`, `is_power_play`/`is_short_handed`/`is_empty_net`/`is_game_winning_goal`, `game_goal_id` (merged from gameSummary, Session 34 — NULL until merged) |
 | `pwhl_pbp_events` | PBP events: faceoffs (homeWin string), hits, penalties, goalie changes |
 | `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
 | `pwhl_game_summaries` | AI post-game summaries (PWHL) |
@@ -369,3 +390,5 @@ True RAPM via ridge regression (alpha=2500):
 - **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
 - **Reddit ingest:** GH Actions IPs blocked by Reddit. New app registration blocked by Responsible Builder Policy. Deferred to October 2026.
 - **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
+- **HockeyTech boolean fields:** gameSummary's `properties` booleans arrive as strings (`"true"`/`"false"`), not JSON booleans — confirmed Session 34 via `pwhl_shot_events.py`'s gameSummary merge (a naive `bool(val)` marked every goal `true` for every flag). `gameCenterPlayByPlay`'s `isPowerPlay`/`isBench` on penalty events appear to be real JSON booleans by contrast (real `False` values already observed in production, pre-Session-34). Check any new HockeyTech boolean field against real data before trusting a bare `bool()` call on it.
+- **`pwhl_milestones.py` undocumented:** This README has no section for the milestones pipeline (NHL `milestones.py` or PWHL `pwhl_milestones.py`) — pre-existing gap, not from Session 34. Worth a dedicated write-up at some point.

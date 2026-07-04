@@ -8,27 +8,36 @@ against real Supabase data on 2026-07-03 rather than assumed.
 
 Detects:
   - Hat tricks / natural hat tricks       (pwhl_shot_events, event_type='goal')
-  - Shorthanded goals                     (pwhl_shot_events x pwhl_pbp_events penalties, v1 — see detect_shorthanded_goals for scope/limitations)
+  - Shorthanded goals                     (pwhl_shot_events.is_short_handed when present -- ground truth from gameSummary, added Session 34; falls back to the pwhl_pbp_events-penalty-window heuristic below for rows not yet merged with gameSummary -- see detect_shorthanded_goals)
   - Shutouts                               (pwhl_shot_events, goalie_id)
   - Season goal milestones                 (pwhl_shot_events tally + pwhl_player_seasons)
+  - Season/career points milestones (Session 34) (pwhl_shot_events assist1_id/assist2_id + pwhl_player_seasons.points)
   - Career win milestones (goalies)        (pwhl_goalie_seasons, summed across seasons)
 
-Known v1 gaps (confirmed against real data, not guessed):
-  - NO points-based milestones (season or career). pwhl_shot_events has
-    shooter_id but no assist columns (no secondary_player_id equivalent —
-    that lives only on pwhl_pbp_events). Without tonight's exact points
-    contribution, a NHL-style pre/post threshold-crossing check can't be
-    done correctly; approximating "tonight's points" as "tonight's goals"
-    would silently produce false negatives (missed crossings on
-    assist-heavy nights) with no way to detect that it happened. Rather
-    than ship that, points milestones are just not included in v1.
-  - Hat-trick `detail` has no assist list (same root cause as above).
+v1 gaps, resolved in Session 34:
+  - Points-based milestones were previously blocked because pwhl_shot_events
+    had shooter_id but no assist columns. Session 34 wired the gameSummary
+    endpoint into pwhl_shot_events.py, adding assist1_id/assist2_id (plus
+    is_power_play/is_short_handed/is_empty_net/is_game_winning_goal) via a
+    merge step keyed on (game_id, period_id, time_seconds, team_id,
+    shooter_id). Season/career points milestones below depend on those
+    columns being merged (NULL on un-merged rows -- run
+    `pwhl_shot_events.py --backfill-goals` for historical games predating
+    Session 34, see that module's docstring).
+  - Hat-trick `detail` now includes a per-goal `assists` list
+    (`[assist1_id, assist2_id]` for each goal, NULL entries where a goal
+    was unassisted or the row hasn't been merged with gameSummary yet --
+    see detect_hat_tricks).
   - Shorthanded goal detection WAS blocked on pwhl_shot_events.situation_code
     being hardcoded "5v5" — fixed 2026-07-04 by cross-referencing
-    pwhl_pbp_events penalty data instead (see detect_shorthanded_goals).
-    Validated against two real games (Adzija SH goal 2026-01-20, confirmed
-    via official PWHL recap + coach quote). Still has documented scope
-    limits — not a full strength-state model.
+    pwhl_pbp_events penalty data (see detect_shorthanded_goals's fallback
+    path). Validated against two real games (Adzija SH goal 2026-01-20,
+    confirmed via official PWHL recap + coach quote). Session 34 upgraded
+    this further: wherever pwhl_shot_events.is_short_handed is non-NULL
+    (i.e. the row has been merged with gameSummary), that ground-truth flag
+    is used directly instead of the heuristic, which has documented scope
+    limits (OT excluded, doesn't model a PP goal cancelling the opponent's
+    minor early, etc. -- see the heuristic's own comments below).
 
 PWHL-specific data quirks (confirmed against real data, 2026-07-03):
   - time_seconds is ELAPSED seconds within the period (0 -> 1200), matching
@@ -89,6 +98,20 @@ PERIOD_SECONDS = 1200
 # Backed by real 2025-26 season data (30 GP/team, single-season record
 # 33 pts / 16 goals — see module docstring).
 SEASON_GOAL_THRESHOLDS = [15, 20]
+
+# Verified against real pwhl_player_seasons data (query run 2026-07,
+# season_id=8 regular season): leader is 33 points (Pannek), with players
+# clustered from 20-30. Both thresholds fire against real data.
+SEASON_POINTS_THRESHOLDS = [20, 30]
+
+# Verified against real pwhl_player_seasons data (query run 2026-07,
+# summed across season_type='regular' rows): career leader is currently 69
+# points (4 seasons). Rescaled from an earlier unverified guess of
+# [75, 125], which would never have fired -- nobody has reached 75 yet.
+# 50 fires immediately for most current top players; 100 is a real future
+# milestone as careers accumulate more seasons. Revisit periodically as
+# the league's history grows.
+CAREER_POINTS_THRESHOLDS = [50, 100]
 
 # Estimate based on ~3 seasons of league history — not verified against
 # real career leaders. Flagged for review.
@@ -186,20 +209,36 @@ def _penalty_window(penalty: dict) -> tuple[int, int, int] | None:
 
 def detect_shorthanded_goals(sb, game: dict, ordered_goals: list[dict]) -> dict[tuple, bool]:
     """Returns {(period_id, time_seconds, shooter_id): is_shorthanded} for
-    every goal in ordered_goals. See module-level scope note above before
-    using this for anything beyond spot-checking."""
-    penalties = get_penalties_for_game(sb, game["game_id"])
+    every goal in ordered_goals.
+
+    Session 34: for any goal row where pwhl_shot_events.is_short_handed is
+    non-NULL (i.e. merged with gameSummary — see pwhl_shot_events.py), that
+    ground-truth flag is used directly. Only goals where is_short_handed is
+    still NULL (not yet merged — e.g. historical rows before Session 34
+    that haven't had `--backfill-goals` run against them) fall back to the
+    penalty-window heuristic below. See module-level scope note above
+    before trusting the heuristic path for anything beyond spot-checking.
+    """
+    needs_heuristic = [g for g in ordered_goals if g.get("is_short_handed") is None]
+
     penalty_windows = []
-    for p in penalties:
-        w = _penalty_window(p)
-        if w is None:
-            continue
-        period_id, start, end = w
-        penalty_windows.append((p["team_id"], period_id, start, end))
+    if needs_heuristic:
+        penalties = get_penalties_for_game(sb, game["game_id"])
+        for p in penalties:
+            w = _penalty_window(p)
+            if w is None:
+                continue
+            period_id, start, end = w
+            penalty_windows.append((p["team_id"], period_id, start, end))
 
     sh_flags = {}
     for goal in ordered_goals:
         key = (goal.get("period_id"), goal.get("time_seconds"), goal.get("shooter_id"))
+
+        if goal.get("is_short_handed") is not None:
+            sh_flags[key] = bool(goal["is_short_handed"])
+            continue
+
         elapsed = _elapsed_seconds(goal.get("period_id"), goal.get("time_seconds") or 0)
         if elapsed is None:
             sh_flags[key] = False
@@ -314,7 +353,10 @@ def get_game_by_id(sb, game_id: int) -> dict | None:
 def get_goal_rows(sb, game_id: int) -> list[dict]:
     r = (
         sb.table("pwhl_shot_events")
-        .select("game_id, team_id, shooter_id, goalie_id, period_id, time_seconds, is_home")
+        .select(
+            "game_id, team_id, shooter_id, goalie_id, period_id, time_seconds, is_home, "
+            "assist1_id, assist2_id, is_short_handed"
+        )
         .eq("game_id", game_id)
         .eq("event_type", "goal")
         .execute()
@@ -366,6 +408,15 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                             b.get("time_seconds"),
                             c.get("time_seconds"),
                         ],
+                        # [assist1_id, assist2_id] per goal, in the same
+                        # order as goal_periods/goal_time_seconds. NULL
+                        # entries mean unassisted OR not yet merged with
+                        # gameSummary (see pwhl_shot_events.py).
+                        "assists": [
+                            [a.get("assist1_id"), a.get("assist2_id")],
+                            [b.get("assist1_id"), b.get("assist2_id")],
+                            [c.get("assist1_id"), c.get("assist2_id")],
+                        ],
                     },
                     "is_pwhl": True,
                     "event_key": "",
@@ -385,7 +436,12 @@ def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
                 "opponent": _team_abbr(opponent_of(team_id)),
                 "milestone_type": "hat_trick",
                 "description": f"Hat trick — player #{sid} ({_team_abbr(team_id)})",
-                "detail": {"goal_count": len(rows)},
+                "detail": {
+                    "goal_count": len(rows),
+                    # Per-goal [assist1_id, assist2_id], one entry per goal
+                    # in `rows`, same NULL convention as natural_hat_trick above.
+                    "assists": [[r.get("assist1_id"), r.get("assist2_id")] for r in rows],
+                },
                 "is_pwhl": True,
                 "event_key": "",
             }
@@ -584,6 +640,136 @@ def detect_season_goal_milestones(sb, game: dict, ordered_goals: list[dict]) -> 
 
 
 # ---------------------------------------------------------------------------
+# Season/career points milestones (Session 34 — depends on assist1_id/
+# assist2_id being merged from gameSummary; see pwhl_shot_events.py)
+# ---------------------------------------------------------------------------
+
+
+def get_tonight_points(ordered_goals: list[dict]) -> dict[int, int]:
+    """Tally each player's point contributions (goals + assists) from this
+    game's goal rows. Requires assist1_id/assist2_id to be populated
+    (gameSummary-merged) -- goals on un-merged rows still count as 1 point
+    each via shooter_id, but assists on those rows are silently absent
+    (assist1_id/assist2_id NULL), same underweighting risk the module
+    docstring previously flagged for the pre-Session-34 gap. Not fixable
+    here; run pwhl_shot_events.py --backfill-goals for old games before
+    trusting these for historical dates."""
+    tonight: dict[int, int] = {}
+    for g in ordered_goals:
+        sid = g.get("shooter_id")
+        if sid is not None:
+            tonight[sid] = tonight.get(sid, 0) + 1
+        for assist_fld in ("assist1_id", "assist2_id"):
+            aid = g.get(assist_fld)
+            if aid is not None:
+                tonight[aid] = tonight.get(aid, 0) + 1
+    return tonight
+
+
+def detect_season_points_milestones(sb, game: dict, ordered_goals: list[dict]) -> list[dict]:
+    milestones = []
+    tonight_points = get_tonight_points(ordered_goals)
+    if not tonight_points:
+        return milestones
+
+    r = (
+        sb.table("pwhl_player_seasons")
+        .select("player_id, team_id, points")
+        .in_("player_id", list(tonight_points))
+        .eq("season_id", game["season_id"])
+        .eq("season_type", game["season_type"])
+        .execute()
+    )
+    season_rows = {row["player_id"]: row for row in r.data or []}
+
+    for pid, tonight in tonight_points.items():
+        season_row = season_rows.get(pid)
+        if not season_row:
+            continue
+        team_id = season_row["team_id"]
+        season_points = season_row.get("points") or 0
+        pre_game_points = season_points - tonight
+
+        for threshold in SEASON_POINTS_THRESHOLDS:
+            if pre_game_points < threshold <= season_points:
+                milestones.append(
+                    {
+                        "game_id": game["game_id"],
+                        "season": game["season_id"],
+                        "game_date": game["game_date"],
+                        "player_id": pid,
+                        "team": _team_abbr(team_id),
+                        "opponent": None,
+                        "milestone_type": f"season_points_{threshold}",
+                        "description": f"Player #{pid} reaches {threshold} points this season",
+                        "detail": {"season_points": season_points},
+                        "is_pwhl": True,
+                        "event_key": "",
+                    }
+                )
+
+    return milestones
+
+
+def get_career_points(sb, player_id: int) -> int:
+    """Same pattern as get_career_wins: PWHL launched Jan 2024, so summing
+    every historical season_type='regular' row for this player IS true
+    career points -- no external API needed (see module docstring)."""
+    r = (
+        sb.table("pwhl_player_seasons")
+        .select("points")
+        .eq("player_id", player_id)
+        .eq("season_type", REGULAR_SEASON_TYPE)
+        .execute()
+    )
+    return sum(row.get("points") or 0 for row in (r.data or []))
+
+
+def detect_career_points_milestones(sb, game: dict, ordered_goals: list[dict]) -> list[dict]:
+    milestones = []
+    tonight_points = get_tonight_points(ordered_goals)
+    if not tonight_points:
+        return milestones
+
+    r = (
+        sb.table("pwhl_player_seasons")
+        .select("player_id, team_id")
+        .in_("player_id", list(tonight_points))
+        .eq("season_id", game["season_id"])
+        .eq("season_type", game["season_type"])
+        .execute()
+    )
+    team_by_player = {row["player_id"]: row["team_id"] for row in r.data or []}
+
+    for pid, tonight in tonight_points.items():
+        career_points = get_career_points(sb, pid)
+        if not career_points:
+            continue
+        pre_game_points = career_points - tonight
+        team_id = team_by_player.get(pid)
+
+        for threshold in CAREER_POINTS_THRESHOLDS:
+            if pre_game_points < threshold <= career_points:
+                milestones.append(
+                    {
+                        "game_id": game["game_id"],
+                        "season": game["season_id"],
+                        "game_date": game["game_date"],
+                        "player_id": pid,
+                        "team": _team_abbr(team_id) if team_id else None,
+                        "opponent": None,
+                        "milestone_type": f"career_points_{threshold}",
+                        "description": f"Player #{pid} reaches {threshold} career points",
+                        "detail": {"career_points": career_points},
+                        "is_pwhl": True,
+                        "event_key": "",
+                    }
+                )
+
+    return milestones
+
+
+# ---------------------------------------------------------------------------
 # Main run
 # ---------------------------------------------------------------------------
 
@@ -601,6 +787,12 @@ def build_description(milestone_type: str, name: str, team: str | None) -> str:
     if milestone_type.startswith("season_goals_"):
         n = milestone_type.rsplit("_", 1)[-1]
         return f"{name} reaches {n} goals this season"
+    if milestone_type.startswith("season_points_"):
+        n = milestone_type.rsplit("_", 1)[-1]
+        return f"{name} reaches {n} points this season"
+    if milestone_type.startswith("career_points_"):
+        n = milestone_type.rsplit("_", 1)[-1]
+        return f"{name} reaches {n} career points"
     if milestone_type.startswith("career_wins_"):
         n = milestone_type.rsplit("_", 1)[-1]
         return f"{name} reaches {n} career wins"
@@ -652,6 +844,8 @@ def run_for_games(sb, games: list[dict]):
 
         all_milestones.extend(detect_hat_tricks(game, ordered_goals))
         all_milestones.extend(detect_season_goal_milestones(sb, game, ordered_goals))
+        all_milestones.extend(detect_season_points_milestones(sb, game, ordered_goals))
+        all_milestones.extend(detect_career_points_milestones(sb, game, ordered_goals))
         all_milestones.extend(build_shorthanded_goal_milestones(sb, game, ordered_goals))
 
         appearances = get_goalie_appearances(sb, game)
