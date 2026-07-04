@@ -1,0 +1,623 @@
+{
+  "teamName": null,
+  "teamLogo": "https://lscluster.hockeytech.com/download.php?file_path=img/logos/0_10.jpg&liaf=1&client_code=pwhl",
+  "seasonName": "2026-27 Pre-Season",
+  "divisionName": "",
+  "roster": [
+    {
+      "sections": [
+        {
+          "title": "Forwards",
+          "headers": {
+            "tp_jersey_number": {
+              "properties": {
+                "key": "tp_jersey_number",
+                "hidden": false,
+                "class": "",
+                "label": "#",
+                "title": "Jersey Number",
+                "sortable": true,
+                "align": "right",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "name": {
+              "properties": {
+                "key": "name",
+                "hidden": false,
+                "class": "",
+                "label": "Name",
+                "title": "Name",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "position": {
+              "properties": {
+                "key": "position",
+                "hidden": false,
+                "class": "",
+                "label": "Pos",
+                "title": "Position",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "shoots": {
+              "properties": {
+                "key": "shoots",
+                "hidden": false,
+                "class": "",
+                "label": "Shoots",
+                "title": "Shoots",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "birthdate": {
+              "properties": {
+                "key": "birthdate",
+                "hidden": false,
+                "class": "",
+                "label": "DOB",
+                "title": "Birthdate",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "hometown": {
+              "properties": {
+                "key": "hometown",
+                "hidden": false,
+                "class": "",
+                "label": "Home town",
+                "title": "",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "player_id": {
+              "properties": {
+                "key": "player_id",
+                "hidden": true,
+                "class": "",
+                "label": "",
+                "title": "",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            }
+          },
+          "data": [
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "18",
+                  "seoName": "Sophie Shirley"
+                }
+              },
+              "row": {
+                "shoots": "R",
+                "hometown": "Saskatoon, SK",
+                "player_id": "18",
+                "birthdate": "1999-06-30",
+                "tp_jersey_number": "9",
+                "position": "RW",
+                "name": "Sophie Shirley"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "97",
+                  "seoName": "Liz Schepers"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Mound, MN",
+                "player_id": "97",
+                "birthdate": "1999-02-13",
+                "tp_jersey_number": "13",
+                "position": "C",
+                "name": "Liz Schepers"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "256",
+                  "seoName": "Olivia Mobley"
+                }
+              },
+              "row": {
+                "shoots": "R",
+                "hometown": "St. Louis Park, MN",
+                "player_id": "256",
+                "birthdate": "2001-10-28",
+                "tp_jersey_number": "15",
+                "position": "RW",
+                "name": "Olivia Mobley"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "217",
+                  "seoName": "Taylor House"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Joliet, IL",
+                "player_id": "217",
+                "birthdate": "1998-09-29",
+                "tp_jersey_number": "22",
+                "position": "F",
+                "name": "Taylor House"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "212",
+                  "seoName": "Laura Kluge"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Berlin, GER",
+                "player_id": "212",
+                "birthdate": "1996-11-06",
+                "tp_jersey_number": "25",
+                "position": "LW",
+                "name": "Laura Kluge"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "243",
+                  "seoName": "Ella Huber"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Northfield, IL",
+                "player_id": "243",
+                "birthdate": "2002-12-18",
+                "tp_jersey_number": "26",
+                "position": "LW",
+                "name": "Ella Huber"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "183",
+                  "seoName": "Shay Maloney"
+                }
+              },
+              "row": {
+                "shoots": "R",
+                "hometown": "McHenry, IL",
+                "player_id": "183",
+                "birthdate": "2000-01-13",
+                "tp_jersey_number": "27",
+                "position": "RW",
+                "name": "Shay Maloney"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "8",
+                  "seoName": "Loren Gabel"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Kitchener, ON",
+                "player_id": "8",
+                "birthdate": "1997-07-24",
+                "tp_jersey_number": "36",
+                "position": "LW",
+                "name": "Loren Gabel"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "149",
+                  "seoName": "Jill Saulnier"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Halifax, NS",
+                "player_id": "149",
+                "birthdate": "1992-03-07",
+                "tp_jersey_number": "44",
+                "position": "LW",
+                "name": "Jill Saulnier"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "78",
+                  "seoName": "Susanna Tapani"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Turku, FIN",
+                "player_id": "78",
+                "birthdate": "1993-03-02",
+                "tp_jersey_number": "77",
+                "position": "C",
+                "name": "Susanna Tapani"
+              }
+            }
+          ]
+        },
+        {
+          "title": "Defenders",
+          "headers": {
+            "tp_jersey_number": {
+              "properties": {
+                "key": "tp_jersey_number",
+                "hidden": false,
+                "class": "",
+                "label": "#",
+                "title": "Jersey Number",
+                "sortable": true,
+                "align": "right",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "name": {
+              "properties": {
+                "key": "name",
+                "hidden": false,
+                "class": "",
+                "label": "Name",
+                "title": "Name",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "position": {
+              "properties": {
+                "key": "position",
+                "hidden": false,
+                "class": "",
+                "label": "Pos",
+                "title": "Position",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "shoots": {
+              "properties": {
+                "key": "shoots",
+                "hidden": false,
+                "class": "",
+                "label": "Shoots",
+                "title": "Shoots",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "birthdate": {
+              "properties": {
+                "key": "birthdate",
+                "hidden": false,
+                "class": "",
+                "label": "DOB",
+                "title": "Birthdate",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "hometown": {
+              "properties": {
+                "key": "hometown",
+                "hidden": false,
+                "class": "",
+                "label": "Home town",
+                "title": "",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "player_id": {
+              "properties": {
+                "key": "player_id",
+                "hidden": true,
+                "class": "",
+                "label": "",
+                "title": "",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            }
+          },
+          "data": [
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "12",
+                  "seoName": "Megan Keller"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Farmington, MI",
+                "player_id": "12",
+                "birthdate": "1996-05-01",
+                "tp_jersey_number": "5",
+                "position": "LD",
+                "name": "Megan Keller"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "246",
+                  "seoName": "Haley Winn"
+                }
+              },
+              "row": {
+                "shoots": "R",
+                "hometown": "Rochester, NY",
+                "player_id": "246",
+                "birthdate": "2003-07-14",
+                "tp_jersey_number": "8",
+                "position": "RD",
+                "name": "Haley Winn"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "51",
+                  "seoName": "Amanda Boulier"
+                }
+              },
+              "row": {
+                "shoots": "R",
+                "hometown": "Watertown, CT",
+                "player_id": "51",
+                "birthdate": "1993-03-30",
+                "tp_jersey_number": "44",
+                "position": "D",
+                "name": "Amanda Boulier"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "232",
+                  "seoName": "Rylind MacKinnon"
+                }
+              },
+              "row": {
+                "shoots": "L",
+                "hometown": "Cranbrook, BC",
+                "player_id": "232",
+                "birthdate": "2000-03-05",
+                "tp_jersey_number": "53",
+                "position": "LD",
+                "name": "Rylind MacKinnon"
+              }
+            }
+          ]
+        },
+        {
+          "title": "Goalies",
+          "headers": {
+            "tp_jersey_number": {
+              "properties": {
+                "key": "tp_jersey_number",
+                "hidden": false,
+                "class": "",
+                "label": "#",
+                "title": "Jersey Number",
+                "sortable": true,
+                "align": "right",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "name": {
+              "properties": {
+                "key": "name",
+                "hidden": false,
+                "class": "",
+                "label": "Name",
+                "title": "Name",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "position": {
+              "properties": {
+                "key": "position",
+                "hidden": false,
+                "class": "",
+                "label": "Pos",
+                "title": "Position",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "catches": {
+              "properties": {
+                "key": "catches",
+                "hidden": false,
+                "class": "",
+                "label": "Catches",
+                "title": "Catches",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "birthdate": {
+              "properties": {
+                "key": "birthdate",
+                "hidden": false,
+                "class": "",
+                "label": "DOB",
+                "title": "Birthdate",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "hometown": {
+              "properties": {
+                "key": "hometown",
+                "hidden": false,
+                "class": "",
+                "label": "Home town",
+                "title": "",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "player_id": {
+              "properties": {
+                "key": "player_id",
+                "hidden": true,
+                "class": "",
+                "label": "",
+                "title": "",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            }
+          },
+          "data": [
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "262",
+                  "seoName": "Amanda Thiele"
+                }
+              },
+              "row": {
+                "catches": "L",
+                "hometown": "Milford, MI",
+                "player_id": "262",
+                "birthdate": "2002-06-30",
+                "tp_jersey_number": "30",
+                "position": "G",
+                "name": "Amanda Thiele"
+              }
+            },
+            {
+              "prop": {
+                "name": {
+                  "playerLink": "6",
+                  "seoName": "Aerin Frankel"
+                }
+              },
+              "row": {
+                "catches": "L",
+                "hometown": "Chappaqua, NY",
+                "player_id": "6",
+                "birthdate": "1999-05-24",
+                "tp_jersey_number": "31",
+                "position": "G",
+                "name": "Aerin Frankel"
+              }
+            }
+          ]
+        },
+        {
+          "title": "Coaches",
+          "headers": {
+            "role": {
+              "properties": {
+                "key": "role",
+                "hidden": false,
+                "class": "",
+                "label": "Role",
+                "title": "Role",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "name": {
+              "properties": {
+                "key": "name",
+                "hidden": false,
+                "class": "",
+                "label": "Name",
+                "title": "Name",
+                "sortable": true,
+                "align": "left",
+                "highlight": false,
+                "sortKey": ""
+              }
+            },
+            "player_id": {
+              "properties": {
+                "key": "player_id",
+                "hidden": true,
+                "class": "",
+                "label": "",
+                "title": "",
+                "sortable": true,
+                "align": "center",
+                "highlight": false,
+                "sortKey": ""
+              }
+            }
+          },
+          "data": []
+        }
+      ]
+    }
+  ]
+}

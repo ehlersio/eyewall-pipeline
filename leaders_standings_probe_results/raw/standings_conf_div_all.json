@@ -1,0 +1,27 @@
+{
+  "SiteKit": {
+    "Parameters": {
+      "feed": "modulekit",
+      "key": "446521baf8c38984",
+      "client_code": "pwhl",
+      "site_id": "0",
+      "league_id": 1,
+      "lang": "en",
+      "view": "standings",
+      "season": "8",
+      "game_id": "261",
+      "conference_id": "-1",
+      "division_id": "-1",
+      "lang_id": 1,
+      "league_code": "pwhl",
+      "season_id": "10"
+    },
+    "Standings": null,
+    "Copyright": {
+      "required_copyright": "Official statistics provided by Professional Women's Hockey League",
+      "required_link": "http://leaguestat.com",
+      "powered_by": "Powered by HockeyTech.com",
+      "powered_by_url": "http://hockeytech.com"
+    }
+  }
+}

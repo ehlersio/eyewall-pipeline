@@ -1,0 +1,1329 @@
+[
+  {
+    "sections": [
+      {
+        "title": "transaction_results",
+        "headers": {
+          "transaction_date": {
+            "properties": {
+              "key": "transaction_date",
+              "hidden": false,
+              "class": "",
+              "label": "Date",
+              "title": "Transaction Date",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": ""
+            }
+          },
+          "player_name": {
+            "properties": {
+              "key": "player_name",
+              "hidden": false,
+              "class": "",
+              "label": "Player",
+              "title": "Player",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": "player_name"
+            }
+          },
+          "division": {
+            "properties": {
+              "key": "division",
+              "hidden": false,
+              "class": "",
+              "label": "Division",
+              "title": "Division",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": ""
+            }
+          },
+          "team_name": {
+            "properties": {
+              "key": "team_name",
+              "hidden": false,
+              "class": "",
+              "label": "Team",
+              "title": "Team",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": "team_name"
+            }
+          },
+          "team_city": {
+            "properties": {
+              "key": "team_city",
+              "hidden": false,
+              "class": "",
+              "label": "Team",
+              "title": "Team",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": "team_name"
+            }
+          },
+          "transaction_type": {
+            "properties": {
+              "key": "transaction_type",
+              "hidden": false,
+              "class": "",
+              "label": "",
+              "title": "Type",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": ""
+            }
+          },
+          "from": {
+            "properties": {
+              "key": "from",
+              "hidden": false,
+              "class": "",
+              "label": "From",
+              "title": "From",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": ""
+            }
+          },
+          "transaction": {
+            "properties": {
+              "key": "transaction",
+              "hidden": false,
+              "class": "",
+              "label": "Transaction",
+              "title": "Transaction",
+              "sortable": true,
+              "align": "left",
+              "highlight": false,
+              "sortKey": ""
+            }
+          }
+        },
+        "data": [
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "238",
+                "seoName": "Sanni Ahola"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-26",
+              "player_name": "Sanni Ahola (G)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "288",
+                "seoName": "Vita Poniatovskaia"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-26",
+              "player_name": "Vita Poniatovskaia (D)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "162",
+                "seoName": "Madison Bizal"
+              },
+              "team_city": {
+                "teamLink": "12"
+              },
+              "team_name": {
+                "teamLink": "12"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-26",
+              "player_name": "Madison Bizal (D)",
+              "team_city": "Las Vegas",
+              "team_name": "PWHL Las Vegas",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "306",
+                "seoName": "Darcie Lappan"
+              },
+              "team_city": {
+                "teamLink": "12"
+              },
+              "team_name": {
+                "teamLink": "12"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-26",
+              "player_name": "Darcie Lappan (F)",
+              "team_city": "Las Vegas",
+              "team_name": "PWHL Las Vegas",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "271",
+                "seoName": "Tamara Giaquinto"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Tamara Giaquinto (D)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "73",
+                "seoName": "Emma Maltais"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Emma Maltais (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "270",
+                "seoName": "Megan Warrener"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Megan Warrener (G)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "291",
+                "seoName": "Lily Delianedis"
+              },
+              "team_city": {
+                "teamLink": "8"
+              },
+              "team_name": {
+                "teamLink": "8"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Lily Delianedis (F)",
+              "team_city": "Seattle",
+              "team_name": "Seattle Torrent",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "294",
+                "seoName": "Lyndie Lobdell"
+              },
+              "team_city": {
+                "teamLink": "8"
+              },
+              "team_name": {
+                "teamLink": "8"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Lyndie Lobdell (D)",
+              "team_city": "Seattle",
+              "team_name": "Seattle Torrent",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "214",
+                "seoName": "Noemi Neubauerov\u00e1"
+              },
+              "team_city": {
+                "teamLink": "8"
+              },
+              "team_name": {
+                "teamLink": "8"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-24",
+              "player_name": "Noemi Neubauerov\u00e1 (D)",
+              "team_city": "Seattle",
+              "team_name": "Seattle Torrent",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "323",
+                "seoName": "Alice Philbert"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-23",
+              "player_name": "Alice Philbert (G)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "296",
+                "seoName": "Olivia Wallin"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-23",
+              "player_name": "Olivia Wallin (F)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "324",
+                "seoName": "Emma Nuutinen"
+              },
+              "team_city": {
+                "teamLink": "8"
+              },
+              "team_name": {
+                "teamLink": "8"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-23",
+              "player_name": "Emma Nuutinen (RW)",
+              "team_city": "Seattle",
+              "team_name": "Seattle Torrent",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "51",
+                "seoName": "Amanda Boulier"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Amanda Boulier (D)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "8",
+                "seoName": "Loren Gabel"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Loren Gabel (LW)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "217",
+                "seoName": "Taylor House"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Taylor House (F)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "243",
+                "seoName": "Ella Huber"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Ella Huber (LW)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "212",
+                "seoName": "Laura Kluge"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Laura Kluge (LW)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "232",
+                "seoName": "Rylind MacKinnon"
+              },
+              "team_city": {
+                "teamLink": "1"
+              },
+              "team_name": {
+                "teamLink": "1"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Rylind MacKinnon (LD)",
+              "team_city": "Boston",
+              "team_name": "Boston Fleet",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "263",
+                "seoName": "Peyton Anderson"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Peyton Anderson (F)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "264",
+                "seoName": "Brooke Becker"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Brooke Becker (D)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "102",
+                "seoName": "Claire Butorac"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Claire Butorac (F)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "126",
+                "seoName": "Samantha Cogan"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Samantha Cogan (F)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "37",
+                "seoName": "\u00c9lizabeth Gigu\u00e8re"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "\u00c9lizabeth Gigu\u00e8re (F)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "190",
+                "seoName": "Kl\u00e1ra Hyml\u00e1rov\u00e1"
+              },
+              "team_city": {
+                "teamLink": "2"
+              },
+              "team_name": {
+                "teamLink": "2"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Kl\u00e1ra Hyml\u00e1rov\u00e1 (F)",
+              "team_city": "Minnesota",
+              "team_name": "Minnesota Frost",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "35",
+                "seoName": "Jade Downie-Landry"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Jade Downie-Landry (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "36",
+                "seoName": "Jessie Eldridge"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Jessie Eldridge (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "39",
+                "seoName": "Alexandra Labelle"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Alexandra Labelle (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "320",
+                "seoName": "Nadia Mattivi"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Nadia Mattivi (D)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "42",
+                "seoName": "Abby Roque"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Abby Roque (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "128",
+                "seoName": "Kaitlin Willoughby"
+              },
+              "team_city": {
+                "teamLink": "3"
+              },
+              "team_name": {
+                "teamLink": "3"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Kaitlin Willoughby (F)",
+              "team_city": "Montr\u00e9al",
+              "team_name": "Montr\u00e9al Victoire",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "277",
+                "seoName": "Anna Bargman"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Anna Bargman (F)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "207",
+                "seoName": "Lauren Bernard"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Lauren Bernard (D)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "85",
+                "seoName": "Elaine Chuli"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Elaine Chuli (G)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "116",
+                "seoName": "Clair DeGeorge"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Clair DeGeorge (F)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "278",
+                "seoName": "Kaley Doyle"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Kaley Doyle (G)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "104",
+                "seoName": "Denisa K\u0159\u00ed\u017eov\u00e1"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Denisa K\u0159\u00ed\u017eov\u00e1 (F)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "251",
+                "seoName": "Dayle Ross"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Dayle Ross (D)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "282",
+                "seoName": "Callie Shanahan"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Callie Shanahan (G)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "283",
+                "seoName": "Nicole Vallario"
+              },
+              "team_city": {
+                "teamLink": "4"
+              },
+              "team_name": {
+                "teamLink": "4"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Nicole Vallario (D)",
+              "team_city": "New York",
+              "team_name": "New York Sirens",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "237",
+                "seoName": "Jenna Buglioni"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Jenna Buglioni (F)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "199",
+                "seoName": "Dara Greig"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Dara Greig (F)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "38",
+                "seoName": "Brooke Hobson"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Brooke Hobson (D)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "192",
+                "seoName": "Brooke McQuigge"
+              },
+              "team_city": {
+                "teamLink": "5"
+              },
+              "team_name": {
+                "teamLink": "5"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Brooke McQuigge (F)",
+              "team_city": "Ottawa",
+              "team_name": "Ottawa Charge",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "254",
+                "seoName": "Mia Biotti"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Mia Biotti (RD)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "129",
+                "seoName": "Mellissa Channell-Watkins"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Mellissa Channell-Watkins (D)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "13",
+                "seoName": "Hilary Knight"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Hilary Knight (F)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "219",
+                "seoName": "Stephanie Markowski"
+              },
+              "team_city": {
+                "teamLink": "10"
+              },
+              "team_name": {
+                "teamLink": "10"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Stephanie Markowski (D)",
+              "team_city": "Detroit",
+              "team_name": "PWHL Detroit",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "101",
+                "seoName": "Alexa Vasko"
+              },
+              "team_city": {
+                "teamLink": "11"
+              },
+              "team_name": {
+                "teamLink": "11"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Alexa Vasko (F)",
+              "team_city": "Hamilton",
+              "team_name": "PWHL Hamilton",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          },
+          {
+            "prop": {
+              "player_name": {
+                "playerLink": "45",
+                "seoName": "Kayla Vespa"
+              },
+              "team_city": {
+                "teamLink": "11"
+              },
+              "team_name": {
+                "teamLink": "11"
+              }
+            },
+            "row": {
+              "transaction_date": "2026-06-22",
+              "player_name": "Kayla Vespa (F)",
+              "team_city": "Hamilton",
+              "team_name": "PWHL Hamilton",
+              "division": "PWHL",
+              "transaction_type": "ADD",
+              "transaction": "Signed",
+              "from": ""
+            }
+          }
+        ]
+      },
+      {
+        "title": "num_results",
+        "headers": {},
+        "data": [
+          {
+            "prop": [],
+            "row": {
+              "num_results": 163
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

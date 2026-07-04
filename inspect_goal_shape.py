@@ -26,8 +26,10 @@ def main():
         return
 
     goal_events = [
-        e for e in events
-        if isinstance(e, dict) and e.get("event") == "shot"
+        e
+        for e in events
+        if isinstance(e, dict)
+        and e.get("event") == "shot"
         and (e.get("details") or {}).get("isGoal")
     ]
     print(f"{len(goal_events)} goal event(s) found in game {GAME_ID}\n")
