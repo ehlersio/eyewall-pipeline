@@ -44,7 +44,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(me
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-PWHL_SEASON = os.environ.get("PWHL_SEASON", "8")  # default: 2025-26 Regular
+PWHL_SEASON = os.environ.get("PWHL_SEASON") or "8"  # default: 2025-26 Regular
+# Note: `or` (not .get's default arg) so an empty-string secret — e.g. a
+# workflow referencing ${{ secrets.PWHL_SEASON }} before the secret exists —
+# still falls through to the default instead of crashing on int('').
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/"
 HOCKEYTECH_KEY = "446521baf8c38984"
