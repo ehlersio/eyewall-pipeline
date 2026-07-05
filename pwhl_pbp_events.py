@@ -31,13 +31,17 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from season_lookup import get_pwhl_season
+
 load_dotenv()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(message)s")
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-PWHL_SEASON = os.environ.get("PWHL_SEASON", "").strip() or "8"
+
+_pwhl_live = get_pwhl_season()  # live-resolved via Worker; falls back to PWHL_SEASON env var
+PWHL_SEASON = str(_pwhl_live["season_id"])
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
 HOCKEYTECH_KEY = "446521baf8c38984"
@@ -60,6 +64,10 @@ SEASON_TYPE_MAP = {
     "8": "regular",
     "9": "playoffs",
 }
+# Historical IDs stay hardcoded above; current season's type filled in
+# live so it doesn't need a manual addition every October — mirrors
+# pwhl_stats.py's SEASON_TYPE_MAP.setdefault pattern.
+SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
 
 # Event types we own — shots/goals handled by pwhl_shot_events.py
 OWNED_TYPES = {"hit", "penalty", "faceoff", "goalie_change"}
