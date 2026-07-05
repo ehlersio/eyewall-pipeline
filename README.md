@@ -21,12 +21,15 @@ Edit `.env`:
 SUPABASE_URL=https://mqgasjzywoibdgxjjkux.supabase.co
 SUPABASE_SERVICE_KEY=your_service_role_key_here
 NHL_SEASON=20252026
+PWHL_SEASON=8
 PRIMARY_TEAM_ABBR=CAR
 CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 CLOUDFLARE_API_KEY=your_cloudflare_api_key
 WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
 POLL_SECRET=your_worker_poll_secret
 ```
+
+**`NHL_SEASON`/`PWHL_SEASON` are now fallbacks, not the primary source.** Both are live-resolved from the Worker's `/config/seasons` endpoint via `season_lookup.py` — see [Live Season Resolution](#live-season-resolution) below. These env vars only matter if the Worker is unreachable when the pipeline starts.
 
 ### 3. Run the pipeline
 ```bash
@@ -101,6 +104,8 @@ Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run man
 ### `moneypuck.py`
 WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, `team_seasons.xgf_pct`. Accepts season argument.
 
+**`MP_URL` fix (2026-07):** used to hardcode `"2025"` directly in the MoneyPuck CSV URL, completely decoupled from `NHL_SEASON` — meaning a correct `NHL_SEASON` flip alone would NOT have fixed this fetch each October. Now derived as `MP_START_YEAR = int(str(NHL_SEASON)[:4])`, so there's exactly one place this needs to be right.
+
 ### `line_combinations.py`
 Forward lines and D pairs inferred from shift + shot events. Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
 
@@ -139,7 +144,31 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 
 ---
 
-## PWHL Pipeline Modules
+## Live Season Resolution
+
+Added 2026-07 (replacing a yearly manual flip across ~8 hardcoded locations in 3 repos). `season_lookup.py` is a small shared module that reads the current NHL and PWHL season from the Worker's `GET /config/seasons` endpoint (see `seasons.js` in `eyewall-poller`), which is itself resolved live from the NHL and HockeyTech APIs and cached in KV.
+
+```python
+from season_lookup import get_nhl_season, get_pwhl_season
+
+nhl_season = get_nhl_season()      # int, e.g. 20252026
+pwhl = get_pwhl_season()           # {"season_id": 8, "season_type": "regular", "start_year": 2025}
+```
+
+**`db.py`** and **`pwhl_stats.py`** both call these at import time — `NHL_SEASON` and `PWHL_SEASON` are now the *live-resolved* values, with the `.env` values above used only as a fallback if the Worker is unreachable. `pwhl_salaries.py`'s `SEASON_LABEL` (e.g. `"2025-26"`) and `moneypuck.py`'s `MP_URL` year are both derived the same way, closing two separate bugs where those values used to be hardcoded independently of `NHL_SEASON`/`PWHL_SEASON` and could silently drift out of sync.
+
+**PWHL-specific gotcha, found the hard way (2026-07):** `get_pwhl_season()` deliberately resolves to the most recent **regular** season, not just the most recent season of any type — because almost every `pwhl.js` Worker endpoint filters `season_type=eq.regular`, and resolving to a playoffs-type season_id (which briefly shipped and broke Cypress across every PWHL view) makes those queries return nothing at all. This means `PWHL_SEASON` is *not* the right value for everything, though — see the `fetch_roster()` note below.
+
+**KV override escape hatch:** if live resolution ever misjudges the real season boundary (most likely risk window: the real Sept/Oct transition, which has never been observed), it can be forced without a redeploy:
+```bash
+wrangler kv key put --binding=CACHE "config:season:nhl:override" '"20262027"'
+wrangler kv key put --binding=CACHE "config:season:pwhl:override" '{"seasonId":9,"seasonType":"regular","startYear":2026}'
+```
+Delete the override key(s) once live resolution is confirmed correct again.
+
+---
+
+
 
 All PWHL modules use HockeyTech API (no authentication required) and write to `pwhl_*` Supabase tables.
 
@@ -156,7 +185,18 @@ Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 reg
 
 **Special teams note:** HockeyTech `view=teams&special=true` returns PP%/PK% as strings like `"23.0%"`. `_parse_pct()` converts to float (0.23).
 
-**Game date note:** HockeyTech returns `"Fri, Apr 30"` not a full ISO date. `_parse_game_date()` uses `SEASON_YEAR_MAP` to infer the year — months Sep-Dec use start year, Jan-Aug use start year + 1.
+**Game date note:** HockeyTech returns `"Fri, Apr 30"` not a full ISO date. `_parse_game_date()` uses `SEASON_YEAR_MAP` to infer the year — months Sep-Dec use start year, Jan-Aug use start year + 1. `SEASON_YEAR_MAP`/`SEASON_TYPE_MAP` are hardcoded per historical season_id, but the *current* season's entry is filled in live via `season_lookup.get_pwhl_season()` (`.setdefault()`, so it never overwrites a real historical entry) — no more manual map edit needed each October for the current season specifically. Historical IDs still need a manual entry if HockeyTech ever renumbers past seasons, which hasn't happened.
+
+**Expansion team IDs (added 2026-07):** `TEAM_ID_MAP` and `CITY_TEAM_MAP` include DET=10, HAM=11, LV=12, SJS=13, confirmed via HockeyTech's real signing data + team-filter dropdown. `find_hat_trick_candidates.py`, `get_candidate_game_info.py`, and `pwhl_milestones.py` all `import TEAM_ID_MAP` from here rather than keeping their own copy, so they picked up the new entries automatically. `pwhl_salaries.py` has its own separate `TEAM_NAME_MAP` (PWHLPA city names, not HockeyTech IDs) — updated independently, see below.
+
+**`fetch_roster()` season_id gotcha, found 2026-07:** unlike stats (which correctly want `PWHL_SEASON`, the current *regular* season), roster data for brand-new expansion teams only exists under whatever season HockeyTech has them assigned to *right now* — during the 2026-27 preseason window, that's season **10** (`2026-27 Pre-Season`), not `PWHL_SEASON` (which resolves to `8`, the 2025-26 regular season, where DET/HAM/LV/SJS didn't exist). `run()` currently passes the same `season_id` to every fetch step including `fetch_roster()`, so a normal pipeline run won't backfill a new expansion team's roster until it's called explicitly against the season where HockeyTech actually has that data:
+```python
+from pwhl_stats import fetch_roster
+fetch_roster(sb, "10")
+```
+`pwhl_players` has no season dimension at all (`on_conflict="player_id"` — one row per player, current team assignment only), so this is always safe to re-run and won't create duplicates or touch any other table. If this comes up again for a future expansion wave, worth considering whether `run()` should call `fetch_roster()` with the bootstrap's raw `current_season_id` instead of `PWHL_SEASON` by default, rather than needing a manual one-off call each time.
+
+**Timing note:** the first attempt at this backfill (2026-07-05) silently only partially succeeded — Detroit got 2 of 15 players, the other three got 0 — not from a code bug (parsing and the JSONP unwrap both checked out fine against the raw response), but because HockeyTech's own roster data for these brand-new teams was still being populated at that exact moment. Re-running the same call a bit later succeeded completely. Worth trying again before assuming a code bug if this happens with some future expansion wave.
 
 **Backfill:**
 ```bash
@@ -179,6 +219,8 @@ python pwhl_pbp_events.py --game 338  # Single game (debug)
 ```
 
 **Important:** `PWHL_SEASON` env var must be non-empty or script defaults to `"8"`. If the GH Actions secret is empty, the default applies correctly via `.strip() or "8"`.
+
+**Not yet part of live season resolution (as of 2026-07):** unlike `pwhl_stats.py`/`pwhl_salaries.py`/`db.py`, this file wasn't touched during the season-resolution rollout — it likely still reads `PWHL_SEASON` directly rather than via `season_lookup.get_pwhl_season()`. Worth checking before assuming it picks up the live-resolved season automatically.
 
 ### `pwhl_shot_events.py`
 Ingests PWHL shot coordinates from HockeyTech PBP. Writes to `pwhl_shot_events` with `x_norm`, `y_norm`, `event_type`, `shooter_id`, `team_id`, `period_id`, `time_seconds`.
@@ -219,6 +261,10 @@ python pwhl_salaries.py --pdf path/to/local.pdf  # Use local PDF (skip download)
 
 **Name alias map** (in `NAME_ALIASES` dict): Abigail→Abby Boreen, Jennifer→Jenn Gardiner, Gabrielle→Gabbie Hughes, Abigail→Abbey Levy, Kimberly→Kim Newell. Update if new mismatches appear.
 
+**`SEASON_LABEL` (fixed 2026-07):** used to be a separately hardcoded `"2025-26"` string, decoupled from `PWHL_SEASON` — same bug shape as `moneypuck.py`'s old `MP_URL`. Now derived from `season_lookup.get_pwhl_season()['start_year']` (e.g. `2025` → `"2025-26"`). This feeds the Supabase upsert's conflict key (`first_name,last_name,season`), so getting it right matters for correctness, not just cosmetics.
+
+**Expansion team cities (added 2026-07):** `TEAM_NAME_MAP` and the `_parse_text_page()` regex fallback both include Detroit=10, Hamilton=11, Las Vegas=12, San Jose=13. Two separate places in this file enumerate team names (the map and the regex), and both needed the update — easy to fix one and miss the other.
+
 **2025-26 results:** 194 rows parsed, 190 matched (97.9%). 4 unmatched (Kaley Doyle, Kristyna Kaltounkova, Kimberly Newell, Megan Warrener) — in `pwhl_salaries` with `player_id = null`.
 
 **PWHL CBA:** Average target $58,349.50/player (±10%), team ceiling ~$1.3M, increases 3%/yr through 2031.
@@ -248,8 +294,11 @@ python pwhl_news.py    # Fetch and POST to Worker
 | 6 | 2024-25 | Playoffs |
 | 8 | 2025-26 | Regular |
 | 9 | 2025-26 | Playoffs |
+| 10 | 2026-27 | Pre-Season (current as of 2026-07; `hide_in_standings: true`, no games yet) |
 
-IDs 2, 4, 7 don't exist or have no data (likely preseason/gaps in HockeyTech numbering).
+IDs 2, 4, 7 are real preseason entries in HockeyTech's own `bootstrap` response (confirmed 2026-07 — they're not missing/gapped as this table previously assumed), just hidden from standings and with little-to-no game data.
+
+**Discrepancy worth flagging, not yet resolved:** `pwhl_stats.py`'s `SEASON_TYPE_MAP` labels ID `2` as `"showcase"` (comment: "2024 Showcase, 9 games, pre-launch tournament"), but the real `bootstrap` response (confirmed 2026-07-05) names it `"2024 Preseason"` with no showcase designation. Haven't dug into which is authoritative — `SEASON_TYPE_MAP`'s comment implies specific prior research into that season, so it wasn't overwritten here without confirming. Worth checking against real 2024 game data (a genuine 9-game exhibition slate would be pretty distinguishable from a normal preseason) before changing either one.
 
 ---
 
@@ -316,7 +365,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 ### PWHL Tables
 | Table | Description |
 |-------|-------------|
-| `pwhl_players` | Player master (player_id, first_name, last_name, position, team_id) |
+| `pwhl_players` | Player master (player_id, first_name, last_name, position, team_id). **No season dimension** — `on_conflict="player_id"`, one row per player reflecting their current team assignment, not versioned historically. |
 | `pwhl_player_seasons` | Per-player per-season stats (GP, G, A, PTS, shots, PP/SH/GW goals, +/-, PIM, shot_pct) |
 | `pwhl_goalie_seasons` | Per-goalie per-season stats (GP, W, L, OTL, GAA, SV%, SO, saves, GA) |
 | `pwhl_team_seasons` | Per-team per-season stats + PP%/PK%/special teams + Corsi/Fenwick + reg_wins/non_reg_wins |
@@ -329,7 +378,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_player_scouting` | AI scouting blurbs (PWHL) |
 | `pwhl_power_rankings_narratives` | PWHL nightly power rankings + AI narrative history |
 | `pwhl_seasons` | PWHL season metadata |
-| `pwhl_teams` | PWHL team master |
+| `pwhl_teams` | PWHL team master. **`pwhl_players.team_id` has a foreign key constraint against this table** — a new team_id (e.g. an expansion team) must be seeded here first, or `fetch_roster()`'s upsert fails with a `23503` FK violation. Not automated; see `seed_expansion_teams.py` pattern from the 2026-07 expansion backfill if this comes up again. |
 | `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; WAR blocked until Oct 2026) |
 | `pwhl_skipped_games` | Games skipped per PWHL pipeline module |
 
@@ -350,18 +399,21 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 
 ## October Season Prep
 
+**Most of this is now automatic (2026-07)** — `NHL_SEASON`, `PWHL_SEASON`, `CURRENT_SEASON`/`PWHL_CURRENT_SEASON` in the frontend, the Worker's own internal season usage, and `MP_SEASON`/`SEASON_LABEL` all resolve live via `season_lookup.py`/`seasons.js`. See [Live Season Resolution](#live-season-resolution). What's left:
+
 ### NHL
-1. Update `NHL_SEASON` GH Actions secret to `20262027`
-2. Update `MP_SEASON` in `moneypuck.py`
-3. Run `python tankathon_ingest.py` for new draft year
+1. ~~Update `NHL_SEASON` GH Actions secret~~ — automatic now (fallback only, safe to leave stale)
+2. ~~Update `MP_SEASON` in `moneypuck.py`~~ — automatic now, derived from `NHL_SEASON`
+3. Run `python tankathon_ingest.py` for new draft year — still manual, unrelated to season resolution
 
 ### PWHL
-1. Update `PWHL_SEASON` GH Actions secret to new regular season ID (verify with HockeyTech)
-2. Update `SEASON_YEAR_MAP` in `pwhl_stats.py` for new season IDs
-3. Update `PWHL_CURRENT_SEASON` in frontend `pwhlConfig.js`
-4. Add expansion team IDs to `pwhlConfig.js` once HockeyTech assigns them (DET, HAM, LAS, SJS)
-5. Run `python pwhl_salaries.py` when PWHLPA publishes 2026-27 salary guide
-6. Run backfill for new season: `python pwhl_stats.py {new_season_id}`
+1. ~~Update `PWHL_SEASON` GH Actions secret~~ — automatic now (fallback only)
+2. ~~Update `SEASON_YEAR_MAP`/`SEASON_TYPE_MAP` in `pwhl_stats.py`~~ — current season's entry fills in live now; only needed if a *historical* season_id ever needs correcting
+3. ~~Update `PWHL_CURRENT_SEASON` in frontend `pwhlConfig.js`~~ — automatic now, fetched from the Worker at app boot
+4. ~~Add expansion team IDs to `pwhlConfig.js`~~ — done 2026-07 (DET=10, HAM=11, LV=12, SJS=13)
+5. Run `python pwhl_salaries.py` when PWHLPA publishes the new salary guide — still manual
+6. Run backfill for the new season: `python pwhl_stats.py {new_season_id}` — still manual (this is a real data ingest, not a config flip)
+7. **New for future expansion waves:** if HockeyTech assigns a new team_id mid-cycle again, remember the `fetch_roster()` season-mismatch gotcha above — roster data needs the literal current/preseason season_id, not `PWHL_SEASON`, and `pwhl_teams` needs the new team_id seeded before `fetch_roster()` can succeed at all (FK constraint). Also bust the Worker's KV cache for the new team+season combos *after* confirming the backfill actually succeeded, not before — busting first just repopulates the same stale/empty entry if the data isn't there yet.
 
 ---
 
@@ -383,7 +435,6 @@ True RAPM via ridge regression (alpha=2500):
 
 - **PWHL news:** CF datacenter IPs blocked by RSS sources. GH Actions runner fetches successfully. Low volume in offseason.
 - **PWHL Corsi/Fenwick:** No missed shots in HockeyTech — FF% is SOG-based proxy only.
-- **PWHL expansion teams:** DET, HAM, LAS, SJS deferred until HockeyTech assigns season IDs (October 2026).
 - **`nhl_stats.py` fragile loop:** `for game_type in [2, 3]` body references `game_type` as if a parameter — works via Python scoping but fragile. Fix before next major pipeline work.
 - **UTA missing from `team_seasons`:** Excluded from power rankings until their row appears.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
@@ -392,3 +443,6 @@ True RAPM via ridge regression (alpha=2500):
 - **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
 - **HockeyTech boolean fields:** gameSummary's `properties` booleans arrive as strings (`"true"`/`"false"`), not JSON booleans — confirmed Session 34 via `pwhl_shot_events.py`'s gameSummary merge (a naive `bool(val)` marked every goal `true` for every flag). `gameCenterPlayByPlay`'s `isPowerPlay`/`isBench` on penalty events appear to be real JSON booleans by contrast (real `False` values already observed in production, pre-Session-34). Check any new HockeyTech boolean field against real data before trusting a bare `bool()` call on it.
 - **`pwhl_milestones.py` undocumented:** This README has no section for the milestones pipeline (NHL `milestones.py` or PWHL `pwhl_milestones.py`) — pre-existing gap, not from Session 34. Worth a dedicated write-up at some point.
+- **Cache-busting order matters (learned 2026-07):** busting the Worker's KV cache *before* confirming the underlying data fix has actually landed just repopulates the same stale/empty entry on the next request. Always confirm the data is correct first (direct Supabase query, or hit the Worker endpoint with a fresh/never-cached key), then bust. This bit us twice during the expansion-team rollout — once for the season-resolution fix, once for the roster backfill.
+- **HockeyTech `bootstrap` feed type:** it's `feed=statviewfeed`, not `feed=modulekit` — the latter returns a 200 OK with no real payload (`{"SiteKit":{"Undefined":"Undefined Tab bootstrap"}}`), which silently masqueraded as a fallback-triggering failure for a while before being caught. If a URL for this endpoint looks like it's built from a written description rather than a captured real request, verify it against actual DevTools traffic before trusting it.
+- **One-off scripts in this repo:** `seed_expansion_teams.py` and `diagnose_roster_fetch.py` were one-time tools for the 2026-07 expansion backfill — safe to delete once no longer needed, not part of the regular pipeline. `test_season_lookup.py` is a real, permanent pytest suite — keep it.
