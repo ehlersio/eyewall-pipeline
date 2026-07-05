@@ -5,8 +5,15 @@ Supabase client shared across pipeline modules.
 import os
 
 from dotenv import load_dotenv
-from supabase import Client, create_client
-from supabase.lib.client_options import ClientOptions
+
+# Import ClientOptions from the package root, not from supabase.lib.client_options.
+# The submodule path resolves to a non-public base class missing a `storage`
+# attribute create_client() expects, raising AttributeError at call time (not
+# at import time). The root import resolves to SyncClientOptions, which is
+# what create_client() actually wants. Confirmed intentional (not a bug) by
+# supabase-py maintainers: https://github.com/supabase/supabase-py/issues/1306
+# — still true as of 2.31.0, don't "clean up" this import back to the submodule.
+from supabase import Client, ClientOptions, create_client
 
 from season_lookup import get_nhl_season
 

@@ -27,8 +27,11 @@ from datetime import date
 
 import requests
 from dotenv import load_dotenv
-from supabase import create_client
-from supabase.lib.client_options import ClientOptions
+
+# ClientOptions must come from the package root, not supabase.lib.client_options
+# — see db.py's import comment for why (AttributeError: 'storage', still true as
+# of 2.31.0). Don't "clean up" this import back to the submodule path.
+from supabase import ClientOptions, create_client
 
 load_dotenv()
 
