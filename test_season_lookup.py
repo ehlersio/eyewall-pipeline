@@ -17,10 +17,14 @@ import season_lookup
 @pytest.fixture(autouse=True)
 def reset_cache():
     """season_lookup caches the fetched config at module scope so a
-    pipeline run only hits the Worker once. Tests need a clean slate."""
+    pipeline run only hits the Worker once. Tests need a clean slate.
+    get_season_type() has its own separate cache (different endpoint) —
+    reset that too."""
     season_lookup._cache = None
+    season_lookup._season_types_cache = None
     yield
     season_lookup._cache = None
+    season_lookup._season_types_cache = None
 
 
 def _mock_response(json_data, ok=True, status=200):
@@ -128,3 +132,84 @@ class TestCaching:
         season_lookup.get_pwhl_season()
         season_lookup.get_nhl_season()
         assert call_count["n"] == 1
+
+
+class TestGetSeasonType:
+    """get_season_type() backs the Session 37 follow-up fix: pipeline
+    modules were silently defaulting an unrecognized season_id to
+    "regular" instead of looking up its real type. Hits a separate
+    endpoint (/config/seasons/pwhl-types) from get_pwhl_season(), with
+    its own separate process-lifetime cache."""
+
+    def test_returns_correct_type_for_a_known_id(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests,
+            "get",
+            lambda *a, **k: _mock_response({"7": "preseason", "8": "regular", "9": "playoffs"}),
+        )
+        assert season_lookup.get_season_type("7") == "preseason"
+        assert season_lookup.get_season_type("9") == "playoffs"
+
+    def test_coerces_an_int_season_id_to_string_for_lookup(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests,
+            "get",
+            lambda *a, **k: _mock_response({"8": "regular"}),
+        )
+        assert season_lookup.get_season_type(8) == "regular"
+
+    def test_returns_none_for_an_id_not_in_the_bootstrap_response(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests, "get", lambda *a, **k: _mock_response({"8": "regular"})
+        )
+        assert season_lookup.get_season_type("99") is None
+
+    def test_returns_none_when_worker_unreachable(self, monkeypatch):
+        # Unlike get_pwhl_season()/get_nhl_season(), there's no reasonable
+        # local fallback for "what type is this arbitrary season" — a
+        # network failure and an unrecognized id both mean "we don't
+        # actually know," so both return None.
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_season_type("8") is None
+
+    def test_returns_none_on_non_ok_http_status(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests,
+            "get",
+            lambda *a, **k: _mock_response({}, ok=False, status=502),
+        )
+        assert season_lookup.get_season_type("8") is None
+
+    def test_fetches_only_once_across_repeated_calls(self, monkeypatch):
+        call_count = {"n": 0}
+
+        def fake_get(*_args, **_kwargs):
+            call_count["n"] += 1
+            return _mock_response({"8": "regular", "9": "playoffs"})
+
+        monkeypatch.setattr(season_lookup.requests, "get", fake_get)
+        season_lookup.get_season_type("8")
+        season_lookup.get_season_type("9")
+        season_lookup.get_season_type("8")
+        assert call_count["n"] == 1
+
+    def test_cache_is_independent_of_get_pwhl_season_cache(self, monkeypatch):
+        """get_season_type() and get_pwhl_season() hit different Worker
+        routes and must not share a cache slot — calling one should not
+        satisfy or clobber the other."""
+        calls = []
+
+        def fake_get(url, **_kwargs):
+            calls.append(url)
+            if url.endswith("/config/seasons/pwhl-types"):
+                return _mock_response({"8": "regular"})
+            return _mock_response(
+                {"nhl": {}, "pwhl": {"seasonId": 8, "seasonType": "regular", "startYear": 2025}}
+            )
+
+        monkeypatch.setattr(season_lookup.requests, "get", fake_get)
+        season_lookup.get_pwhl_season()
+        season_lookup.get_season_type("8")
+        assert len(calls) == 2
+        assert any(u.endswith("/config/seasons") and "pwhl-types" not in u for u in calls)
+        assert any(u.endswith("/config/seasons/pwhl-types") for u in calls)

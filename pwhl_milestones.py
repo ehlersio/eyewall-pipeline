@@ -87,7 +87,8 @@ from datetime import date, datetime, timedelta
 
 from db import get_client
 from pipeline_common import get_logger
-from pwhl_stats import SEASON_TYPE_MAP, TEAM_ID_MAP
+from pwhl_stats import TEAM_ID_MAP
+from pwhl_stats import _resolve_season_type as resolve_season_type
 
 log = get_logger(__name__)
 
@@ -317,7 +318,19 @@ def get_games_for_date(sb, target_date: str) -> list[dict]:
     games = []
     for row in r.data or []:
         season_id = row["season_id"]
-        row["season_type"] = SEASON_TYPE_MAP.get(str(season_id), "regular")
+        season_type = resolve_season_type(str(season_id))
+        if season_type is None:
+            # Runs unattended (nightly, over a whole day's games) — log
+            # and drop just this one game rather than crash the whole
+            # date's detection run or silently guess "regular" (which
+            # would compare this game's stats against the wrong season's
+            # totals downstream in run_for_games).
+            log.error(
+                f"Unknown season_id {season_id} for game {row['game_id']} — "
+                "not found in HockeyTech bootstrap data, skipping this game"
+            )
+            continue
+        row["season_type"] = season_type
         games.append(row)
     return games
 
@@ -341,7 +354,16 @@ def get_game_by_id(sb, game_id: int) -> dict | None:
     if not rows:
         return None
     row = rows[0]
-    row["season_type"] = SEASON_TYPE_MAP.get(str(row["season_id"]), "regular")
+    season_type = resolve_season_type(str(row["season_id"]))
+    if season_type is None:
+        # --game is a debug/spot-check tool run by a human watching the
+        # output directly — loud failure is correct here, unlike the
+        # unattended per-date loop in get_games_for_date().
+        raise ValueError(
+            f"Unknown season_id {row['season_id']} for game {game_id} — "
+            "not found in HockeyTech bootstrap data"
+        )
+    row["season_type"] = season_type
     return row
 
 

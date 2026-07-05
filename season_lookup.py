@@ -18,6 +18,7 @@ WORKER_BASE = "https://eyewall-poller.billowing-queen-bf23.workers.dev"
 TIMEOUT_SECONDS = 10
 
 _cache = None  # populated on first call, reused for the rest of this process
+_season_types_cache: dict | None = None  # same pattern, separate endpoint — see get_season_type()
 
 
 def _fetch_config() -> dict | None:
@@ -71,3 +72,43 @@ def get_pwhl_season() -> dict:
         }
     except (KeyError, TypeError, ValueError):
         return fallback
+
+
+def _fetch_season_types() -> dict:
+    """Fetches the full PWHL season_id -> season_type map from the Worker's
+    /config/seasons/pwhl-types endpoint. Cached for the rest of this
+    process, same as _fetch_config() — a pipeline run is short-lived, so
+    "once per process" is effectively as fresh as a real TTL would be
+    here; no need to reimplement the Worker's 6hr KV TTL on this side.
+
+    Unlike _fetch_config()'s fallback-laden callers, there IS no
+    reasonable local fallback for "what type is this arbitrary season" —
+    caching {} on failure just means get_season_type() correctly returns
+    None for the rest of this run instead of retrying a Worker that's
+    already down.
+    """
+    global _season_types_cache
+    if _season_types_cache is not None:
+        return _season_types_cache
+    try:
+        r = requests.get(f"{WORKER_BASE}/config/seasons/pwhl-types", timeout=TIMEOUT_SECONDS)
+        r.raise_for_status()
+        _season_types_cache = r.json()
+    except Exception as e:
+        print(f"  WARNING: season_lookup could not reach Worker for season types ({e})")
+        _season_types_cache = {}
+    return _season_types_cache
+
+
+def get_season_type(season_id: str | int) -> str | None:
+    """Return the season_type ("regular", "playoffs", "preseason", etc.)
+    for an arbitrary PWHL season_id, per HockeyTech's own bootstrap data
+    (proxied through the Worker's /config/seasons/pwhl-types endpoint).
+
+    Returns None if season_id isn't present in that response, OR if the
+    Worker couldn't be reached at all — both cases mean "we don't
+    actually know," and callers should treat that as something to
+    surface (log + skip, or raise), not as license to guess "regular".
+    """
+    types = _fetch_season_types()
+    return types.get(str(season_id))

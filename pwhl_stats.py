@@ -36,7 +36,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from season_lookup import get_pwhl_season
+from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -117,6 +117,16 @@ SEASON_TYPE_MAP = {
 # needing a manual addition every October — see SEASON_YEAR_MAP's comment
 # for the failure mode this replaces.
 SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
+
+
+def _resolve_season_type(season_id: str) -> str | None:
+    """SEASON_TYPE_MAP first (holds a deliberate manual correction for
+    season "2" — see CLAUDE.md's "Known open items" before ever touching
+    that), then get_season_type() as a live fallback for any season_id
+    this module has no hardcoded entry for. Returns None, not a guessed
+    "regular", if neither source recognizes the id."""
+    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+
 
 # Position group → canonical position code
 SECTION_POSITION_MAP = {
@@ -747,7 +757,14 @@ def fetch_game_log(sb, season_id: str) -> None:
 
 def run(season_id: str | None = None) -> None:
     season_id = season_id or PWHL_SEASON
-    season_type = SEASON_TYPE_MAP.get(season_id, "regular")
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        # This is a whole-season, unattended-cron entry point (no --game
+        # debug mode exists here) — log loudly and skip the run rather
+        # than crash it or silently guess "regular" for a season we don't
+        # actually recognize.
+        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        return
 
     log.info(f"=== PWHL Stats pipeline — season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)

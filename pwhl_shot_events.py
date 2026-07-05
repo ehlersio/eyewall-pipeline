@@ -50,6 +50,8 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from season_lookup import get_season_type
+
 load_dotenv()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(message)s")
@@ -81,6 +83,16 @@ SEASON_TYPE_MAP = {
     "8": "regular",
     "9": "playoffs",
 }
+
+
+def _resolve_season_type(season_id: str) -> str | None:
+    """SEASON_TYPE_MAP first (holds a deliberate manual correction for
+    season "2" — see CLAUDE.md's "Known open items" before ever touching
+    that), then get_season_type() as a live fallback for any season_id
+    this module has no hardcoded entry for. Returns None, not a guessed
+    "regular", if neither source recognizes the id."""
+    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+
 
 # Coordinate transform constants
 # Observed raw ranges from game 213: xLocation 63-537, yLocation 13-290
@@ -549,9 +561,15 @@ def ingest_game(sb, gid: int, home_id: int, season_id: str, season_type: str) ->
 
 def run(season_id: str | None = None) -> None:
     season_id = season_id or PWHL_SEASON
-    season_type = SEASON_TYPE_MAP.get(season_id, "regular")
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        # Sweep mode processes many games in one unattended run — log
+        # loudly and bail out of the whole run rather than crash it or
+        # silently guess "regular" for a season we don't recognize.
+        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        return
 
-    log.info(f"=== PWHL Shot Events -- season {season_id} ===")
+    log.info(f"=== PWHL Shot Events -- season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     completed = get_completed_games(sb, season_id)
@@ -597,7 +615,15 @@ def run_single_game(game_id: int) -> None:
     row = result.data[0]
     home_id = row["home_team_id"] or 0
     season_id = str(row["season_id"])
-    season_type = SEASON_TYPE_MAP.get(season_id, "regular")
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        # --game is a debug/spot-check tool run by a human watching the
+        # output directly — loud failure (not a silent "regular" guess)
+        # is correct here, unlike the unattended sweep path in run().
+        raise ValueError(
+            f"Unknown season_id {season_id} for game {game_id} — "
+            "not found in HockeyTech bootstrap data"
+        )
 
     log.info(f"=== PWHL Shot Events -- single game {game_id} (season {season_id}) ===")
     ingest_game(sb, game_id, home_id, season_id, season_type)

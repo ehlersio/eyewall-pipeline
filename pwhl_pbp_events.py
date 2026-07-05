@@ -31,7 +31,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from season_lookup import get_pwhl_season
+from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -68,6 +68,19 @@ SEASON_TYPE_MAP = {
 # live so it doesn't need a manual addition every October — mirrors
 # pwhl_stats.py's SEASON_TYPE_MAP.setdefault pattern.
 SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
+
+
+def _resolve_season_type(season_id: str) -> str | None:
+    """SEASON_TYPE_MAP first — it holds deliberate manual corrections
+    (e.g. season "2" is hardcoded "showcase" even though HockeyTech's own
+    bootstrap calls it "2024 Preseason"; see CLAUDE.md's "Known open
+    items" before ever changing that) — then get_season_type() as a live
+    fallback for any id (new preseason/playoff seasons, etc.) this module
+    doesn't have a hardcoded entry for. Returns None, not a guessed
+    "regular", if neither source recognizes the id — callers must decide
+    what to do with that (see run()'s two call sites)."""
+    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+
 
 # Event types we own — shots/goals handled by pwhl_shot_events.py
 OWNED_TYPES = {"hit", "penalty", "faceoff", "goalie_change"}
@@ -513,15 +526,23 @@ def ingest_game(
 
 def run(season_id: str | None = None, force: bool = False, single_game: int | None = None) -> None:
     season_id = (season_id or "").strip() or PWHL_SEASON
-    season_type = SEASON_TYPE_MAP.get(season_id, "regular")
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        # Sweep mode processes many games in one unattended run (nightly
+        # cron) — log loudly and bail out of the whole run rather than
+        # crash it, so one bad/future season_id doesn't take down a
+        # scheduled job. mark_skipped isn't used here because this fails
+        # before any game is even selected.
+        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        return
 
-    log.info(f"=== PWHL PBP Events -- season {season_id} ===")
+    log.info(f"=== PWHL PBP Events -- season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     if single_game is not None:
         result = (
             sb.table("pwhl_game_log")
-            .select("home_team_id")
+            .select("home_team_id,away_team_id,season_id")
             .eq("game_id", single_game)
             .limit(1)
             .execute()
@@ -529,9 +550,26 @@ def run(season_id: str | None = None, force: bool = False, single_game: int | No
         if not result.data:
             log.error(f"game_id {single_game} not found in pwhl_game_log")
             return
-        home_id = result.data[0]["home_team_id"] or 0
-        log.info(f"Single-game mode: game {single_game}")
-        ingest_game(sb, single_game, home_id, season_id, season_type)
+        row = result.data[0]
+        home_id = row["home_team_id"] or 0
+        away_id = row["away_team_id"] or None
+        # Use the game's OWN season, not the sweep-level season_id/season_type
+        # resolved above — those come from get_pwhl_season(), which deliberately
+        # prefers the most recent REGULAR season and would mislabel a preseason
+        # or playoff game_id passed via --game. See
+        # test_pwhl_pbp_events_season.py for the regression this guards against.
+        game_season_id = str(row["season_id"]) if row.get("season_id") else season_id
+        game_season_type = _resolve_season_type(game_season_id)
+        if game_season_type is None:
+            # --game is a debug/spot-check tool run by a human watching the
+            # output directly — loud failure (not a silent "regular" guess)
+            # is correct here, unlike the unattended sweep path above.
+            raise ValueError(
+                f"Unknown season_id {game_season_id} for game {single_game} — "
+                "not found in HockeyTech bootstrap data"
+            )
+        log.info(f"Single-game mode: game {single_game} (season {game_season_id})")
+        ingest_game(sb, single_game, home_id, game_season_id, game_season_type, away_id)
         return
 
     completed = get_completed_games(sb, season_id)
