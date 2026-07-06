@@ -763,7 +763,9 @@ def run(season_id: str | None = None) -> None:
         # debug mode exists here) — log loudly and skip the run rather
         # than crash it or silently guess "regular" for a season we don't
         # actually recognize.
-        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run"
+        )
         return
 
     log.info(f"=== PWHL Stats pipeline — season {season_id} ({season_type}) ===")

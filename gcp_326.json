@@ -1,0 +1,1099 @@
+{
+  "homeTeam": {
+    "teamInfo": {
+      "id": 8,
+      "name": "Seattle Torrent",
+      "city": "Seattle",
+      "nickname": "Torrent",
+      "abbreviation": "SEA",
+      "logo": "https://assets.leaguestat.com/pwhl/logos/8.png",
+      "divisionName": "PWHL",
+      "conferenceName": "PWHL"
+    },
+    "teamRecord": {
+      "overall": {
+        "wins": 9,
+        "losses": 16,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 2,
+        "SOLosses": 2,
+        "formattedRecord": "9-16-2-2"
+      },
+      "home": {
+        "wins": 7,
+        "losses": 5,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 1,
+        "formattedRecord": "7-5-1-1"
+      },
+      "visiting": {
+        "wins": 2,
+        "losses": 11,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 1,
+        "formattedRecord": "2-11-1-1"
+      },
+      "past_10_games": {
+        "wins": 3,
+        "losses": 5,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 1,
+        "formattedRecord": "3-5-1-1"
+      },
+      "streak": "1-0-0-0"
+    },
+    "goalsFor": 57,
+    "goalsAgainst": 88,
+    "miscellaneousRecords": {
+      "leading_after_1st": "0-0-0-0",
+      "leading_after_2nd": "0-0-0-0",
+      "tied_after_1st": "0-0-0-0",
+      "tied_after_2nd": "0-0-0-0",
+      "trailing_after_1st": "0-0-0-0",
+      "trailing_after_2nd": "0-0-0-0",
+      "out_shooting_opponents": "0-0-0-0",
+      "out_shot_by_opponent": "0-0-0-0",
+      "one_goal_game": "0-0-0-0",
+      "two_goal_game": "0-0-0-0",
+      "three_goal_game": "0-0-0-0",
+      "four_goal_game": "0-0-0-0",
+      "five_goal_game": "0-0-0-0",
+      "six_goal_game": "0-0-0-0",
+      "sevenplus_goal_game": "0-0-0-0",
+      "as_of_game": "9-16-1-2"
+    },
+    "leadingRookie": {
+      "info": {
+        "id": 294,
+        "firstName": "Lyndie",
+        "lastName": "Lobdell",
+        "jerseyNumber": 24,
+        "position": null,
+        "birthDate": "",
+        "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/294.jpg"
+      },
+      "stats": {
+        "goals": 0,
+        "assists": 4,
+        "points": 4,
+        "penaltyMinutes": 6,
+        "plusMinus": 0,
+        "faceoffAttempts": 0,
+        "faceoffWins": 0,
+        "shots": 0,
+        "hits": 0,
+        "blockedShots": 0,
+        "toi": null
+      },
+      "starting": 0,
+      "status": null
+    },
+    "leadingPIM": {
+      "info": {
+        "id": 203,
+        "firstName": "Anna",
+        "lastName": "Wilgren",
+        "jerseyNumber": 5,
+        "position": null,
+        "birthDate": "",
+        "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/203.jpg"
+      },
+      "stats": {
+        "goals": 3,
+        "assists": 7,
+        "points": 10,
+        "penaltyMinutes": 26,
+        "plusMinus": 0,
+        "faceoffAttempts": 0,
+        "faceoffWins": 0,
+        "shots": 0,
+        "hits": 0,
+        "blockedShots": 0,
+        "toi": null
+      },
+      "starting": 0,
+      "status": null
+    },
+    "powerPlayStats": {
+      "overall": {
+        "power_plays": 79,
+        "power_player_goals": 0,
+        "power_play_goals": 9,
+        "percentage": 11.39
+      },
+      "home": {
+        "power_plays": 42,
+        "power_player_goals": 0,
+        "power_play_goals": 5,
+        "percentage": 11.9
+      },
+      "visiting": {
+        "power_plays": 37,
+        "power_player_goals": 0,
+        "power_play_goals": 4,
+        "percentage": 10.81
+      }
+    },
+    "penaltyKillStats": {
+      "overall": {
+        "times_short_handed": 81,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 13,
+        "percentage": 83.95
+      },
+      "home": {
+        "times_short_handed": 36,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 5,
+        "percentage": 86.11
+      },
+      "visiting": {
+        "times_short_handed": 45,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 8,
+        "percentage": 82.22
+      }
+    },
+    "gamesPlayed": 29,
+    "penaltyMinutes": 185,
+    "penaltyMinutesPerGame": 6,
+    "longestStreaks": {
+      "points": [
+        {
+          "player": {
+            "id": 36,
+            "firstName": "Jessie",
+            "lastName": "Eldridge",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/36.jpg"
+          },
+          "streak": "points",
+          "length": 8
+        },
+        {
+          "player": {
+            "id": 210,
+            "firstName": "Julia",
+            "lastName": "Gosling",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/210.jpg"
+          },
+          "streak": "points",
+          "length": 4
+        },
+        {
+          "player": {
+            "id": 34,
+            "firstName": "Alex",
+            "lastName": "Carpenter",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/34.jpg"
+          },
+          "streak": "points",
+          "length": 4
+        }
+      ],
+      "goals": [
+        {
+          "player": {
+            "id": 36,
+            "firstName": "Jessie",
+            "lastName": "Eldridge",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/36.jpg"
+          },
+          "streak": "goals",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 34,
+            "firstName": "Alex",
+            "lastName": "Carpenter",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/34.jpg"
+          },
+          "streak": "goals",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 34,
+            "firstName": "Alex",
+            "lastName": "Carpenter",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/34.jpg"
+          },
+          "streak": "goals",
+          "length": 2
+        }
+      ],
+      "assists": [
+        {
+          "player": {
+            "id": 181,
+            "firstName": "Hannah",
+            "lastName": "Bilka",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/181.jpg"
+          },
+          "streak": "assists",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 210,
+            "firstName": "Julia",
+            "lastName": "Gosling",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/210.jpg"
+          },
+          "streak": "assists",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 13,
+            "firstName": "Hilary",
+            "lastName": "Knight",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/13.jpg"
+          },
+          "streak": "assists",
+          "length": 3
+        }
+      ]
+    },
+    "previousGames": [
+      {
+        "id": "325",
+        "date_played": "2026-04-22",
+        "game_date_iso_8601": "2026-04-22T22:00:00-04:00",
+        "home_team": "8",
+        "homeCode": "SEA",
+        "homeCity": "Seattle",
+        "home_goal_count": "5",
+        "visiting_team": "2",
+        "visitingCode": "MIN",
+        "visitingCity": "Minnesota",
+        "visiting_goal_count": "4",
+        "winner": "8"
+      },
+      {
+        "id": "320",
+        "date_played": "2026-04-18",
+        "game_date_iso_8601": "2026-04-18T17:00:00-04:00",
+        "home_team": "8",
+        "homeCode": "SEA",
+        "homeCity": "Seattle",
+        "home_goal_count": "5",
+        "visiting_team": "9",
+        "visitingCode": "VAN",
+        "visitingCity": "Vancouver",
+        "visiting_goal_count": "6",
+        "winner": "9"
+      },
+      {
+        "id": "315",
+        "date_played": "2026-04-14",
+        "game_date_iso_8601": "2026-04-14T22:00:00-04:00",
+        "home_team": "9",
+        "homeCode": "VAN",
+        "homeCity": "Vancouver",
+        "home_goal_count": "4",
+        "visiting_team": "8",
+        "visitingCode": "SEA",
+        "visitingCity": "Seattle",
+        "visiting_goal_count": "1",
+        "winner": "9"
+      },
+      {
+        "id": "311",
+        "date_played": "2026-04-08",
+        "game_date_iso_8601": "2026-04-08T19:00:00-04:00",
+        "home_team": "5",
+        "homeCode": "OTT",
+        "homeCity": "Ottawa",
+        "home_goal_count": "3",
+        "visiting_team": "8",
+        "visitingCode": "SEA",
+        "visitingCity": "Seattle",
+        "visiting_goal_count": "5",
+        "winner": "8"
+      },
+      {
+        "id": "309",
+        "date_played": "2026-04-07",
+        "game_date_iso_8601": "2026-04-07T19:00:00-04:00",
+        "home_team": "3",
+        "homeCode": "MTL",
+        "homeCity": "Montr\u00e9al",
+        "home_goal_count": "4",
+        "visiting_team": "8",
+        "visitingCode": "SEA",
+        "visitingCity": "Seattle",
+        "visiting_goal_count": "1",
+        "winner": "3"
+      }
+    ],
+    "leadingScorers": [
+      {
+        "info": {
+          "id": 210,
+          "firstName": "Julia",
+          "lastName": "Gosling",
+          "jerseyNumber": 88,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/210.jpg"
+        },
+        "stats": {
+          "goals": 6,
+          "assists": 14,
+          "points": 20,
+          "penaltyMinutes": 10,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 34,
+          "firstName": "Alex",
+          "lastName": "Carpenter",
+          "jerseyNumber": 25,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/34.jpg"
+        },
+        "stats": {
+          "goals": 12,
+          "assists": 8,
+          "points": 20,
+          "penaltyMinutes": 2,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 224,
+          "firstName": "Danielle",
+          "lastName": "Serdachny",
+          "jerseyNumber": 92,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/224.jpg"
+        },
+        "stats": {
+          "goals": 7,
+          "assists": 9,
+          "points": 16,
+          "penaltyMinutes": 8,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 17,
+          "firstName": "Theresa",
+          "lastName": "Schafzahl",
+          "jerseyNumber": 37,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/17.jpg"
+        },
+        "stats": {
+          "goals": 4,
+          "assists": 11,
+          "points": 15,
+          "penaltyMinutes": 0,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 203,
+          "firstName": "Anna",
+          "lastName": "Wilgren",
+          "jerseyNumber": 5,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/203.jpg"
+        },
+        "stats": {
+          "goals": 3,
+          "assists": 7,
+          "points": 10,
+          "penaltyMinutes": 26,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      }
+    ],
+    "lineup": {
+      "goalies": [],
+      "skaters": []
+    }
+  },
+  "visitingTeam": {
+    "teamInfo": {
+      "id": 3,
+      "name": "Montr\u00e9al Victoire",
+      "city": "Montr\u00e9al",
+      "nickname": "Victoire",
+      "abbreviation": "MTL",
+      "logo": "https://assets.leaguestat.com/pwhl/logos/3.png",
+      "divisionName": "PWHL",
+      "conferenceName": "PWHL"
+    },
+    "teamRecord": {
+      "overall": {
+        "wins": 21,
+        "losses": 6,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 2,
+        "SOLosses": 0,
+        "formattedRecord": "21-6-2-0"
+      },
+      "home": {
+        "wins": 13,
+        "losses": 1,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 0,
+        "formattedRecord": "13-1-1-0"
+      },
+      "visiting": {
+        "wins": 8,
+        "losses": 5,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 0,
+        "formattedRecord": "8-5-1-0"
+      },
+      "past_10_games": {
+        "wins": 8,
+        "losses": 1,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 1,
+        "SOLosses": 0,
+        "formattedRecord": "8-1-1-0"
+      },
+      "streak": "0-1-0-0"
+    },
+    "goalsFor": 74,
+    "goalsAgainst": 40,
+    "miscellaneousRecords": {
+      "leading_after_1st": "0-0-0-0",
+      "leading_after_2nd": "0-0-0-0",
+      "tied_after_1st": "0-0-0-0",
+      "tied_after_2nd": "0-0-0-0",
+      "trailing_after_1st": "0-0-0-0",
+      "trailing_after_2nd": "0-0-0-0",
+      "out_shooting_opponents": "0-0-0-0",
+      "out_shot_by_opponent": "0-0-0-0",
+      "one_goal_game": "0-0-0-0",
+      "two_goal_game": "0-0-0-0",
+      "three_goal_game": "0-0-0-0",
+      "four_goal_game": "0-0-0-0",
+      "five_goal_game": "0-0-0-0",
+      "six_goal_game": "0-0-0-0",
+      "sevenplus_goal_game": "0-0-0-0",
+      "as_of_game": "21-6-1-0"
+    },
+    "leadingRookie": {
+      "info": {
+        "id": 253,
+        "firstName": "Nicole",
+        "lastName": "Gosling",
+        "jerseyNumber": 61,
+        "position": null,
+        "birthDate": "",
+        "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/253.jpg"
+      },
+      "stats": {
+        "goals": 3,
+        "assists": 16,
+        "points": 19,
+        "penaltyMinutes": 10,
+        "plusMinus": 0,
+        "faceoffAttempts": 0,
+        "faceoffWins": 0,
+        "shots": 0,
+        "hits": 0,
+        "blockedShots": 0,
+        "toi": null
+      },
+      "starting": 0,
+      "status": null
+    },
+    "leadingPIM": {
+      "info": {
+        "id": 79,
+        "firstName": "Maggie",
+        "lastName": "Flaherty",
+        "jerseyNumber": 91,
+        "position": null,
+        "birthDate": "",
+        "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/79.jpg"
+      },
+      "stats": {
+        "goals": 4,
+        "assists": 5,
+        "points": 9,
+        "penaltyMinutes": 33,
+        "plusMinus": 0,
+        "faceoffAttempts": 0,
+        "faceoffWins": 0,
+        "shots": 0,
+        "hits": 0,
+        "blockedShots": 0,
+        "toi": null
+      },
+      "starting": 0,
+      "status": null
+    },
+    "powerPlayStats": {
+      "overall": {
+        "power_plays": 77,
+        "power_player_goals": 0,
+        "power_play_goals": 15,
+        "percentage": 19.48
+      },
+      "home": {
+        "power_plays": 44,
+        "power_player_goals": 0,
+        "power_play_goals": 10,
+        "percentage": 22.73
+      },
+      "visiting": {
+        "power_plays": 33,
+        "power_player_goals": 0,
+        "power_play_goals": 5,
+        "percentage": 15.15
+      }
+    },
+    "penaltyKillStats": {
+      "overall": {
+        "times_short_handed": 81,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 6,
+        "percentage": 92.59
+      },
+      "home": {
+        "times_short_handed": 43,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 1,
+        "percentage": 97.67
+      },
+      "visiting": {
+        "times_short_handed": 38,
+        "power_player_goals_against": 0,
+        "power_play_goals_against": 5,
+        "percentage": 86.84
+      }
+    },
+    "gamesPlayed": 29,
+    "penaltyMinutes": 228,
+    "penaltyMinutesPerGame": 7,
+    "longestStreaks": {
+      "points": [
+        {
+          "player": {
+            "id": 31,
+            "firstName": "Marie-Philip",
+            "lastName": "Poulin",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/31.jpg"
+          },
+          "streak": "points",
+          "length": 9
+        },
+        {
+          "player": {
+            "id": 42,
+            "firstName": "Abby",
+            "lastName": "Roque",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/42.jpg"
+          },
+          "streak": "points",
+          "length": 7
+        },
+        {
+          "player": {
+            "id": 32,
+            "firstName": "Laura",
+            "lastName": "Stacey",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/32.jpg"
+          },
+          "streak": "points",
+          "length": 7
+        }
+      ],
+      "goals": [
+        {
+          "player": {
+            "id": 31,
+            "firstName": "Marie-Philip",
+            "lastName": "Poulin",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/31.jpg"
+          },
+          "streak": "goals",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 157,
+            "firstName": "Catherine",
+            "lastName": "Dubois",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/157.jpg"
+          },
+          "streak": "goals",
+          "length": 3
+        },
+        {
+          "player": {
+            "id": 98,
+            "firstName": "Maureen",
+            "lastName": "Murphy",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/98.jpg"
+          },
+          "streak": "goals",
+          "length": 3
+        }
+      ],
+      "assists": [
+        {
+          "player": {
+            "id": 31,
+            "firstName": "Marie-Philip",
+            "lastName": "Poulin",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/31.jpg"
+          },
+          "streak": "assists",
+          "length": 5
+        },
+        {
+          "player": {
+            "id": 42,
+            "firstName": "Abby",
+            "lastName": "Roque",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/42.jpg"
+          },
+          "streak": "assists",
+          "length": 5
+        },
+        {
+          "player": {
+            "id": 253,
+            "firstName": "Nicole",
+            "lastName": "Gosling",
+            "jerseyNumber": 0,
+            "position": null,
+            "birthDate": "",
+            "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/253.jpg"
+          },
+          "streak": "assists",
+          "length": 3
+        }
+      ]
+    },
+    "previousGames": [
+      {
+        "id": "323",
+        "date_played": "2026-04-21",
+        "game_date_iso_8601": "2026-04-21T22:00:00-04:00",
+        "home_team": "9",
+        "homeCode": "VAN",
+        "homeCity": "Vancouver",
+        "home_goal_count": "4",
+        "visiting_team": "3",
+        "visitingCode": "MTL",
+        "visitingCity": "Montr\u00e9al",
+        "visiting_goal_count": "3",
+        "winner": "9"
+      },
+      {
+        "id": "318",
+        "date_played": "2026-04-17",
+        "game_date_iso_8601": "2026-04-17T19:00:00-04:00",
+        "home_team": "3",
+        "homeCode": "MTL",
+        "homeCity": "Montr\u00e9al",
+        "home_goal_count": "3",
+        "visiting_team": "1",
+        "visitingCode": "BOS",
+        "visitingCity": "Boston",
+        "visiting_goal_count": "2",
+        "winner": "3"
+      },
+      {
+        "id": "314",
+        "date_played": "2026-04-11",
+        "game_date_iso_8601": "2026-04-11T19:00:00-04:00",
+        "home_team": "1",
+        "homeCode": "BOS",
+        "homeCity": "Boston",
+        "home_goal_count": "0",
+        "visiting_team": "3",
+        "visitingCode": "MTL",
+        "visitingCity": "Montr\u00e9al",
+        "visiting_goal_count": "1",
+        "winner": "3"
+      },
+      {
+        "id": "309",
+        "date_played": "2026-04-07",
+        "game_date_iso_8601": "2026-04-07T19:00:00-04:00",
+        "home_team": "3",
+        "homeCode": "MTL",
+        "homeCity": "Montr\u00e9al",
+        "home_goal_count": "4",
+        "visiting_team": "8",
+        "visitingCode": "SEA",
+        "visitingCity": "Seattle",
+        "visiting_goal_count": "1",
+        "winner": "3"
+      },
+      {
+        "id": "282",
+        "date_played": "2026-04-03",
+        "game_date_iso_8601": "2026-04-03T19:00:00-04:00",
+        "home_team": "5",
+        "homeCode": "OTT",
+        "homeCity": "Ottawa",
+        "home_goal_count": "0",
+        "visiting_team": "3",
+        "visitingCode": "MTL",
+        "visitingCity": "Montr\u00e9al",
+        "visiting_goal_count": "3",
+        "winner": "3"
+      }
+    ],
+    "leadingScorers": [
+      {
+        "info": {
+          "id": 42,
+          "firstName": "Abby",
+          "lastName": "Roque",
+          "jerseyNumber": 11,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/42.jpg"
+        },
+        "stats": {
+          "goals": 8,
+          "assists": 14,
+          "points": 22,
+          "penaltyMinutes": 31,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 32,
+          "firstName": "Laura",
+          "lastName": "Stacey",
+          "jerseyNumber": 7,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/32.jpg"
+        },
+        "stats": {
+          "goals": 7,
+          "assists": 15,
+          "points": 22,
+          "penaltyMinutes": 12,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 253,
+          "firstName": "Nicole",
+          "lastName": "Gosling",
+          "jerseyNumber": 61,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/253.jpg"
+        },
+        "stats": {
+          "goals": 3,
+          "assists": 16,
+          "points": 19,
+          "penaltyMinutes": 10,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 31,
+          "firstName": "Marie-Philip",
+          "lastName": "Poulin",
+          "jerseyNumber": 29,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/31.jpg"
+        },
+        "stats": {
+          "goals": 9,
+          "assists": 9,
+          "points": 18,
+          "penaltyMinutes": 20,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      },
+      {
+        "info": {
+          "id": 61,
+          "firstName": "Hayley",
+          "lastName": "Scamurra",
+          "jerseyNumber": 16,
+          "position": null,
+          "birthDate": "",
+          "playerImageURL": "https://assets.leaguestat.com/pwhl/120x160/61.jpg"
+        },
+        "stats": {
+          "goals": 8,
+          "assists": 8,
+          "points": 16,
+          "penaltyMinutes": 20,
+          "plusMinus": 0,
+          "faceoffAttempts": 0,
+          "faceoffWins": 0,
+          "shots": 0,
+          "hits": 0,
+          "blockedShots": 0,
+          "toi": null
+        },
+        "starting": 0,
+        "status": null
+      }
+    ],
+    "lineup": {
+      "goalies": [],
+      "skaters": []
+    }
+  },
+  "headToHeadRecords": {
+    "homeTeam": {
+      "previousYear": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "0-0-0-0"
+      },
+      "currentYear": {
+        "wins": 1,
+        "losses": 2,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "1-2-0-0"
+      },
+      "previousFiveYears": {
+        "wins": 1,
+        "losses": 2,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "1-2-0-0"
+      }
+    },
+    "visitingTeam": {
+      "previousYear": {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "0-0-0-0"
+      },
+      "currentYear": {
+        "wins": 2,
+        "losses": 1,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "2-1-0-0"
+      },
+      "previousFiveYears": {
+        "wins": 2,
+        "losses": 1,
+        "ties": 0,
+        "OTWins": 0,
+        "OTLosses": 0,
+        "SOLosses": 0,
+        "formattedRecord": "2-1-0-0"
+      }
+    }
+  },
+  "previousMeetings": [
+    {
+      "gameId": "309",
+      "visitingTeamId": "8",
+      "visitingCity": "Seattle",
+      "visitingScore": "1",
+      "homeTeamId": "3",
+      "homeCity": "Montr\u00e9al",
+      "homeScore": "4",
+      "datePlayed": "2026-04-07",
+      "game_date_iso_8601": "2026-04-07T19:00:00-04:00",
+      "status": "Final"
+    },
+    {
+      "gameId": "292",
+      "visitingTeamId": "8",
+      "visitingCity": "Seattle",
+      "visitingScore": "1",
+      "homeTeamId": "3",
+      "homeCity": "Montr\u00e9al",
+      "homeScore": "4",
+      "datePlayed": "2026-03-19",
+      "game_date_iso_8601": "2026-03-19T19:00:00-04:00",
+      "status": "Final"
+    },
+    {
+      "gameId": "236",
+      "visitingTeamId": "3",
+      "visitingCity": "Montr\u00e9al",
+      "visitingScore": "1",
+      "homeTeamId": "8",
+      "homeCity": "Seattle",
+      "homeScore": "2",
+      "datePlayed": "2025-12-23",
+      "game_date_iso_8601": "2025-12-23T22:00:00-05:00",
+      "status": "Final"
+    }
+  ],
+  "lineupPairingReport": null
+}

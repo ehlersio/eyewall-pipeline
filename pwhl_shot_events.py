@@ -16,16 +16,19 @@ Coordinate transform:
   Raw values observed: xLocation 63-537, yLocation ~13-290
   Canvas estimated ~600 x 300 px. Set TRANSFORM_DEBUG=1 to print stats for calibration.
 
---- gameSummary merge (added Session 34) ---------------------------------
+--- gameSummary merge (added Session 34; extended Session 41) ------------
 After shot events are ingested for a game, a second fetch against
 statviewfeed/gameSummary pulls periods[].goals[], which carries data the PBP
 feed doesn't have: real assists (full player objects), and ground-truth
-per-goal flags (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal).
+per-goal flags (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal,
+isPenaltyShot, isInsuranceGoal — the last two added Session 41, confirmed
+present on every goal via a live pull against game 326).
 Each gameSummary goal is matched to its existing pwhl_shot_events row on
 (game_id, event_type='goal', period_id, time_seconds, team_id, shooter_id) —
 the same key components already used for shot-event dedup, minus x_raw/y_raw
 — and that row is UPDATEd in place with assist1_id, assist2_id,
-is_power_play, is_short_handed, is_empty_net, is_game_winning_goal.
+is_power_play, is_short_handed, is_empty_net, is_game_winning_goal,
+is_penalty_shot, is_insurance_goal.
 
 This does NOT replace pwhl_shot_events' own goal rows or its dedup key;
 gameSummary has no shot x/y coordinates, so it only supplements existing rows.
@@ -566,7 +569,9 @@ def run(season_id: str | None = None) -> None:
         # Sweep mode processes many games in one unattended run — log
         # loudly and bail out of the whole run rather than crash it or
         # silently guess "regular" for a season we don't recognize.
-        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run"
+        )
         return
 
     log.info(f"=== PWHL Shot Events -- season {season_id} ({season_type}) ===")
