@@ -158,9 +158,7 @@ class TestPBPSeasonHandling:
         season), even though no season argument was passed to run()."""
         preseason_game_id = 555
 
-        game_log_mock = _chain_mock(
-            data=[{"home_team_id": 1, "away_team_id": 2, "season_id": 7}]
-        )
+        game_log_mock = _chain_mock(data=[{"home_team_id": 1, "away_team_id": 2, "season_id": 7}])
         players_mock = _chain_mock(data=[])
         pbp_events_mock = _chain_mock(data=[])
         skipped_mock = _chain_mock(data=[])
@@ -219,9 +217,7 @@ class TestPBPSeasonHandling:
         # Existing hardcoded entries are untouched by the live fallback.
         assert pbp_module._resolve_season_type("8") == "regular"
 
-    def test_sweep_logs_and_skips_on_a_truly_unrecognized_season_id(
-        self, pbp_module, monkeypatch
-    ):
+    def test_sweep_logs_and_skips_on_a_truly_unrecognized_season_id(self, pbp_module, monkeypatch):
         """The sweep path (`run(season_id=...)`) is an unattended nightly
         job — a season_id neither SEASON_TYPE_MAP nor the live bootstrap
         recognizes should log an error and skip the run, NOT raise and
@@ -243,9 +239,7 @@ class TestPBPSeasonHandling:
         monkeypatch.setattr(
             season_lookup.requests, "get", _make_requests_get(season_types=DEFAULT_SEASON_TYPES)
         )
-        game_log_mock = _chain_mock(
-            data=[{"home_team_id": 1, "away_team_id": 2, "season_id": 404}]
-        )
+        game_log_mock = _chain_mock(data=[{"home_team_id": 1, "away_team_id": 2, "season_id": 404}])
         sb = MagicMock()
         sb.table.side_effect = lambda name: {"pwhl_game_log": game_log_mock}[name]
         monkeypatch.setattr(pbp_module, "create_client", lambda *a, **k: sb)
