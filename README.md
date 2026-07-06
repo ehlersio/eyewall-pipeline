@@ -244,6 +244,31 @@ python pwhl_shot_events.py --backfill-goals 9   # Backfill a specific season
 python pwhl_shot_events.py --game 338           # Single game_id (debug -- ingest + merge just this game)
 ```
 
+**Penalty shots moved out (Session 42):** penalty-shot goals are NOT ingested here anymore — `extract_gamesummary_goals()` explicitly skips any goal with `isPenaltyShot=true` rather than trying to match it against a `pwhl_shot_events` row that will never exist (penalty shots have no coordinates at all, confirmed live for both makes and misses; see `pwhl_penalty_shots.py`). `is_penalty_shot` remains a column on this table but will only ever read `false` going forward — likely dead weight, left in place rather than dropped this session.
+
+### `pwhl_penalty_shots.py` (added Session 42)
+Ingests penalty shots (makes AND misses) from `gameSummary`'s `penaltyShots.homeTeam[]`/`visitingTeam[]` — not the PBP `"penaltyshot"` event and not `periods[].goals[]` (which only has goals, so misses are invisible there). Confirmed via a full scan of all 329 completed games: 9 games had a penalty shot, only 1 was a goal (game 277) — misses dominate 8-to-1. No coordinate data exists for these events at all, on a make or a miss, so `pwhl_penalty_shots` has no x/y columns and these rows are never written to `pwhl_shot_events` (a coordinate-based shot-map table).
+
+```bash
+python pwhl_penalty_shots.py            # Ingest current season, mark no-penalty-shot games skipped
+python pwhl_penalty_shots.py 9          # Specific season
+python pwhl_penalty_shots.py --game 277 # Single game_id (debug)
+```
+
+### `pwhl_goal_on_ice.py` (added Session 42)
+Ingests `gameSummary`'s `periods[].goals[].plus_players[]`/`minus_players[]` — the full on-ice skater roster (by team) at the moment of each goal — one row per `(game_goal_id, player_id)` in `pwhl_goal_on_ice`. Convention (empirically validated against `pwhl_skater_game_box.plus_minus`, full historical backfill, 10,669/10,669 player-games matched): summing `on_ice_for` (+1)/not (-1) across every goal **except power-play goals** reproduces HockeyTech's own `plusMinus` exactly — short-handed, empty-net, and penalty-shot goals all count toward it, only power-play goals are excluded. Each row carries `is_power_play`/`is_short_handed`/`is_empty_net`/`is_penalty_shot` directly so consumers don't need to join back to `pwhl_shot_events`.
+
+This is goal-scoped, not continuous shift data — it does **not** change the WAR/RAPM October-2026 blocker calculus (see "PWHL Analytics Roadmap" below) and is too coarse a signal (goals are rare relative to total ice time) to substitute for real line-combination detection the way `line_combinations.py` does for NHL.
+
+`pwhl_on_ice_differential.py` is the first consumer: computes each player's on-ice goals-for/against split (not just the net `+/-` number `pwhl_player_seasons`/`pwhl_skater_game_box` already have) for a season. Currently a report/script, not yet a persisted table or frontend surface — see its docstring.
+
+```bash
+python pwhl_goal_on_ice.py            # Ingest current season
+python pwhl_goal_on_ice.py 9          # Specific season
+python pwhl_goal_on_ice.py --game 277 # Single game_id (debug)
+python pwhl_on_ice_differential.py 8  # Print GF/GA leaderboard for a season
+```
+
 ### `pwhl_salaries.py`
 Scrapes PWHLPA salary guide PDF and upserts to `pwhl_salaries`.
 
@@ -319,6 +344,8 @@ Train logistic regression on `pwhl_shot_events`: distance + angle → goal proba
 **Step 2 — Shift data** (`pwhl_shift_data.py`)
 HockeyTech PBP confirmed to have NO `player_change` events across all 3 seasons (checked June 2026). Cannot derive shift intervals from existing data. PWHL WAR/RAPM blocked until season 4 data becomes available in October 2026 — HockeyTech may add shift events for the expanded league.
 
+**Correction (Session 42):** `pwhl_goal_on_ice` (goal-level on-ice rosters, see above) does **not** change this calculus, despite being "independent of the shift-derivation approach" in a narrow sense. It's goal-scoped, not continuous — it only captures on-ice composition at the instant of a goal, and goals are rare relative to total ice time, so it's far too coarse/sparse a signal to substitute for real shift intervals. Don't treat it as a lighter-weight WAR/RAPM path.
+
 **Alternative:** Use lineup-based approach — derive approximate on-ice time from faceoff events + penalties from `pwhl_pbp_events`. Less accurate but buildable from existing data.
 
 **Step 3 — Zone starts** (`pwhl_zone_starts.py`)
@@ -370,8 +397,10 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_goalie_seasons` | Per-goalie per-season stats (GP, W, L, OTL, GAA, SV%, SO, saves, GA) |
 | `pwhl_team_seasons` | Per-team per-season stats + PP%/PK%/special teams + Corsi/Fenwick + reg_wins/non_reg_wins |
 | `pwhl_game_log` | Game results with scores, dates, venue, OT/SO flags |
-| `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time; goal rows also carry `assist1_id`/`assist2_id`, `is_power_play`/`is_short_handed`/`is_empty_net`/`is_game_winning_goal`, `game_goal_id` (merged from gameSummary, Session 34 — NULL until merged) |
+| `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time; goal rows also carry `assist1_id`/`assist2_id`, `is_power_play`/`is_short_handed`/`is_empty_net`/`is_game_winning_goal`, `game_goal_id` (merged from gameSummary, Session 34 — NULL until merged). `is_penalty_shot` always `false` now (Session 42 — see `pwhl_penalty_shots` below) |
 | `pwhl_pbp_events` | PBP events: faceoffs (homeWin string), hits, penalties, goalie changes |
+| `pwhl_penalty_shots` | (Session 42) Penalty shots (makes + misses), no coordinates: game_id, season_id, team_id, player_id (shooter), goalie_id, period_id, time_seconds, is_goal. Sourced from `gameSummary.penaltyShots`, not PBP |
+| `pwhl_goal_on_ice` | (Session 42) On-ice skater roster per goal, one row per (game_goal_id, player_id): team_id, on_ice_for, is_power_play/is_short_handed/is_empty_net/is_penalty_shot. Sourced from `gameSummary`'s `plus_players[]`/`minus_players[]` |
 | `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
 | `pwhl_game_summaries` | AI post-game summaries (PWHL) |
 | `pwhl_game_predictions` | AI pre-game predictions (PWHL) |
