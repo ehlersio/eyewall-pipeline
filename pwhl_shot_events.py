@@ -215,13 +215,15 @@ def _gs_parse_time(time_str) -> int:
 
 
 def _gs_parse_bool(val) -> bool:
-    """HockeyTech's gameSummary properties come through as the STRINGS
-    "true"/"false", not JSON booleans -- confirmed 2026-07 via game 261,
-    where a naive bool(val) marked every single goal true for every flag
-    (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal all True on
-    all 10 goals -- impossible, since bool("false") is True in Python for
-    any non-empty string). Handle string/bool/None explicitly instead of
-    relying on Python truthiness."""
+    """HockeyTech's gameSummary properties come through as strings, not
+    JSON booleans -- confirmed 2026-07 via game 261, where a naive bool(val)
+    marked every single goal true for every flag (isPowerPlay, isShortHanded,
+    isEmptyNet, isGameWinningGoal all True on all 10 goals -- impossible,
+    since bool("false") is True in Python for any non-empty string). The
+    exact string encoding isn't even consistent: game 261 sent "true"/"false",
+    while a later live pull (game 326, Session 41) sent "1"/"0" for the same
+    properties on the same view. Handle string/bool/None explicitly instead
+    of relying on Python truthiness or assuming one fixed encoding."""
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
@@ -280,6 +282,8 @@ def extract_gamesummary_goals(game_summary: dict) -> list[dict]:
                     "is_short_handed": _gs_parse_bool(props.get("isShortHanded", False)),
                     "is_empty_net": _gs_parse_bool(props.get("isEmptyNet", False)),
                     "is_game_winning_goal": _gs_parse_bool(props.get("isGameWinningGoal", False)),
+                    "is_penalty_shot": _gs_parse_bool(props.get("isPenaltyShot", False)),
+                    "is_insurance_goal": _gs_parse_bool(props.get("isInsuranceGoal", False)),
                 }
             )
     return out
@@ -312,6 +316,8 @@ def merge_game_summary(sb, game_id: int) -> tuple[int, int]:
                     "is_short_handed": g["is_short_handed"],
                     "is_empty_net": g["is_empty_net"],
                     "is_game_winning_goal": g["is_game_winning_goal"],
+                    "is_penalty_shot": g["is_penalty_shot"],
+                    "is_insurance_goal": g["is_insurance_goal"],
                     "game_goal_id": g["game_goal_id"],
                 }
             )

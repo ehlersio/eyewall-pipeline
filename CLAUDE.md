@@ -38,8 +38,24 @@ New teams also need a `pwhl_teams` row seeded before `pwhl_players.team_id` FK i
 
 ## Known open items
 - Season ID 2 naming discrepancy: `SEASON_TYPE_MAP` here labels it `"showcase"`; the real HockeyTech `bootstrap` response calls it `"2024 Preseason"`. Don't silently "fix" either direction — verify against real 2024 game data first.
-- `gameSummary`'s homeTeam/visitingTeam box score payload (rich per-player TOI/hits/blocked-shots/faceoffs) is not yet wired into any pipeline module.
+- `gameSummary`'s homeTeam/visitingTeam box score payload (rich per-player TOI/hits/blocked-shots/faceoffs) is not yet wired into any pipeline module (scoped in Session 41; table-shape decision pending before implementation).
+- `gameSummary`'s `goal.plus_players[]`/`minus_players[]` (full on-ice player objects per goal) also unused — flagged as a possible future feature, separate from the box-score item above.
 - `inspect_*`/`test_*` diagnostic files are intentionally kept around (not scratch files to delete) — not audited recently though.
+
+## `special_teams.py` is NHL-only — not a PWHL PP%/PK% source
+Despite the generic name, `special_teams.py` uses `NHL_SEASON` and the NHL
+`game_log`/`shot_events`/`shift_events` tables, and it infers **PP/PK unit
+compositions** (which players form PP1/PP2/PK1/PK2) — it does not compute
+PP%/PK% *percentages* for either league. There is no PWHL-side module that
+independently derives PP%/PK% from shot/shift data. PWHL's actual PP%/PK%
+(`pwhl_team_seasons.pp_pct`/`pk_pct`) comes from a second HockeyTech call in
+`pwhl_stats.py::fetch_team_stats` (`view=teams&special=true`) — i.e. it's
+already a server-computed HockeyTech value, same as `gameCenterPreview`'s
+`powerPlayStats`/`penaltyKillStats`. Confirmed via live pull (Session 41,
+game 326 — season 8's actual final game): the two are consistent, with
+`gameCenterPreview`'s numbers reflecting the cumulative record *entering*
+that game rather than the season's final total. Don't conflate this module
+with a PWHL special-teams calculator when scoping future work.
 
 ## HockeyTech API facts (hard-won, from direct DevTools inspection — see `docs/hockeytech-api-notes.md`)
 - `feed=statviewfeed` is the only valid feed (not `modulekit` — silently returns a fake 200 with no payload)
