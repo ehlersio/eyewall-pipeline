@@ -365,10 +365,7 @@ def get_skipped_games(sb, pipeline: str) -> set:
 
 def get_processed_games(sb, season_id: str) -> set:
     result = (
-        sb.table("pwhl_skater_game_box")
-        .select("game_id")
-        .eq("season_id", int(season_id))
-        .execute()
+        sb.table("pwhl_skater_game_box").select("game_id").eq("season_id", int(season_id)).execute()
     )
     return {r["game_id"] for r in (result.data or [])}
 
