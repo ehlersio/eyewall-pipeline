@@ -11,6 +11,49 @@ Python data pipeline for EyeWall Analytics, run nightly via GitHub Actions. Inge
 ## Sibling repos
 Lives in `eyewall/` alongside `eyewall-poller` (Cloudflare Workers backend) and `eyewall-analytics` (React frontend). This repo writes to Supabase; `eyewall-poller` and the frontend read from it (plus live APIs directly for some things).
 
+## Git branch hygiene (standing rule — read before any session)
+
+Before making any file changes in a new session, always run:
+
+```
+git status
+git branch
+```
+
+If the current branch is not `main`, or if `main` locally is behind `origin/main`, stop and do this first:
+
+```
+git checkout main
+git pull origin main
+git checkout -b <new-branch-name-for-this-session>
+```
+
+Only start editing files after confirming you're on a fresh branch cut from an up-to-date `main`. Do not assume the working directory is already in the right state, even if the previous session ended with a merge — branch switches are a manual step and are easy to forget.
+
+Name the new branch for what the session is actually doing (e.g. `session43-line-combinations`), not a generic name, so it's identifiable later if it needs recovering.
+
+At the end of a session, after a PR is merged, explicitly prompt a reminder to run `git checkout main && git pull origin main` before ending — don't assume this happens automatically between sessions.
+
+## Python environment hygiene (standing rule — read before any Python command)
+
+This repo uses a project-local venv at `.venv/` (not the global system Python). Before running any Python command (`pip`, `pytest`, `python <script>.py`, etc.), confirm the venv is active and matches `requirements.txt` — don't assume it's already activated just because it exists.
+
+Quick check:
+
+```
+pip show supabase
+```
+
+This should report `Version: 2.31.0` (or whatever `requirements.txt` currently pins). If it reports something older (e.g. `2.3.4`), the venv is either not activated or out of sync — stop and flag this before proceeding, rather than silently running against a stale/global interpreter. Do not assume a passing or failing test result reflects the real dependency state without this check first — a stale environment can produce misleading import errors that look like code bugs but are actually local environment drift (this happened once already, in Session 42).
+
+If the venv needs activating:
+
+```
+.venv\Scripts\Activate.ps1
+```
+
+If it's active but out of sync with `requirements.txt`, ask before running `pip install -r requirements.txt` rather than assuming it's safe to just sync silently.
+
 ## Live season resolution (built Session 35–36)
 
 `season_lookup.py` reads `GET /config/seasons` from the `eyewall-poller` Worker (with an env-var fallback if the Worker is unreachable), and is the entry point other modules use instead of hardcoding season constants:
@@ -39,7 +82,8 @@ New teams also need a `pwhl_teams` row seeded before `pwhl_players.team_id` FK i
 ## Known open items
 - Season ID 2 naming discrepancy: `SEASON_TYPE_MAP` here labels it `"showcase"`; the real HockeyTech `bootstrap` response calls it `"2024 Preseason"`. Don't silently "fix" either direction — verify against real 2024 game data first.
 - `gameSummary`'s homeTeam/visitingTeam box score payload (rich per-player TOI/hits/blocked-shots/faceoffs) is not yet wired into any pipeline module (scoped in Session 41; table-shape decision pending before implementation).
-- `gameSummary`'s `goal.plus_players[]`/`minus_players[]` (full on-ice player objects per goal) also unused — flagged as a possible future feature, separate from the box-score item above.
+- ~~`gameSummary`'s `goal.plus_players[]`/`minus_players[]`~~ — resolved Session 42: wired into `pwhl_goal_on_ice.py` / `pwhl_goal_on_ice` table, convention validated against `pwhl_skater_game_box.plus_minus` (10,669/10,669 player-games matched across the full historical backfill: sum `on_ice_for` excluding power-play goals only). Does NOT change the WAR/RAPM October-2026 blocker below — goal-scoped, not continuous shift data, too coarse a signal to substitute.
+- Penalty shots (`"penaltyshot"` PBP event / `gameSummary.penaltyShots`) — resolved Session 42: own table (`pwhl_penalty_shots.py` / `pwhl_penalty_shots`), sourced from `gameSummary.penaltyShots` (has misses; `periods[].goals[]` doesn't). No coordinate data exists for these at all. `pwhl_shot_events.is_penalty_shot` now always reads `false` — likely dead weight, not dropped this session.
 - `inspect_*`/`test_*` diagnostic files are intentionally kept around (not scratch files to delete) — not audited recently though.
 
 ## `special_teams.py` is NHL-only — not a PWHL PP%/PK% source

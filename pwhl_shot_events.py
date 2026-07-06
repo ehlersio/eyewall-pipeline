@@ -11,6 +11,8 @@ Event types captured:
   shot         — details.shooter, goalie, xLocation, yLocation, shotType, shotQuality, isGoal
   blocked_shot — details.shooter, blocker, goalie, xLocation, yLocation, shotType, shotQuality
   (goal events skipped — coordinates duplicated on shot event with isGoal=true)
+  ("penaltyshot" events intentionally NOT parsed here — no coordinates exist
+   for them at all, make or miss; see pwhl_penalty_shots.py, Session 42)
 
 Coordinate transform:
   Raw values observed: xLocation 63-537, yLocation ~13-290
@@ -32,6 +34,18 @@ is_penalty_shot, is_insurance_goal.
 
 This does NOT replace pwhl_shot_events' own goal rows or its dedup key;
 gameSummary has no shot x/y coordinates, so it only supplements existing rows.
+
+--- penalty shots moved out entirely (Session 42) -----------------------
+Penalty shots (make or miss) are NOT ingested here or into pwhl_shot_events
+at all — see pwhl_penalty_shots.py, sourced from gameSummary's own
+penaltyShots key instead (which has misses too, unlike periods[].goals[]).
+extract_gamesummary_goals() below explicitly skips any goal with
+isPenaltyShot=true rather than trying to match it against a shot_events row
+that will never exist (penalty shots have no shot coordinates at all,
+confirmed Session 42, and pwhl_shot_events is fundamentally a coordinate-
+based shot-map table). Practical effect: is_penalty_shot on this table's
+existing rows will only ever read false going forward — it's likely dead
+weight now, left in place rather than dropped this session (see CLAUDE.md).
 
 Run modes:
   python pwhl_shot_events.py                  # ingest current season, merge gameSummary for newly-ingested games
@@ -235,7 +249,16 @@ def extract_gamesummary_goals(game_summary: dict) -> list[dict]:
     """Flatten periods[].goals[] into merge-ready dicts: the match key
     (period_id, time_seconds, team_id, shooter_id) plus the new columns to
     write. No coordinates here — this only supplements existing shot_events
-    rows, never replaces them."""
+    rows, never replaces them.
+
+    Penalty-shot goals are deliberately excluded (Session 42) — they now
+    live in pwhl_penalty_shots.py instead, sourced from gameSummary's own
+    penaltyShots key (which also has misses, unlike this periods[].goals[]
+    view). A penalty-shot goal is intentionally never inserted into
+    pwhl_shot_events (it's a coordinate-based shot-map table; penalty shots
+    have no coordinates at all), so without this skip, merge_game_summary()
+    would log a permanent false-positive "unmatched" warning for every one,
+    forever, instead of a real data-quality signal."""
     out = []
     for period in game_summary.get("periods") or []:
         period_id = _gs_period_id((period.get("info") or {}).get("id"))
@@ -269,6 +292,12 @@ def extract_gamesummary_goals(game_summary: dict) -> list[dict]:
                 except (TypeError, ValueError):
                     assist2_id = None
 
+            is_penalty_shot = _gs_parse_bool(props.get("isPenaltyShot", False))
+            if is_penalty_shot:
+                # No pwhl_shot_events row will ever exist for this goal --
+                # see docstring above. pwhl_penalty_shots.py owns it instead.
+                continue
+
             out.append(
                 {
                     "period_id": period_id,
@@ -282,7 +311,7 @@ def extract_gamesummary_goals(game_summary: dict) -> list[dict]:
                     "is_short_handed": _gs_parse_bool(props.get("isShortHanded", False)),
                     "is_empty_net": _gs_parse_bool(props.get("isEmptyNet", False)),
                     "is_game_winning_goal": _gs_parse_bool(props.get("isGameWinningGoal", False)),
-                    "is_penalty_shot": _gs_parse_bool(props.get("isPenaltyShot", False)),
+                    "is_penalty_shot": is_penalty_shot,
                     "is_insurance_goal": _gs_parse_bool(props.get("isInsuranceGoal", False)),
                 }
             )
