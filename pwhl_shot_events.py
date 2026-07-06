@@ -16,16 +16,19 @@ Coordinate transform:
   Raw values observed: xLocation 63-537, yLocation ~13-290
   Canvas estimated ~600 x 300 px. Set TRANSFORM_DEBUG=1 to print stats for calibration.
 
---- gameSummary merge (added Session 34) ---------------------------------
+--- gameSummary merge (added Session 34; extended Session 41) ------------
 After shot events are ingested for a game, a second fetch against
 statviewfeed/gameSummary pulls periods[].goals[], which carries data the PBP
 feed doesn't have: real assists (full player objects), and ground-truth
-per-goal flags (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal).
+per-goal flags (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal,
+isPenaltyShot, isInsuranceGoal — the last two added Session 41, confirmed
+present on every goal via a live pull against game 326).
 Each gameSummary goal is matched to its existing pwhl_shot_events row on
 (game_id, event_type='goal', period_id, time_seconds, team_id, shooter_id) —
 the same key components already used for shot-event dedup, minus x_raw/y_raw
 — and that row is UPDATEd in place with assist1_id, assist2_id,
-is_power_play, is_short_handed, is_empty_net, is_game_winning_goal.
+is_power_play, is_short_handed, is_empty_net, is_game_winning_goal,
+is_penalty_shot, is_insurance_goal.
 
 This does NOT replace pwhl_shot_events' own goal rows or its dedup key;
 gameSummary has no shot x/y coordinates, so it only supplements existing rows.
@@ -212,13 +215,15 @@ def _gs_parse_time(time_str) -> int:
 
 
 def _gs_parse_bool(val) -> bool:
-    """HockeyTech's gameSummary properties come through as the STRINGS
-    "true"/"false", not JSON booleans -- confirmed 2026-07 via game 261,
-    where a naive bool(val) marked every single goal true for every flag
-    (isPowerPlay, isShortHanded, isEmptyNet, isGameWinningGoal all True on
-    all 10 goals -- impossible, since bool("false") is True in Python for
-    any non-empty string). Handle string/bool/None explicitly instead of
-    relying on Python truthiness."""
+    """HockeyTech's gameSummary properties come through as strings, not
+    JSON booleans -- confirmed 2026-07 via game 261, where a naive bool(val)
+    marked every single goal true for every flag (isPowerPlay, isShortHanded,
+    isEmptyNet, isGameWinningGoal all True on all 10 goals -- impossible,
+    since bool("false") is True in Python for any non-empty string). The
+    exact string encoding isn't even consistent: game 261 sent "true"/"false",
+    while a later live pull (game 326, Session 41) sent "1"/"0" for the same
+    properties on the same view. Handle string/bool/None explicitly instead
+    of relying on Python truthiness or assuming one fixed encoding."""
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
@@ -277,6 +282,8 @@ def extract_gamesummary_goals(game_summary: dict) -> list[dict]:
                     "is_short_handed": _gs_parse_bool(props.get("isShortHanded", False)),
                     "is_empty_net": _gs_parse_bool(props.get("isEmptyNet", False)),
                     "is_game_winning_goal": _gs_parse_bool(props.get("isGameWinningGoal", False)),
+                    "is_penalty_shot": _gs_parse_bool(props.get("isPenaltyShot", False)),
+                    "is_insurance_goal": _gs_parse_bool(props.get("isInsuranceGoal", False)),
                 }
             )
     return out
@@ -309,6 +316,8 @@ def merge_game_summary(sb, game_id: int) -> tuple[int, int]:
                     "is_short_handed": g["is_short_handed"],
                     "is_empty_net": g["is_empty_net"],
                     "is_game_winning_goal": g["is_game_winning_goal"],
+                    "is_penalty_shot": g["is_penalty_shot"],
+                    "is_insurance_goal": g["is_insurance_goal"],
                     "game_goal_id": g["game_goal_id"],
                 }
             )

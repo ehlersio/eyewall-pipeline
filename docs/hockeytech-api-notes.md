@@ -161,15 +161,24 @@ periods[].goals[]:
 **No shot x/y coordinates in this view** — it supplements
 `pwhl_shot_events.py`, doesn't replace it.
 
-**Planned integration (not started — see memory for full scope):** merge
-`gameSummary` goals into `pwhl_shot_events` rows (match on period + time +
-shooter), adding `assist1_id`, `assist2_id`, `is_power_play`,
-`is_short_handed`, `is_empty_net`, `is_game_winning_goal` columns. This
-unblocks PWHL season/career points milestones (blocked since — no assist
-data existed anywhere before this) and would let `is_short_handed` replace
-the hand-built penalty-window SH-goal detector in `pwhl_milestones.py`
+**Integration status (done — Session 34, extended Session 41):** `gameSummary`
+goals are merged into `pwhl_shot_events` rows (matched on period + time +
+shooter) via `merge_game_summary()`/`extract_gamesummary_goals()` in
+`pwhl_shot_events.py`, writing `assist1_id`, `assist2_id`, `game_goal_id`,
+`is_power_play`, `is_short_handed`, `is_empty_net`, `is_game_winning_goal`
+(Session 34), plus `is_penalty_shot`, `is_insurance_goal` (Session 41 — both
+confirmed present on every goal via a live pull against game 326, previously
+untouched). This unblocked PWHL season/career points milestones (no assist
+data existed anywhere before this) and lets `is_short_handed` replace the
+hand-built penalty-window SH-goal detector in `pwhl_milestones.py`
 (`detect_shorthanded_goals`), which has documented edge-case gaps (OT,
 penalty cancellation, etc.) that HockeyTech's own flag doesn't have.
+
+Still unused from this same payload: `goal.plus_players[]`/`minus_players[]`
+(full on-ice player objects per goal) — a genuine on-ice roster dataset
+independent of shift-derivation, but a bigger design decision (new table
+shape) than the two boolean flags above, logged separately rather than
+folded into this pass.
 
 ---
 
