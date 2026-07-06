@@ -533,7 +533,9 @@ def run(season_id: str | None = None, force: bool = False, single_game: int | No
         # crash it, so one bad/future season_id doesn't take down a
         # scheduled job. mark_skipped isn't used here because this fails
         # before any game is even selected.
-        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run"
+        )
         return
 
     log.info(f"=== PWHL PBP Events -- season {season_id} ({season_type}) ===")

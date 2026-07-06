@@ -566,7 +566,9 @@ def run(season_id: str | None = None) -> None:
         # Sweep mode processes many games in one unattended run — log
         # loudly and bail out of the whole run rather than crash it or
         # silently guess "regular" for a season we don't recognize.
-        log.error(f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run")
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run"
+        )
         return
 
     log.info(f"=== PWHL Shot Events -- season {season_id} ({season_type}) ===")
