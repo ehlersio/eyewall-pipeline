@@ -1,3 +1,4 @@
 .env
 __pycache__/
 *.pyc
+gcp_*.json
