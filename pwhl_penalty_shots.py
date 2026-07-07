@@ -277,7 +277,10 @@ def ingest_game(sb, gid: int, season_id: str, season_type: str) -> int:
     player_ids = {s["player_id"] for s in shots} | {s["goalie_id"] for s in shots if s["goalie_id"]}
     if player_ids:
         existing = (
-            sb.table("pwhl_players").select("player_id").in_("player_id", list(player_ids)).execute()
+            sb.table("pwhl_players")
+            .select("player_id")
+            .in_("player_id", list(player_ids))
+            .execute()
         )
         existing_ids = {r["player_id"] for r in (existing.data or [])}
         missing = player_ids - existing_ids
@@ -347,7 +350,11 @@ def run_single_game(game_id: int) -> None:
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     result = (
-        sb.table("pwhl_game_log").select("game_id,season_id").eq("game_id", game_id).limit(1).execute()
+        sb.table("pwhl_game_log")
+        .select("game_id,season_id")
+        .eq("game_id", game_id)
+        .limit(1)
+        .execute()
     )
     if not result.data:
         log.error(f"game_id {game_id} not found in pwhl_game_log")
