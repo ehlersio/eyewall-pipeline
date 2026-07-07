@@ -67,7 +67,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from season_lookup import get_season_type
+from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -75,7 +75,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(me
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-PWHL_SEASON = os.environ.get("PWHL_SEASON", "8")
+# Live-resolved via Worker; falls back to PWHL_SEASON env var (or "8") — see
+# season_lookup.get_pwhl_season(). Not os.environ.get("PWHL_SEASON", "8"):
+# that only applies its default when the key is absent, not when it's set
+# to an empty string (the Session 30 bug).
+PWHL_SEASON = str(get_pwhl_season()["season_id"])
 TRANSFORM_DEBUG = os.environ.get("TRANSFORM_DEBUG", "0") == "1"
 
 # Note: uses feed/index.php not feed/ -- required for gameCenterPlayByPlay
