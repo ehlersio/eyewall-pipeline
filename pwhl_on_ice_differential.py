@@ -87,7 +87,9 @@ def compute_on_ice_differential(sb, season_id: int) -> list[dict]:
                 .execute()
             )
             for p in res.data or []:
-                names[p["player_id"]] = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                names[p["player_id"]] = (
+                    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+                )
 
     out = []
     for pid in player_ids:
@@ -115,10 +117,14 @@ def main(season_id: str | None = None) -> None:
     print(f"{'Player':<25}{'GP':>4}{'GF':>5}{'GA':>5}{'Diff':>6}")
     print("-- Top 10 --")
     for r in diff[:10]:
-        print(f"{r['name']:<25}{r['gp']:>4}{r['goals_for']:>5}{r['goals_against']:>5}{r['goal_diff']:>+6}")
+        print(
+            f"{r['name']:<25}{r['gp']:>4}{r['goals_for']:>5}{r['goals_against']:>5}{r['goal_diff']:>+6}"
+        )
     print("-- Bottom 10 --")
     for r in diff[-10:]:
-        print(f"{r['name']:<25}{r['gp']:>4}{r['goals_for']:>5}{r['goals_against']:>5}{r['goal_diff']:>+6}")
+        print(
+            f"{r['name']:<25}{r['gp']:>4}{r['goals_for']:>5}{r['goals_against']:>5}{r['goal_diff']:>+6}"
+        )
 
 
 if __name__ == "__main__":

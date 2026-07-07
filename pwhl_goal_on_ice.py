@@ -269,7 +269,10 @@ def ingest_game(sb, gid: int, home_id: int, away_id: int, season_id: str, season
     player_ids = {e["player_id"] for e in entries}
     if player_ids:
         existing = (
-            sb.table("pwhl_players").select("player_id").in_("player_id", list(player_ids)).execute()
+            sb.table("pwhl_players")
+            .select("player_id")
+            .in_("player_id", list(player_ids))
+            .execute()
         )
         existing_ids = {r["player_id"] for r in (existing.data or [])}
         missing = player_ids - existing_ids
@@ -296,7 +299,9 @@ def ingest_game(sb, gid: int, home_id: int, away_id: int, season_id: str, season
             on_conflict="game_goal_id,player_id",
         ).execute()
 
-    log.info(f"    {len(rows)} on-ice row(s) upserted across {len({r['game_goal_id'] for r in rows})} goal(s)")
+    log.info(
+        f"    {len(rows)} on-ice row(s) upserted across {len({r['game_goal_id'] for r in rows})} goal(s)"
+    )
     return len(rows)
 
 
@@ -315,11 +320,7 @@ def run(season_id: str | None = None) -> None:
     completed = get_completed_games(sb, season_id)
     skipped = get_skipped_games(sb)
     processed = get_processed_games(sb, season_id)
-    todo = [
-        g
-        for g in completed
-        if g["game_id"] not in skipped and g["game_id"] not in processed
-    ]
+    todo = [g for g in completed if g["game_id"] not in skipped and g["game_id"] not in processed]
 
     log.info(
         f"  {len(completed)} completed, {len(processed)} processed, "
