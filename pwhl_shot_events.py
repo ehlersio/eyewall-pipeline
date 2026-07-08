@@ -67,6 +67,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from pipeline_common import FetchError
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -156,8 +157,13 @@ def transform_coords(x_raw: int, y_raw: int, is_home: bool, period: int) -> tupl
 
 def _hockeytech_get(view: str, game_id: int):
     """Shared fetch for any statviewfeed view keyed on game_id. Returns the
-    parsed JSON (list or dict, whatever the view returns) or None on failure.
-    Mirrors fetch_pbp's retry/JSONP-unwrap logic exactly."""
+    parsed JSON (list or dict, whatever the view returns), or None if the
+    API itself responded with an error payload (a legitimate "no data for
+    this view/game" signal, not a fetch failure). Raises FetchError after
+    exhausting 3 retries -- a genuine fetch failure, distinct from the
+    API-error case above. Mirrors fetch_pbp's retry/JSONP-unwrap logic
+    exactly."""
+    last_err = None
     for attempt in range(3):
         try:
             r = requests.get(
@@ -176,6 +182,7 @@ def _hockeytech_get(view: str, game_id: int):
             )
             if r.status_code != 200:
                 log.warning(f"    {view} {game_id} status {r.status_code}")
+                last_err = f"status {r.status_code}"
                 continue
             text = r.text.strip()
             if "(" in text:
@@ -187,9 +194,10 @@ def _hockeytech_get(view: str, game_id: int):
             return data
         except Exception as e:
             log.warning(f"    {view} {game_id} attempt {attempt + 1}: {e}")
+            last_err = str(e)
         if attempt < 2:
             time.sleep(2**attempt)
-    return None
+    raise FetchError(f"{view} {game_id}: failed after 3 attempts ({last_err})")
 
 
 def fetch_pbp(game_id: int) -> list | None:
@@ -630,7 +638,17 @@ def run(season_id: str | None = None) -> None:
         gid = game["game_id"]
         home_id = game["home_team_id"] or 0
         log.info(f"  [{i + 1}/{len(todo)}] game {gid}")
-        ingest_game(sb, gid, home_id, season_id, season_type)
+        try:
+            ingest_game(sb, gid, home_id, season_id, season_type)
+        except FetchError as e:
+            # _hockeytech_get() now raises after exhausting retries instead
+            # of swallowing to None -- this loop has no other exception
+            # handling, so without this one bad game's fetch failure would
+            # crash the entire sweep instead of being skipped like every
+            # other per-game isolation loop in this codebase.
+            log.warning(f"    Fetch failed for game {gid}, skipping: {e}")
+        except Exception:
+            log.exception(f"    CRASHED on game {gid}, skipping")
         time.sleep(0.5)
 
     log.info("=== PWHL Shot Events complete ===")

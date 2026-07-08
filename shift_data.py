@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db import NHL_SEASON, get_client
+from pipeline_common import FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -71,8 +72,7 @@ def nhl_get(url, params=None):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  ✗ GET failed: {url} — {e}")
-        return None
+        raise FetchError(f"GET failed: {url} — {e}") from e
 
 
 def mmss_to_secs(mmss):
@@ -93,8 +93,10 @@ def get_all_completed_games(season):
     seen = set()
     games = []
     for team in ALL_TEAMS:
-        data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
-        if not data:
+        try:
+            data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
+        except FetchError as e:
+            print(f"  ✗ {e}")
             continue
         for g in data.get("games", []):
             gid = g.get("id")
@@ -153,9 +155,17 @@ def get_skipped_games(client, season):
 
 
 def fetch_shift_chart(game_id):
-    """Fetch raw shift chart rows from NHL API for a single game."""
-    data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
-    if not data:
+    """Fetch raw shift chart rows from NHL API for a single game.
+
+    Catches FetchError itself (unlike this module's other helpers) rather
+    than letting it propagate to process_one() -- process_one()'s "empty
+    JSON result -> fall back to HTML shift reports" logic deliberately
+    treats "fetch broke" and "no JSON data for this game" the same way,
+    both should trigger the HTML fallback attempt, not skip it.
+    """
+    try:
+        data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
+    except FetchError:
         return []
     return data.get("data", [])
 
@@ -167,10 +177,11 @@ def fetch_roster(game_id):
     """Fetch player roster from play-by-play API.
     Returns dict of (normalized_last, normalized_first) -> (player_id, team_id).
     Used to match HTML shift report names to player IDs.
+
+    Lets FetchError propagate -- process_one()'s broad except already
+    isolates one game's fetch failure from the rest of the run.
     """
     data = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-    if not data:
-        return {}, {}
     roster = {}
     team_map = {}  # team_id -> abbrev (populated from awayTeam/homeTeam)
     for t in ["awayTeam", "homeTeam"]:

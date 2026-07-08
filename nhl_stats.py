@@ -15,6 +15,7 @@ from collections import defaultdict
 import requests
 
 from db import NHL_SEASON, get_client, upsert
+from pipeline_common import FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -63,13 +64,14 @@ def nhl_get(url, params=None):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  ✗ NHL GET failed: {url} — {e}")
-        return None
+        raise FetchError(f"NHL GET failed: {url} — {e}") from e
 
 
 def fetch_roster(team: str, season: int) -> list:
-    data = nhl_get(f"{NHL_BASE}/roster/{team}/{season}")
-    if not data:
+    try:
+        data = nhl_get(f"{NHL_BASE}/roster/{team}/{season}")
+    except FetchError as e:
+        print(f"  ✗ {e}")
         return []
     players = []
     for group in ["forwards", "defensemen", "goalies"]:
@@ -102,8 +104,12 @@ def fetch_skater_stats(season: int, game_type: int) -> list:
         "limit": -1,
         "cayenneExp": exp,
     }
-    data = nhl_get(url, params)
-    return data.get("data", []) if data else []
+    try:
+        data = nhl_get(url, params)
+    except FetchError as e:
+        print(f"  ✗ {e}")
+        return []
+    return data.get("data", [])
 
 
 def fetch_skater_scoring(season: int, game_type: int) -> dict:
@@ -119,8 +125,10 @@ def fetch_skater_scoring(season: int, game_type: int) -> dict:
         "limit": -1,
         "cayenneExp": exp,
     }
-    data = nhl_get(url, params)
-    if not data:
+    try:
+        data = nhl_get(url, params)
+    except FetchError as e:
+        print(f"  ✗ {e}")
         return {}
     return {r["playerId"]: r for r in data.get("data", [])}
 
@@ -137,8 +145,10 @@ def fetch_skater_realtime(season: int, game_type: int) -> dict:
         "limit": -1,
         "cayenneExp": exp,
     }
-    data = nhl_get(url, params)
-    if not data:
+    try:
+        data = nhl_get(url, params)
+    except FetchError as e:
+        print(f"  ✗ {e}")
         return {}
     return {r["playerId"]: r for r in data.get("data", [])}
 
@@ -154,8 +164,12 @@ def fetch_goalie_stats(season: int, game_type: int) -> list:
         "limit": -1,
         "cayenneExp": exp,
     }
-    data = nhl_get(url, params)
-    return data.get("data", []) if data else []
+    try:
+        data = nhl_get(url, params)
+    except FetchError as e:
+        print(f"  ✗ {e}")
+        return []
+    return data.get("data", [])
 
 
 def fetch_team_stats(season: int, game_type: int) -> list:
@@ -169,8 +183,12 @@ def fetch_team_stats(season: int, game_type: int) -> list:
         "limit": 50,
         "cayenneExp": exp,
     }
-    data = nhl_get(url, params)
-    return data.get("data", []) if data else []
+    try:
+        data = nhl_get(url, params)
+    except FetchError as e:
+        print(f"  ✗ {e}")
+        return []
+    return data.get("data", [])
 
 
 def fetch_standings_l10() -> dict:
@@ -179,8 +197,10 @@ def fetch_standings_l10() -> dict:
     Returns { 'CAR': {'l10_wins': 7, 'l10_losses': 2, 'l10_ot_losses': 1}, ... }
     Only meaningful for regular season (game_type=2).
     """
-    data = nhl_get(f"{NHL_BASE}/standings/now")
-    if not data:
+    try:
+        data = nhl_get(f"{NHL_BASE}/standings/now")
+    except FetchError as e:
+        print(f"  ✗ {e}")
         return {}
     result = {}
     for t in data.get("standings", []):
@@ -196,8 +216,12 @@ def fetch_standings_l10() -> dict:
 
 
 def fetch_schedule(team: str, season: int) -> list:
-    data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
-    return data.get("games", []) if data else []
+    try:
+        data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
+    except FetchError as e:
+        print(f"  ✗ {e}")
+        return []
+    return data.get("games", [])
 
 
 def run(season: int = NHL_SEASON):
@@ -267,8 +291,8 @@ def run(season: int = NHL_SEASON):
             print(f"  Fetching names for {len(missing_ids)} unlisted players...")
             missing_players = []
             for pid in missing_ids:
-                data = nhl_get(f"{NHL_BASE}/player/{pid}/landing")
-                if data:
+                try:
+                    data = nhl_get(f"{NHL_BASE}/player/{pid}/landing")
                     missing_players.append(
                         {
                             "id": pid,
@@ -276,7 +300,10 @@ def run(season: int = NHL_SEASON):
                             "position": data.get("position"),
                         }
                     )
-                time.sleep(0.1)
+                except FetchError as e:
+                    print(f"  ✗ {e}")
+                finally:
+                    time.sleep(0.1)
             if missing_players:
                 upsert(client, "players", missing_players, "id")
 
@@ -468,8 +495,10 @@ def run(season: int = NHL_SEASON):
 
     updated = 0
     for game_id, team_rows in games_to_fetch.items():
-        pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-        if not pbp:
+        try:
+            pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
+        except FetchError as e:
+            print(f"  ✗ {e}")
             time.sleep(0.3)
             continue
 

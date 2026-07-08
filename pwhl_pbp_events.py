@@ -31,6 +31,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from pipeline_common import FetchError
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -102,7 +103,11 @@ PIPELINE = "pwhl_pbp_events"
 
 
 def fetch_pbp(game_id: int) -> list | None:
-    """Fetch play-by-play events for a single game. Returns list or None."""
+    """Fetch play-by-play events for a single game. Returns None if the API
+    responded with an error payload (legitimate "no data", not a fetch
+    failure); raises FetchError after exhausting 3 retries (a genuine
+    fetch failure)."""
+    last_err = None
     for attempt in range(3):
         try:
             r = requests.get(
@@ -121,6 +126,7 @@ def fetch_pbp(game_id: int) -> list | None:
             )
             if r.status_code != 200:
                 log.warning(f"    PBP {game_id} status {r.status_code}")
+                last_err = f"status {r.status_code}"
                 continue
             text = r.text.strip()
             # HockeyTech wraps some responses as JSONP: callback(...)
@@ -134,9 +140,10 @@ def fetch_pbp(game_id: int) -> list | None:
                 return None
         except Exception as e:
             log.warning(f"    PBP {game_id} attempt {attempt + 1}: {e}")
+            last_err = str(e)
         if attempt < 2:
             time.sleep(2**attempt)
-    return None
+    raise FetchError(f"PBP {game_id}: failed after 3 attempts ({last_err})")
 
 
 # ── Coord helpers ─────────────────────────────────────────────────────────────
@@ -591,7 +598,15 @@ def run(season_id: str | None = None, force: bool = False, single_game: int | No
         home_id = game["home_team_id"] or 0
         away_id = game["away_team_id"] or None
         log.info(f"  [{i + 1}/{len(todo)}] game {gid}")
-        total_rows += ingest_game(sb, gid, home_id, season_id, season_type, away_id)
+        try:
+            total_rows += ingest_game(sb, gid, home_id, season_id, season_type, away_id)
+        except FetchError as e:
+            # fetch_pbp() now raises after exhausting retries instead of
+            # swallowing to None -- without this, one bad game's fetch
+            # failure would crash the entire sweep instead of being skipped.
+            log.warning(f"    Fetch failed for game {gid}, skipping: {e}")
+        except Exception:
+            log.exception(f"    CRASHED on game {gid}, skipping")
         time.sleep(0.5)
 
     log.info(f"=== PWHL PBP Events complete — {total_rows} total rows ===")

@@ -14,25 +14,38 @@ import os
 
 import requests
 
+from pipeline_common import FetchError
+
 WORKER_BASE = "https://eyewall-poller.billowing-queen-bf23.workers.dev"
 TIMEOUT_SECONDS = 10
 
 _cache = None  # populated on first call, reused for the rest of this process
 _season_types_cache: dict | None = None  # same pattern, separate endpoint — see get_season_type()
 
+# Sentinels distinct from both None (unfetched) and {} (a genuinely empty but
+# valid response) — mark "already tried this process, the Worker was down."
+# _fetch_config()/_fetch_season_types() raise FetchError on every call once
+# a sentinel is cached, without hitting the network again, preserving the
+# original "at most one real fetch attempt per process" behavior now that
+# failure is signaled by raising instead of by caching a falsy value.
+_FETCH_FAILED = object()
+_TYPES_FETCH_FAILED = object()
 
-def _fetch_config() -> dict | None:
+
+def _fetch_config() -> dict:
     global _cache
+    if _cache is _FETCH_FAILED:
+        raise FetchError("season_lookup: Worker unreachable (cached failure, not retrying)")
     if _cache is not None:
         return _cache
     try:
         r = requests.get(f"{WORKER_BASE}/config/seasons", timeout=TIMEOUT_SECONDS)
         r.raise_for_status()
         _cache = r.json()
+        return _cache
     except Exception as e:
-        print(f"  WARNING: season_lookup could not reach Worker ({e}) — using env var fallbacks")
-        _cache = {}
-    return _cache
+        _cache = _FETCH_FAILED
+        raise FetchError(f"season_lookup could not reach Worker ({e})") from e
 
 
 def get_nhl_season() -> int:
@@ -42,7 +55,11 @@ def get_nhl_season() -> int:
     unset) if the Worker is unreachable or returns something unexpected.
     """
     fallback = int(os.environ.get("NHL_SEASON", "20252026"))
-    config = _fetch_config()
+    try:
+        config = _fetch_config()
+    except FetchError as e:
+        print(f"  WARNING: {e} — using env var fallback")
+        return fallback
     try:
         return int(config["nhl"]["seasonId"])
     except (KeyError, TypeError, ValueError):
@@ -62,7 +79,11 @@ def get_pwhl_season() -> dict:
         "season_type": "regular",
         "start_year": 2025,
     }
-    config = _fetch_config()
+    try:
+        config = _fetch_config()
+    except FetchError as e:
+        print(f"  WARNING: {e} — using env var fallback")
+        return fallback
     try:
         pwhl = config["pwhl"]
         return {
@@ -83,21 +104,25 @@ def _fetch_season_types() -> dict:
 
     Unlike _fetch_config()'s fallback-laden callers, there IS no
     reasonable local fallback for "what type is this arbitrary season" —
-    caching {} on failure just means get_season_type() correctly returns
-    None for the rest of this run instead of retrying a Worker that's
-    already down.
+    get_season_type() catches the FetchError this raises and returns None
+    for the rest of this run instead of retrying a Worker that's already
+    down (see _FETCH_FAILED-style sentinel caching above).
     """
     global _season_types_cache
+    if _season_types_cache is _TYPES_FETCH_FAILED:
+        raise FetchError(
+            "season_lookup: Worker unreachable for season types (cached failure, not retrying)"
+        )
     if _season_types_cache is not None:
         return _season_types_cache
     try:
         r = requests.get(f"{WORKER_BASE}/config/seasons/pwhl-types", timeout=TIMEOUT_SECONDS)
         r.raise_for_status()
         _season_types_cache = r.json()
+        return _season_types_cache
     except Exception as e:
-        print(f"  WARNING: season_lookup could not reach Worker for season types ({e})")
-        _season_types_cache = {}
-    return _season_types_cache
+        _season_types_cache = _TYPES_FETCH_FAILED
+        raise FetchError(f"season_lookup could not reach Worker for season types ({e})") from e
 
 
 def get_season_type(season_id: str | int) -> str | None:
@@ -110,5 +135,9 @@ def get_season_type(season_id: str | int) -> str | None:
     actually know," and callers should treat that as something to
     surface (log + skip, or raise), not as license to guess "regular".
     """
-    types = _fetch_season_types()
+    try:
+        types = _fetch_season_types()
+    except FetchError as e:
+        print(f"  WARNING: {e}")
+        return None
     return types.get(str(season_id))
