@@ -1,0 +1,34 @@
+-- Session 47 — recommended index for shift_events, found while verifying
+-- the rapm.py/score_state.py keyset-pagination fix. Run this in the
+-- Supabase SQL editor. This file is a reference copy, not executed by any
+-- pipeline code (this repo has no migration tooling — schema changes are
+-- applied directly in Supabase, same as every existing pwhl_* table).
+--
+-- Background: line_combinations.py's fetch_all() proved keyset (cursor)
+-- pagination fixes the `57014` statement-timeout risk for a team-scoped,
+-- single-season shift_events query. rapm.py and score_state.py needed the
+-- same fix for their league-wide (season-only, no team filter) pool loads
+-- — but live verification against production (2026-07-08) showed that
+-- query shape can still hit `57014` even with keyset pagination: a single
+-- page (999 rows, `season = X AND id > last_seen_id ORDER BY id LIMIT
+-- 999`) took 7.4s on its own, and a full-season fetch (~1.1M rows)
+-- succeeded once in 83.8s but failed outright on a retry. That strongly
+-- suggests there's no index supporting an efficient scan for "season = X,
+-- ordered by id" at this selectivity (no team filter narrows it down) —
+-- keyset still helps (cost no longer compounds with page depth, so this
+-- is a probabilistic failure now, not a guaranteed one at large offsets),
+-- but it isn't a complete fix without a supporting index.
+--
+-- This composite index lets Postgres satisfy "WHERE season = X ORDER BY
+-- id" directly from the index (season as the leading/equality column,
+-- id as the sort column within that partition) instead of scanning the
+-- full id-ordered range and filtering by season row-by-row.
+create index if not exists shift_events_season_id_idx
+  on public.shift_events (season, id);
+
+-- shot_events did NOT show this problem in verification (a full-season
+-- keyset fetch, 173,972 rows, completed cleanly and quickly) — likely
+-- because it's a much smaller table per season than shift_events (one row
+-- per shot vs. one row per shift). No index change proposed for
+-- shot_events at this time; revisit if it starts showing the same
+-- symptom as the table grows.
