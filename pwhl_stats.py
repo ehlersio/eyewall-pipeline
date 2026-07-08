@@ -771,9 +771,19 @@ def run(season_id: str | None = None) -> None:
     log.info(f"=== PWHL Stats pipeline — season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-    fetch_roster(sb, season_id)
+    # fetch_roster() runs after the stats fetches, not before: skater/goalie
+    # stats stub-upsert pwhl_players.team_id from each player's *stats-view*
+    # team_code, which lags on players who haven't played a game for their
+    # new team yet (trades, expansion-team signings) — team_code there still
+    # reflects last season's team. Roster is the authoritative "who's on
+    # this team right now" source, so it needs the final write to avoid
+    # having its own team_id immediately clobbered by the stats sweep
+    # (found Session 44: DET's 13 signed skaters/D had team_id silently
+    # reverted to their old teams by fetch_skater_stats/fetch_goalie_stats
+    # running right after a correct fetch_roster() write in the same run).
     fetch_skater_stats(sb, season_id, season_type)
     fetch_goalie_stats(sb, season_id, season_type)
+    fetch_roster(sb, season_id)
     fetch_team_stats(sb, season_id, season_type)
     run_team_shot_totals(sb, season_id, season_type)
     fetch_game_log(sb, season_id)
