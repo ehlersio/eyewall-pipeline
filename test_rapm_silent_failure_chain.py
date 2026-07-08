@@ -32,7 +32,19 @@ def _chain_mock(data=None):
     """Chainable Supabase query-builder mock — every builder method returns
     itself, .execute() returns a MagicMock with .data set to the given rows."""
     m = MagicMock()
-    for method in ("select", "eq", "range", "in_", "delete", "update", "insert", "upsert"):
+    for method in (
+        "select",
+        "eq",
+        "range",
+        "gt",
+        "order",
+        "limit",
+        "in_",
+        "delete",
+        "update",
+        "insert",
+        "upsert",
+    ):
         getattr(m, method).return_value = m
     m.execute.return_value = MagicMock(data=data if data is not None else [])
     return m

@@ -57,6 +57,42 @@ def fetch_all(client, table, select, filters, page_size=1000):
     return all_rows
 
 
+def fetch_all_keyset(client, table, select, filters, page_size=999, cursor_col="id"):
+    """Cursor-based (keyset) Supabase fetch — see line_combinations.py::fetch_all.
+
+    Used for the shot_events/shift_events pool loads here, which are
+    league-wide (all 32 teams) across a 3-season pool — same table, larger
+    scope than the single-team single-season query that hit a Postgres
+    `57014` statement timeout via OFFSET pagination on 2026-07-04.
+    game_log stays on offset pagination (no `id` column, small table).
+
+    Known limitation (see rapm.py::fetch_all_keyset's matching docstring
+    for the full writeup): the season-only filter here (no team scoping)
+    is less selective than line_combinations.py's proven case, and live
+    verification against production showed individual pages can still hit
+    a `57014` timeout even with keyset pagination — a large reliability
+    improvement over OFFSET, not a guaranteed fix. See
+    docs/session47_shift_events_index.sql for the recommended index.
+    """
+    rows, last_val = [], 0
+    cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"
+    while True:
+        q = client.table(table).select(cols)
+        for col, val in filters.items():
+            if isinstance(val, list):
+                q = q.in_(col, val)
+            else:
+                q = q.eq(col, val)
+        batch = q.gt(cursor_col, last_val).order(cursor_col).limit(page_size).execute().data
+        if not batch:
+            break
+        rows.extend(batch)
+        last_val = batch[-1][cursor_col]
+        if len(batch) < page_size:
+            break
+    return rows
+
+
 def prior_season(season: int) -> int:
     end_year = season % 10000
     start_year = season // 10000
@@ -78,7 +114,7 @@ def build_goal_timeline(client, seasons):
             game_home[r["game_id"]] = r["home_team"]
 
     for s in seasons:
-        rows = fetch_all(
+        rows = fetch_all_keyset(
             client,
             "shot_events",
             "game_id,team,event_type,period,time_in_period",
@@ -205,7 +241,7 @@ def run(season: int = NHL_SEASON):
     print("\n[2/3] Loading shifts...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all(
+        rows = fetch_all_keyset(
             client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
         )
         all_shifts.extend(rows)

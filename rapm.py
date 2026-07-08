@@ -95,6 +95,56 @@ def fetch_all(client, table, select, filters: dict, page_size=1000):
     return all_rows
 
 
+def fetch_all_keyset(client, table, select, filters: dict, page_size=999, cursor_col="id"):
+    """Cursor-based (keyset) Supabase fetch — see line_combinations.py::fetch_all.
+
+    Used here for the shot_events/shift_events pool loads, which are
+    league-wide (all 32 teams) across a 3-season pool — the same table and
+    a larger scope than the single-team, single-season query that hit a
+    Postgres `57014` statement timeout via OFFSET pagination on 2026-07-04
+    (see line_combinations.py's docstring for that incident). Keyset
+    pagination keeps each page's cost flat regardless of *depth*, which is
+    what OFFSET can't do — but depth wasn't the only variable in play here.
+
+    Known limitation (found verifying this fix, 2026-07-08): unlike
+    line_combinations.py's team-scoped query, this module's shift_events
+    calls filter by season only (no team filter — RAPM needs the full
+    league). That's a much less selective filter, and live verification
+    against production showed single pages still occasionally hit the same
+    `57014` timeout even with keyset pagination (one page took 7.4s on its
+    own; a full season fetch succeeded once in 83.8s but failed outright on
+    a retry). This is a large improvement over OFFSET — cost no longer
+    compounds with depth, and the failure mode is "one page times out, retry
+    might work" rather than "guaranteed to get slower and eventually always
+    fail" — but it is not a guaranteed fix without a supporting index. See
+    docs/session47_shift_events_index.sql for the recommended index; this
+    function does not depend on it existing, but reliability without it is
+    probabilistic, not certain.
+
+    Not used for every fetch_all() call in this module — game_log has no
+    `id` column (composite game_id+team rows) and player_score_state_dist
+    has no surrogate key either, so those stay on offset pagination; both
+    are small, bounded tables with no timeout history.
+    """
+    rows, last_val = [], 0
+    cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"
+    while True:
+        q = client.table(table).select(cols)
+        for col, val in filters.items():
+            if isinstance(val, list):
+                q = q.in_(col, val)
+            else:
+                q = q.eq(col, val)
+        batch = q.gt(cursor_col, last_val).order(cursor_col).limit(page_size).execute().data
+        if not batch:
+            break
+        rows.extend(batch)
+        last_val = batch[-1][cursor_col]
+        if len(batch) < page_size:
+            break
+    return rows
+
+
 def prior_season(season: int) -> int:
     """Return the season immediately before this one.
     e.g. 20252026 -> 20242025, 20242025 -> 20232024
@@ -133,7 +183,7 @@ def run(season: int = NHL_SEASON):
     print("\n[1/5] Loading shot events...")
     all_shots = []
     for s in POOL_SEASONS:
-        rows = fetch_all(
+        rows = fetch_all_keyset(
             client,
             "shot_events",
             "game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code",
@@ -154,7 +204,7 @@ def run(season: int = NHL_SEASON):
     print("\n[2/5] Loading shift events...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all(
+        rows = fetch_all_keyset(
             client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
         )
         all_shifts.extend(rows)
