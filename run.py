@@ -125,7 +125,16 @@ def run_all():
     stage("shift_data", shift_data.run)
     stage("zone_starts", zone_starts.run)
     rapm_status = stage("rapm", rapm.run)
-    stage("moneypuck", moneypuck.run)
+
+    # moneypuck.run() returns a list of its own internal sub-stage failures
+    # (e.g. RAPM values load, game_xg, goalie_qs) rather than raising for
+    # those specific pieces -- see moneypuck.py's run() docstring. Fold that
+    # list into failed_stages too, so a partial moneypuck failure is just as
+    # visible in the summary as a stage that raised outright.
+    moneypuck_result = stage("moneypuck", moneypuck.run)
+    if moneypuck_result and moneypuck_result is not STAGE_FAILED:
+        failed_stages.extend(moneypuck_result)
+
     stage("line_combinations", line_combinations.run)  # must run after shift_data + shot_events
     stage("special_teams", special_teams.run)  # must run after shift_data
     stage("power_rankings", power_rankings.run)  # must run after moneypuck (needs fresh WAR + xGF%)
@@ -189,7 +198,8 @@ if __name__ == "__main__":
     elif arg == "moneypuck":
         import moneypuck
 
-        moneypuck.run()
+        if moneypuck.run():
+            sys.exit(1)
     elif arg == "lines":
         import line_combinations
 
