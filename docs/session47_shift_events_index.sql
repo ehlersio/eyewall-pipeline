@@ -23,7 +23,15 @@
 -- id" directly from the index (season as the leading/equality column,
 -- id as the sort column within that partition) instead of scanning the
 -- full id-ordered range and filtering by season row-by-row.
-create index if not exists shift_events_season_id_idx
+--
+-- CONCURRENTLY: shift_events is a live table (read by eyewall-poller,
+-- written by the nightly pipeline). A plain CREATE INDEX takes an
+-- ACCESS EXCLUSIVE lock for the whole build, which would block reads and
+-- writes against a ~1M+ row table. CONCURRENTLY avoids that lock (at the
+-- cost of a slower build, and it can't run inside an explicit
+-- transaction block -- run this as its own single statement, which is
+-- how the Supabase SQL editor executes it by default).
+create index concurrently if not exists shift_events_season_id_idx
   on public.shift_events (season, id);
 
 -- shot_events did NOT show this problem in verification (a full-season
