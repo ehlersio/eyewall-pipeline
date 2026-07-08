@@ -105,6 +105,12 @@ def prior_season(season: int) -> int:
 
 
 def run(season: int = NHL_SEASON):
+    """Returns an explicit status string: "ok" on success, or one of the
+    "aborted_*" sentinels below on early exit. player_seasons.rapm is
+    updated in place per-player (never cleared first), so a mid-run abort
+    leaves prior values untouched rather than empty — callers must check
+    this return value directly rather than inferring success from whether
+    player_seasons.rapm is populated (stale != fresh)."""
     try:
         import numpy as np
         from scipy.sparse import lil_matrix
@@ -112,7 +118,7 @@ def run(season: int = NHL_SEASON):
     except ImportError:
         print("  ERROR Missing dependencies. Run:")
         print("    pip install scikit-learn scipy --break-system-packages")
-        return
+        return "aborted_missing_deps"
 
     client = get_client()
     print(f"\n=== RAPM Pipeline -- Season {season} (3-year pool) ===")
@@ -369,7 +375,7 @@ def run(season: int = NHL_SEASON):
 
     if included < 1000:
         print("  ERROR Too few events for regression -- aborting")
-        return
+        return "aborted_insufficient_data"
 
     # Build sparse matrix
     import numpy as np
@@ -454,6 +460,7 @@ def run(season: int = NHL_SEASON):
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
     print("\nDONE RAPM pipeline complete")
+    return "ok"
 
 
 if __name__ == "__main__":
