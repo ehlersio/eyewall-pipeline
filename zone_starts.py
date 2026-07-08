@@ -110,26 +110,38 @@ def get_all_completed_games(season):
 
 
 def get_processed_games(client, season):
+    """Keyset-paginated (not OFFSET) -- grows every completed game of every
+    season; see line_combinations.py::fetch_all's docstring for the
+    2026-07-04 statement-timeout incident that motivated this pattern."""
     all_ids = set()
-    offset = 0
+    last_id = 0
     while True:
         result = (
             client.table("zone_starts")
-            .select("game_id")
+            .select("id,game_id")
             .eq("season", season)
-            .range(offset, offset + 999)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
             .execute()
         )
         rows = result.data
         if not rows:
             break
         all_ids.update(r["game_id"] for r in rows)
-        offset += 1000
+        last_id = rows[-1]["id"]
+        if len(rows) < 999:
+            break
     return all_ids
 
 
 def get_skipped_games(client, season):
-    """Get game IDs previously marked as having no zone start data."""
+    """Get game IDs previously marked as having no zone start data.
+
+    Left on OFFSET pagination (Session 47 audit #10 pass, accept-and-
+    monitor): skipped_games only holds games with no data at all, a small
+    fraction of a season -- no timeout history, revisit if that changes.
+    """
     all_ids = set()
     offset = 0
     while True:
@@ -417,6 +429,11 @@ def run(season=NHL_SEASON):
     print(f"  Found {len(games):,} completed games")
 
     # Load home team mapping from game_log — more reliable than schedule API field
+    # OFFSET pagination accepted as-is (Session 47 audit #10 pass): ~1,300
+    # rows/season, sub-cap in practice. Also game_log has no `id` column
+    # (one row per team per game -- game_id alone isn't unique) so keyset
+    # isn't a drop-in option here without a composite cursor; not worth it
+    # at this row count.
     print("  Loading home team map from game_log...")
     home_team_map = {}
     offset = 0

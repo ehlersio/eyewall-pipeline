@@ -118,6 +118,12 @@ def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> lis
     Each row has: game_id, period, time_in_period.
     """
     # Fetch all non-5v5 shot events for games this team played in
+    # OFFSET pagination accepted as-is (Session 47 audit #10 pass): despite
+    # the name, this always queries CAR's own car_game=True dataset
+    # regardless of `team` (client-side filtered below), so it's bounded to
+    # one team's season -- same low-risk shape as line_combinations.py's
+    # proven-safe queries, just not yet converted to keyset. Revisit if
+    # this ever becomes genuinely league-wide.
     rows = []
     offset = 0
     while True:
@@ -166,25 +172,34 @@ def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> lis
 
 
 def fetch_shifts_for_team(team: str, season: int) -> list[dict]:
-    """Returns all shift_events for the team in the season."""
+    """Returns all shift_events for the team in the season.
+
+    Keyset (not OFFSET) pagination -- team-scoped so each call is bounded
+    today, but this is the same shift_events table that hit a Postgres
+    57014 statement timeout via OFFSET pagination at this exact scope
+    (single team, single season) on 2026-07-04, fixed the same way in
+    line_combinations.py::fetch_all (see its docstring for the incident).
+    """
     rows = []
-    offset = 0
+    last_id = 0
     while True:
         batch = (
             supabase.table("shift_events")
-            .select("game_id,player_id,period,start_secs,end_secs")
+            .select("id,game_id,player_id,period,start_secs,end_secs")
             .eq("season", season)
             .eq("team", team)
-            .range(offset, offset + 999)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
             .execute()
             .data
         )
         if not batch:
             break
         rows.extend(batch)
-        if len(batch) < 1000:
+        last_id = batch[-1]["id"]
+        if len(batch) < 999:
             break
-        offset += 1000
     return rows
 
 

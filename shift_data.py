@@ -132,7 +132,12 @@ def get_processed_games(client, season):
 
 
 def get_skipped_games(client, season):
-    """Get game IDs previously marked as having no shift data."""
+    """Get game IDs previously marked as having no shift data.
+
+    Left on OFFSET pagination (Session 47 audit #10 pass, accept-and-
+    monitor): skipped_games only holds games with no data at all, a small
+    fraction of a season -- no timeout history, revisit if that changes.
+    """
     all_ids = set()
     offset = 0
     while True:

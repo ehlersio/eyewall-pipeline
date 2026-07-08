@@ -62,6 +62,9 @@ MEAN_TOLERANCE = 0.05  # mean should be within ±0.05 of 0
 
 
 def fetch_all(client, table, select, filters, page_size=1000):
+    """OFFSET pagination accepted as-is (Session 47 audit #10 pass): only
+    ever queries small tables (players, player_seasons) in this module's
+    nightly path, well under the cap -- revisit if that changes."""
     all_rows = []
     offset = 0
     while True:
