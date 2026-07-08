@@ -41,6 +41,9 @@ PWHL_SEASON = str(get_pwhl_season()["season_id"])
 
 
 def _fetch_all(sb, table: str, cols: str, **filters):
+    """OFFSET pagination accepted as-is (Session 47 audit #10 pass):
+    ad hoc/report-only (no scheduled caller), PWHL-scale season data --
+    revisit if this graduates into a real, scheduled pipeline module."""
     out = []
     offset = 0
     step = 1000

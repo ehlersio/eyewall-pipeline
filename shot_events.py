@@ -100,22 +100,29 @@ def get_all_completed_games(season):
 
 
 def get_already_processed(client, season):
-    """Get game IDs already in shot_events (paginated)."""
+    """Get game IDs already in shot_events (keyset-paginated -- see
+    line_combinations.py::fetch_all's docstring for why OFFSET pagination
+    is a timeout risk on this table as it grows every game of every
+    season; this query walks the whole table's depth every run)."""
     all_ids = set()
-    offset = 0
+    last_id = 0
     while True:
         rows = (
             client.table("shot_events")
-            .select("game_id")
+            .select("id,game_id")
             .eq("season", season)
-            .range(offset, offset + 999)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
             .execute()
             .data
         )
         if not rows:
             break
         all_ids.update(r["game_id"] for r in rows)
-        offset += 1000
+        last_id = rows[-1]["id"]
+        if len(rows) < 999:
+            break
     return all_ids
 
 

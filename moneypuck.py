@@ -143,6 +143,9 @@ def run_team_xgf_rollup(client, season: int):
     """
     print("\n--- Team XGF% rollup (game_xg → team_seasons) ---")
     # Supabase project cap is 999 rows — paginate with .range()
+    # OFFSET pagination accepted as-is (Session 47 audit #10 pass):
+    # ~2,624 rows/season (32 teams x 82 games), well under the cap --
+    # already paginated defensively, not because it's been observed slow.
     rows = []
     offset = 0
     while True:
@@ -213,16 +216,22 @@ def run_goalie_qs(client, season: int):
 
     goalie_game_stats = defaultdict(lambda: {"sa": 0, "sv": 0})
 
-    offset = 0
+    # Keyset (not OFFSET) pagination -- same growth profile as
+    # shot_events.py::get_already_processed (season-scoped, grows every
+    # game); see line_combinations.py::fetch_all's docstring for the
+    # 2026-07-04 statement-timeout incident that motivated this pattern.
+    last_id = 0
     total_rows = 0
     while True:
         rows = (
             client.table("shot_events")
-            .select("goalie_id,game_id,event_type")
+            .select("id,goalie_id,game_id,event_type")
             .eq("season", season)
             .in_("event_type", ["goal", "shot-on-goal"])
             .not_.is_("goalie_id", "null")
-            .range(offset, offset + 999)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
             .execute()
             .data
         )
@@ -234,9 +243,9 @@ def run_goalie_qs(client, season: int):
             if r["event_type"] == "shot-on-goal":
                 goalie_game_stats[key]["sv"] += 1
         total_rows += len(rows)
+        last_id = rows[-1]["id"]
         if len(rows) < 999:
             break
-        offset += 999
 
     print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
 
@@ -462,6 +471,8 @@ def run(season: int = NHL_SEASON) -> list[str]:
     # way for a caller to tell "every player is running in fallback mode
     # tonight" from "RAPM data was never expected to exist yet."
     print("  Loading RAPM values from Supabase...")
+    # OFFSET pagination accepted as-is (Session 47 audit #10 pass): bounded
+    # by league roster size (~800-900 players/season), well under the cap.
     rapm_map = {}  # player_id -> rapm coefficient (marginal xG/60 at 5v5 EV)
     try:
         offset = 0
