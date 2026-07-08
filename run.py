@@ -31,22 +31,69 @@ Usage:
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
+
+# Sentinel distinct from any real stage return value (None included) --
+# lets run_all() tell "this stage raised" apart from "this stage returned
+# a falsy/None result on purpose."
+STAGE_FAILED = object()
 
 
 def run_subprocess(label, cmd):
-    """Run a script via subprocess. Raises on non-zero exit."""
-    print(f"\n  >> {label}")
+    """Run a script via subprocess. Raises on non-zero exit.
+
+    Caller (run_ai_pipeline, via run_stage) prints the stage label already.
+    """
     result = subprocess.run([sys.executable, *cmd])
     if result.returncode != 0:
         raise RuntimeError(f"{cmd[0]} failed with exit code {result.returncode}")
 
 
+def run_stage(label, fn, *args, **kwargs):
+    """Run one pipeline stage in isolation.
+
+    A single stage's exception (a genuine bug, a schema change, an
+    unhandled edge case -- as opposed to a fetch failure, which the
+    individual modules' HTTP helpers already swallow to None/[] on their
+    own) must not abort every other stage in the nightly run, including
+    ones that have nothing to do with the failure. Logs loudly (full
+    traceback + stage label) and returns STAGE_FAILED so the caller can
+    track/report it, instead of letting it propagate.
+
+    Once Item 3 (SESSION_46_SCOPE.md) lands a distinct FetchError from the
+    HTTP-helper layer, this should catch that separately from other
+    exceptions too -- "this stage's fetch failed after retries" and "this
+    stage hit an unexpected parsing exception" are different signals worth
+    keeping apart in the logs, even though both currently resolve to the
+    same "skip it, keep going" action.
+    """
+    print(f"\n  >> {label}")
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        print(f"\n  !! {label} FAILED: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return STAGE_FAILED
+
+
 def run_ai_pipeline():
-    """AI pipeline — game_scoring, summaries, scouting. Runs after moneypuck."""
-    run_subprocess("game_scoring   — PBP goals/assists parser", ["game_scoring.py"])
-    run_subprocess("ai_summaries   — post-game summaries", ["ai_summaries.py"])
-    run_subprocess("ai_scouting    — missing scouting blurbs", ["ai_scouting.py", "--missing"])
+    """AI pipeline — game_scoring, summaries, scouting. Runs after moneypuck.
+
+    Each sub-stage is isolated: game_scoring, ai_summaries, and ai_scouting
+    don't depend on each other's output (confirmed — neither ai_summaries.py
+    nor ai_scouting.py reference game_scoring), so one crashing must not
+    prevent the other two from running.
+    """
+    failures = []
+    for label, cmd in (
+        ("game_scoring   — PBP goals/assists parser", ["game_scoring.py"]),
+        ("ai_summaries   — post-game summaries", ["ai_summaries.py"]),
+        ("ai_scouting    — missing scouting blurbs", ["ai_scouting.py", "--missing"]),
+    ):
+        if run_stage(label, run_subprocess, label, cmd) is STAGE_FAILED:
+            failures.append(label)
+    return failures
 
 
 def run_all():
@@ -65,38 +112,62 @@ def run_all():
     import special_teams
     import zone_starts
 
-    nhl_stats.run()
-    shot_events.run()
-    shift_data.run()
-    zone_starts.run()
-    rapm_status = rapm.run()
-    moneypuck.run()
-    line_combinations.run()  # must run after shift_data + shot_events
-    special_teams.run()  # must run after shift_data
-    power_rankings.run()  # must run after moneypuck (needs fresh WAR + xGF%)
+    failed_stages = []
+
+    def stage(label, fn, *args, **kwargs):
+        result = run_stage(label, fn, *args, **kwargs)
+        if result is STAGE_FAILED:
+            failed_stages.append(label)
+        return result
+
+    stage("nhl_stats", nhl_stats.run)
+    stage("shot_events", shot_events.run)
+    stage("shift_data", shift_data.run)
+    stage("zone_starts", zone_starts.run)
+    rapm_status = stage("rapm", rapm.run)
+
+    # moneypuck.run() returns a list of its own internal sub-stage failures
+    # (e.g. RAPM values load, game_xg, goalie_qs) rather than raising for
+    # those specific pieces -- see moneypuck.py's run() docstring. Fold that
+    # list into failed_stages too, so a partial moneypuck failure is just as
+    # visible in the summary as a stage that raised outright.
+    moneypuck_result = stage("moneypuck", moneypuck.run)
+    if moneypuck_result and moneypuck_result is not STAGE_FAILED:
+        failed_stages.extend(moneypuck_result)
+
+    stage("line_combinations", line_combinations.run)  # must run after shift_data + shot_events
+    stage("special_teams", special_teams.run)  # must run after shift_data
+    stage("power_rankings", power_rankings.run)  # must run after moneypuck (needs fresh WAR + xGF%)
 
     # AI pipeline — runs after player_seasons is fresh
-    run_ai_pipeline()
+    failed_stages.extend(run_ai_pipeline())
 
     # Validate RAPM after every nightly run — exits non-zero on failure
     # which triggers a GitHub Actions failure email
     import validate_rapm
 
-    validation_status = validate_rapm.run()
+    validation_status = stage("validate_rapm", validate_rapm.run)
 
     elapsed = round(time.time() - start, 1)
     print(f"\n{'=' * 55}")
     print(f"  All pipelines complete in {elapsed}s")
+    if failed_stages:
+        print(f"  {len(failed_stages)} stage(s) failed: {', '.join(failed_stages)}")
+    else:
+        print("  All stages completed without error")
     print(f"{'=' * 55}\n")
 
     # Allowlist, not a blocklist: rapm.run() returning anything other than
     # "ok", or validate_rapm.run() returning anything other than "pass"/"warn"
-    # (including an unexpected None), fails the job loudly instead of being
-    # silently treated as success — see Session 45 for the incident this
-    # closed (rapm.run()'s abort paths returned nothing and player_seasons.rapm
-    # keeps stale prior-night values on abort, so validation could pass
-    # against stale data even when tonight's regression never ran).
-    if rapm_status != "ok" or validation_status not in ("pass", "warn"):
+    # (including an unexpected None or STAGE_FAILED), fails the job loudly
+    # instead of being silently treated as success — see Session 45 for the
+    # incident this closed (rapm.run()'s abort paths returned nothing and
+    # player_seasons.rapm keeps stale prior-night values on abort, so
+    # validation could pass against stale data even when tonight's
+    # regression never ran). Any other stage failing (per-stage isolation,
+    # Session 46) also fails the job, but critically doesn't prevent the
+    # remaining stages from having run first.
+    if failed_stages or rapm_status != "ok" or validation_status not in ("pass", "warn"):
         sys.exit(1)
 
 
@@ -127,7 +198,8 @@ if __name__ == "__main__":
     elif arg == "moneypuck":
         import moneypuck
 
-        moneypuck.run()
+        if moneypuck.run():
+            sys.exit(1)
     elif arg == "lines":
         import line_combinations
 
@@ -148,6 +220,7 @@ if __name__ == "__main__":
         if status not in ("pass", "warn"):
             sys.exit(1)
     elif arg == "ai":
-        run_ai_pipeline()
+        if run_ai_pipeline():
+            sys.exit(1)
     else:
         run_all()

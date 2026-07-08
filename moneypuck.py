@@ -8,6 +8,7 @@ Runs after nhl_stats.py (player_seasons rows must exist first).
 import csv
 import io
 import math
+import traceback
 
 import requests
 
@@ -100,11 +101,7 @@ def run_game_xg(client, season: int):
     coordinate-estimate model in the frontend.
     """
     print("\n--- Game-level xG (MoneyPuck) ---")
-    try:
-        rows = fetch_team_games_csv(season)
-    except Exception as e:
-        print(f"  WARNING: Could not fetch team game CSV: {e}")
-        return
+    rows = fetch_team_games_csv(season)
 
     upserts = []
     for row in rows:
@@ -145,29 +142,25 @@ def run_team_xgf_rollup(client, season: int):
     owned by nhl_stats.py and are not touched here.
     """
     print("\n--- Team XGF% rollup (game_xg → team_seasons) ---")
-    try:
-        # Supabase project cap is 999 rows — paginate with .range()
-        rows = []
-        offset = 0
-        while True:
-            batch = (
-                client.table("game_xg")
-                .select("team,xgf,xga")
-                .eq("season", season)
-                .eq("situation", "5on5")
-                .range(offset, offset + 999)
-                .execute()
-                .data
-            )
-            if not batch:
-                break
-            rows.extend(batch)
-            if len(batch) < 999:
-                break
-            offset += 999
-    except Exception as e:
-        print(f"  WARNING: Could not fetch game_xg rows: {e}")
-        return
+    # Supabase project cap is 999 rows — paginate with .range()
+    rows = []
+    offset = 0
+    while True:
+        batch = (
+            client.table("game_xg")
+            .select("team,xgf,xga")
+            .eq("season", season)
+            .eq("situation", "5on5")
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < 999:
+            break
+        offset += 999
 
     if not rows:
         print("  No game_xg rows found — skipping rollup")
@@ -215,103 +208,122 @@ def run_goalie_qs(client, season: int):
     No external CSV needed — uses data already in the DB.
     """
     print("\n--- Goalie Quality Start % ---")
-    try:
-        print("  Fetching shot_events for goalie QS computation...")
-        from collections import defaultdict
+    print("  Fetching shot_events for goalie QS computation...")
+    from collections import defaultdict
 
-        goalie_game_stats = defaultdict(lambda: {"sa": 0, "sv": 0})
+    goalie_game_stats = defaultdict(lambda: {"sa": 0, "sv": 0})
 
-        offset = 0
-        total_rows = 0
-        while True:
-            rows = (
-                client.table("shot_events")
-                .select("goalie_id,game_id,event_type")
-                .eq("season", season)
-                .in_("event_type", ["goal", "shot-on-goal"])
-                .not_.is_("goalie_id", "null")
-                .range(offset, offset + 999)
-                .execute()
-                .data
-            )
-            if not rows:
-                break
-            for r in rows:
-                key = (r["goalie_id"], r["game_id"])
-                goalie_game_stats[key]["sa"] += 1
-                if r["event_type"] == "shot-on-goal":
-                    goalie_game_stats[key]["sv"] += 1
-            total_rows += len(rows)
-            if len(rows) < 999:
-                break
-            offset += 999
+    offset = 0
+    total_rows = 0
+    while True:
+        rows = (
+            client.table("shot_events")
+            .select("goalie_id,game_id,event_type")
+            .eq("season", season)
+            .in_("event_type", ["goal", "shot-on-goal"])
+            .not_.is_("goalie_id", "null")
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        )
+        if not rows:
+            break
+        for r in rows:
+            key = (r["goalie_id"], r["game_id"])
+            goalie_game_stats[key]["sa"] += 1
+            if r["event_type"] == "shot-on-goal":
+                goalie_game_stats[key]["sv"] += 1
+        total_rows += len(rows)
+        if len(rows) < 999:
+            break
+        offset += 999
 
-        print(
-            f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs"
+    print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
+
+    if not goalie_game_stats:
+        print("  No shot event data — skipping")
+        return
+
+    # Aggregate QS per goalie
+    goalie_totals = defaultdict(lambda: {"starts": 0, "qs": 0})
+    for (goalie_id, _game_id), stats in goalie_game_stats.items():
+        sa = stats["sa"]
+        sv = stats["sv"]
+        if sa < 5:
+            continue  # skip garbage time / backup appearances
+        sv_pct = sv / sa
+        is_qs = sv_pct >= 0.917 or (sa <= 20 and sv_pct >= 0.885)
+        goalie_totals[goalie_id]["starts"] += 1
+        if is_qs:
+            goalie_totals[goalie_id]["qs"] += 1
+
+    # Look up teams for CAR goalies so the conflict key matches nhl_stats.py
+    # (goalie_seasons uses player_id,season,team,game_type as conflict key).
+    # Deliberately not swallowed: `team` is part of the upsert's on_conflict
+    # key below, so a failed/partial lookup here doesn't just mean a missing
+    # cosmetic field -- it risks upserting under the wrong key and creating
+    # a duplicate row instead of updating the existing one.
+    team_map = {}
+    team_rows = (
+        client.table("goalie_seasons")
+        .select("player_id,team")
+        .eq("season", season)
+        .eq("game_type", 2)
+        .execute()
+        .data
+        or []
+    )
+    for r in team_rows:
+        team_map[r["player_id"]] = r["team"]
+
+    upserts = []
+    for goalie_id, g in goalie_totals.items():
+        if g["starts"] == 0:
+            continue
+        upserts.append(
+            {
+                "player_id": int(goalie_id),
+                "season": season,
+                "team": team_map.get(int(goalie_id), ""),
+                "game_type": 2,
+                "qs": g["qs"],
+                "qs_pct": round(g["qs"] / g["starts"], 4),
+            }
         )
 
-        if not goalie_game_stats:
-            print("  No shot event data — skipping")
-            return
+    print(f"  Upserting QS% for {len(upserts)} goalies...")
+    for i in range(0, len(upserts), 500):
+        client.table("goalie_seasons").upsert(
+            upserts[i : i + 500], on_conflict="player_id,season,team,game_type"
+        ).execute()
+    print(f"  ✓ goalie_seasons: QS% updated for {len(upserts)} goalies")
 
-        # Aggregate QS per goalie
-        goalie_totals = defaultdict(lambda: {"starts": 0, "qs": 0})
-        for (goalie_id, _game_id), stats in goalie_game_stats.items():
-            sa = stats["sa"]
-            sv = stats["sv"]
-            if sa < 5:
-                continue  # skip garbage time / backup appearances
-            sv_pct = sv / sa
-            is_qs = sv_pct >= 0.917 or (sa <= 20 and sv_pct >= 0.885)
-            goalie_totals[goalie_id]["starts"] += 1
-            if is_qs:
-                goalie_totals[goalie_id]["qs"] += 1
 
-        # Look up teams for CAR goalies so the conflict key matches nhl_stats.py
-        # (goalie_seasons uses player_id,season,team,game_type as conflict key)
-        team_map = {}
-        try:
-            team_rows = (
-                client.table("goalie_seasons")
-                .select("player_id,team")
-                .eq("season", season)
-                .eq("game_type", 2)
-                .execute()
-                .data
-                or []
-            )
-            for r in team_rows:
-                team_map[r["player_id"]] = r["team"]
-        except Exception:
-            pass
-
-        upserts = []
-        for goalie_id, g in goalie_totals.items():
-            if g["starts"] == 0:
-                continue
-            upserts.append(
-                {
-                    "player_id": int(goalie_id),
-                    "season": season,
-                    "team": team_map.get(int(goalie_id), ""),
-                    "game_type": 2,
-                    "qs": g["qs"],
-                    "qs_pct": round(g["qs"] / g["starts"], 4),
-                }
-            )
-
-        print(f"  Upserting QS% for {len(upserts)} goalies...")
-        for i in range(0, len(upserts), 500):
-            client.table("goalie_seasons").upsert(
-                upserts[i : i + 500], on_conflict="player_id,season,team,game_type"
-            ).execute()
-        print(f"  ✓ goalie_seasons: QS% updated for {len(upserts)} goalies")
-
+def _run_substage(failures: list, label: str, fn, *args, **kwargs):
+    """Run one of this module's optional sub-stages (game_xg / team_xgf_rollup
+    / goalie_qs) in isolation. These don't depend on each other, so one
+    raising must not stop the others, nor the player_seasons.war/percentile
+    upsert that already completed earlier in run(). Logs loudly (full
+    traceback + label) and records the failure in `failures` so run()'s
+    caller can still see it, instead of a bare print no caller could detect.
+    """
+    try:
+        fn(*args, **kwargs)
     except Exception as e:
-        print(f"  WARNING: Could not compute goalie QS%: {e}")
+        print(f"  !! {label} FAILED: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        failures.append(f"moneypuck.{label}")
 
 
-def run(season: int = NHL_SEASON):
+def run(season: int = NHL_SEASON) -> list[str]:
+    """Returns a list of any internal sub-stage failure labels (empty on
+    full success). run.py's run_stage() only sees whether this function
+    raised at all -- a non-empty return here means run() itself completed,
+    just with one or more of its internal pieces degraded or skipped. See
+    run.py's run_all(), which folds this list into its own failed_stages
+    report so a partial moneypuck failure isn't silently treated as green.
+    """
+    failures: list[str] = []
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
@@ -440,6 +452,15 @@ def run(season: int = NHL_SEASON):
     # ── Load RAPM values written by rapm.py ──────────────────────────
     # rapm.py runs before moneypuck.py in the pipeline so values are fresh.
     # RAPM is a beta model — clearly labeled in the frontend tooltip.
+    #
+    # Deliberately caught rather than left to raise: a failure here degrades
+    # (every player's WAR falls back to the xG-based method below instead of
+    # RAPM-derived) but doesn't invalidate the rest of this run -- unlike the
+    # three sub-stages below, this isn't a separable "nice to have," it's a
+    # fallback baked into compute_war() itself. What must NOT happen is what
+    # happened before Session 46: swallowing this into a bare print with no
+    # way for a caller to tell "every player is running in fallback mode
+    # tonight" from "RAPM data was never expected to exist yet."
     print("  Loading RAPM values from Supabase...")
     rapm_map = {}  # player_id -> rapm coefficient (marginal xG/60 at 5v5 EV)
     try:
@@ -462,7 +483,12 @@ def run(season: int = NHL_SEASON):
             offset += 999
         print(f"  Loaded RAPM for {len(rapm_map)} players")
     except Exception as e:
-        print(f"  WARNING: Could not load RAPM values: {e}")
+        print(
+            f"  !! RAPM values load FAILED: {type(e).__name__}: {e} "
+            "-- every player's WAR this run falls back to the xG-based method below"
+        )
+        traceback.print_exc()
+        failures.append("moneypuck.rapm_values_load")
 
     # ── League averages for WAR fallback ─────────────────────────────
     def avg(pool):
@@ -602,15 +628,23 @@ def run(season: int = NHL_SEASON):
         ).execute()
     print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
 
-    run_game_xg(client, season)
-    run_team_xgf_rollup(client, season)
-    run_goalie_qs(client, season)
+    _run_substage(failures, "game_xg", run_game_xg, client, season)
+    _run_substage(failures, "team_xgf_rollup", run_team_xgf_rollup, client, season)
+    _run_substage(failures, "goalie_qs", run_goalie_qs, client, season)
 
-    print("\n✅ MoneyPuck analytics pipeline complete")
+    if failures:
+        print(
+            f"\n⚠️  MoneyPuck analytics pipeline complete with {len(failures)} failure(s): {failures}"
+        )
+    else:
+        print("\n✅ MoneyPuck analytics pipeline complete")
+
+    return failures
 
 
 if __name__ == "__main__":
     import sys
 
     season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
-    run(season_arg)
+    if run(season_arg):
+        sys.exit(1)
