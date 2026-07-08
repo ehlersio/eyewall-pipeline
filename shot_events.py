@@ -24,6 +24,7 @@ Usage:
 """
 
 import time
+import traceback
 
 import requests
 
@@ -199,10 +200,31 @@ def run(season=NHL_SEASON):
         return
 
     total_shots = 0
-    errors = 0
+    errors = (
+        0  # process_game() returned no data (nhl_get already swallowed the fetch failure/absence)
+    )
+    crashed = (
+        0  # process_game() itself raised -- a real parsing/schema exception, not a fetch failure
+    )
 
     for i, game in enumerate(pending):
-        shots = process_game(game, season)
+        try:
+            shots = process_game(game, season)
+        except Exception as e:
+            # One malformed game must not abort the whole season's run -- log loudly
+            # (full traceback + game_id) and move on to the next game. Kept as its own
+            # `crashed` bucket rather than folded into `errors` because this is a
+            # different failure shape than "no data": nhl_get() already swallows
+            # network/JSON failures to None before this point (see Item 3 in
+            # SESSION_46_SCOPE.md -- once that lands with a distinct FetchError,
+            # this except block should catch that separately from other exceptions
+            # too, same reasoning as here: "fetch failed" and "parsing broke" are
+            # different signals worth keeping apart in the logs).
+            print(f"  !! CRASHED on game {game.get('id')}: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            crashed += 1
+            continue
+
         if shots:
             client.table("shot_events").delete().eq("game_id", game["id"]).execute()
             for j in range(0, len(shots), 500):
@@ -220,6 +242,8 @@ def run(season=NHL_SEASON):
     print(f"   Shots inserted: {total_shots:,}")
     if errors:
         print(f"   Games with no data: {errors}")
+    if crashed:
+        print(f"   Games that crashed the parser: {crashed}")
 
 
 if __name__ == "__main__":
