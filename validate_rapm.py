@@ -261,6 +261,9 @@ def run_eh_comparison(client, season, our_rapm, eh_csv_path):
 
 
 def run(season=NHL_SEASON, eh_csv_path=None):
+    """Returns "no_data" (rapm.py never ran or aborted before writing anything
+    this season), "pass", "warn", or "fail" — never None. Callers should
+    treat anything other than "pass"/"warn" as a hard failure."""
     client = get_client()
     print(f"\n=== RAPM Validation -- Season {season} ===")
 
@@ -271,7 +274,7 @@ def run(season=NHL_SEASON, eh_csv_path=None):
 
     if not our_rapm:
         print("  ERROR: No RAPM values found. Run rapm.py first.")
-        return
+        return "no_data"
 
     # Run checks
     issues, notes = run_internal_checks(client, season, our_rapm)

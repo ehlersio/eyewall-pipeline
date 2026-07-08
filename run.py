@@ -69,7 +69,7 @@ def run_all():
     shot_events.run()
     shift_data.run()
     zone_starts.run()
-    rapm.run()
+    rapm_status = rapm.run()
     moneypuck.run()
     line_combinations.run()  # must run after shift_data + shot_events
     special_teams.run()  # must run after shift_data
@@ -82,14 +82,21 @@ def run_all():
     # which triggers a GitHub Actions failure email
     import validate_rapm
 
-    status = validate_rapm.run()
+    validation_status = validate_rapm.run()
 
     elapsed = round(time.time() - start, 1)
     print(f"\n{'=' * 55}")
     print(f"  All pipelines complete in {elapsed}s")
     print(f"{'=' * 55}\n")
 
-    if status == "fail":
+    # Allowlist, not a blocklist: rapm.run() returning anything other than
+    # "ok", or validate_rapm.run() returning anything other than "pass"/"warn"
+    # (including an unexpected None), fails the job loudly instead of being
+    # silently treated as success — see Session 45 for the incident this
+    # closed (rapm.run()'s abort paths returned nothing and player_seasons.rapm
+    # keeps stale prior-night values on abort, so validation could pass
+    # against stale data even when tonight's regression never ran).
+    if rapm_status != "ok" or validation_status not in ("pass", "warn"):
         sys.exit(1)
 
 
@@ -138,7 +145,7 @@ if __name__ == "__main__":
 
         eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         status = validate_rapm.run(eh_csv_path=eh_csv)
-        if status == "fail":
+        if status not in ("pass", "warn"):
             sys.exit(1)
     elif arg == "ai":
         run_ai_pipeline()
