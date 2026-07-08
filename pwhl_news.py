@@ -20,6 +20,8 @@ from email.utils import parsedate_to_datetime
 
 from dotenv import load_dotenv
 
+from pipeline_common import FetchError
+
 load_dotenv()
 
 logging.basicConfig(
@@ -131,14 +133,13 @@ SOURCES = [
 ]
 
 
-def fetch_url(url: str) -> str | None:
+def fetch_url(url: str) -> str:
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=15) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except Exception as e:
-        log.warning(f"  fetch {url}: {e}")
-        return None
+        raise FetchError(f"fetch {url}: {e}") from e
 
 
 def safe_text(el, tag: str) -> str:
@@ -248,8 +249,10 @@ def main():
 
     for source in SOURCES:
         log.info(f"Fetching {source['id']} from {source['url']}")
-        xml = fetch_url(source["url"])
-        if not xml:
+        try:
+            xml = fetch_url(source["url"])
+        except FetchError as e:
+            log.warning(f"  {e}")
             continue
         parsed = parse_rss(xml, source)
         log.info(f"  {source['id']}: {len(parsed)} raw items")

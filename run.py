@@ -34,10 +34,23 @@ import time
 import traceback
 from datetime import datetime
 
-# Sentinel distinct from any real stage return value (None included) --
-# lets run_all() tell "this stage raised" apart from "this stage returned
-# a falsy/None result on purpose."
-STAGE_FAILED = object()
+
+class _StageFailed:
+    """Sentinel distinct from any real stage return value (None included) --
+    lets run_all() tell "this stage raised" apart from "this stage returned
+    a falsy/None result on purpose." A plain object() can't carry state (no
+    __dict__), so this is a trivial class instead -- run_stage() stamps
+    .exc_type on the single shared instance right before returning it, so
+    callers can build an exception-type breakdown (FetchError vs a genuine
+    bug) without re-deriving it from the log. Safe because run_stage() is
+    synchronous and .exc_type is always read immediately after the call
+    that set it, before the next stage runs."""
+
+    def __init__(self):
+        self.exc_type = None
+
+
+STAGE_FAILED = _StageFailed()
 
 
 def run_subprocess(label, cmd):
@@ -55,18 +68,17 @@ def run_stage(label, fn, *args, **kwargs):
 
     A single stage's exception (a genuine bug, a schema change, an
     unhandled edge case -- as opposed to a fetch failure, which the
-    individual modules' HTTP helpers already swallow to None/[] on their
-    own) must not abort every other stage in the nightly run, including
-    ones that have nothing to do with the failure. Logs loudly (full
-    traceback + stage label) and returns STAGE_FAILED so the caller can
-    track/report it, instead of letting it propagate.
+    individual modules' HTTP helpers now raise as FetchError rather than
+    swallowing to None/[]) must not abort every other stage in the nightly
+    run, including ones that have nothing to do with the failure. Logs
+    loudly (full traceback + stage label) and returns STAGE_FAILED so the
+    caller can track/report it, instead of letting it propagate.
 
-    Once Item 3 (SESSION_46_SCOPE.md) lands a distinct FetchError from the
-    HTTP-helper layer, this should catch that separately from other
-    exceptions too -- "this stage's fetch failed after retries" and "this
-    stage hit an unexpected parsing exception" are different signals worth
-    keeping apart in the logs, even though both currently resolve to the
-    same "skip it, keep going" action.
+    Deliberately still catches the general Exception base rather than
+    special-casing FetchError -- "skip it, keep going" is the same action
+    either way at this level, and type(e).__name__ (stamped on
+    STAGE_FAILED.exc_type below) already gives callers the FetchError-vs-
+    genuine-bug distinction for the summary line without a separate branch.
     """
     print(f"\n  >> {label}")
     try:
@@ -74,6 +86,7 @@ def run_stage(label, fn, *args, **kwargs):
     except Exception as e:
         print(f"\n  !! {label} FAILED: {type(e).__name__}: {e}")
         traceback.print_exc()
+        STAGE_FAILED.exc_type = type(e).__name__
         return STAGE_FAILED
 
 
@@ -92,7 +105,11 @@ def run_ai_pipeline():
         ("ai_scouting    — missing scouting blurbs", ["ai_scouting.py", "--missing"]),
     ):
         if run_stage(label, run_subprocess, label, cmd) is STAGE_FAILED:
-            failures.append(label)
+            # Runs as a subprocess -- the exception seen here is always
+            # RuntimeError (raised by run_subprocess() on non-zero exit),
+            # not the actual exception type from inside the subprocess.
+            # Still worth annotating for consistency with the other stages.
+            failures.append(f"{label} ({STAGE_FAILED.exc_type})")
     return failures
 
 
@@ -117,7 +134,7 @@ def run_all():
     def stage(label, fn, *args, **kwargs):
         result = run_stage(label, fn, *args, **kwargs)
         if result is STAGE_FAILED:
-            failed_stages.append(label)
+            failed_stages.append(f"{label} ({STAGE_FAILED.exc_type})")
         return result
 
     stage("nhl_stats", nhl_stats.run)

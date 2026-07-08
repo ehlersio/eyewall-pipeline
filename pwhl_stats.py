@@ -36,6 +36,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from pipeline_common import FetchError
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -139,8 +140,9 @@ SECTION_POSITION_MAP = {
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 
 
-def ht_get(params: dict, retries: int = 3) -> list | dict | None:
-    """Hit the HockeyTech statviewfeed endpoint and return parsed response."""
+def ht_get(params: dict, retries: int = 3) -> list | dict:
+    """Hit the HockeyTech statviewfeed endpoint and return parsed response.
+    Raises FetchError after exhausting `retries` attempts."""
     p = {
         "feed": "statviewfeed",
         "key": HOCKEYTECH_KEY,
@@ -151,6 +153,7 @@ def ht_get(params: dict, retries: int = 3) -> list | dict | None:
     }
     p.update(params)
 
+    last_err = None
     for attempt in range(retries):
         try:
             r = requests.get(HOCKEYTECH_BASE, params=p, headers=HEADERS, timeout=20)
@@ -160,11 +163,13 @@ def ht_get(params: dict, retries: int = 3) -> list | dict | None:
                     text = text[text.index("(") + 1 : text.rindex(")")]
                 return json.loads(text)
             log.warning(f"HT {p.get('view')} status {r.status_code} (attempt {attempt + 1})")
+            last_err = f"status {r.status_code}"
         except Exception as e:
             log.warning(f"HT {p.get('view')} error: {e} (attempt {attempt + 1})")
+            last_err = str(e)
         if attempt < retries - 1:
             time.sleep(2**attempt)
-    return None
+    raise FetchError(f"HT {p.get('view')}: failed after {retries} attempts ({last_err})")
 
 
 def extract_rows(data: list | dict) -> list[dict]:
@@ -206,9 +211,10 @@ def fetch_roster(sb, season_id: str) -> None:
     log.info("Fetching rosters...")
 
     for team_id, team_code in TEAM_ID_MAP.items():
-        data = ht_get({"view": "roster", "team_id": team_id, "season": season_id})
-        if not data:
-            log.warning(f"  No roster data for {team_code}")
+        try:
+            data = ht_get({"view": "roster", "team_id": team_id, "season": season_id})
+        except FetchError as e:
+            log.warning(f"  No roster data for {team_code}: {e}")
             continue
 
         # Roster response: dict with 'roster' key containing a list with one
@@ -271,19 +277,20 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
     """Fetch league-wide skater stats and upsert to pwhl_player_seasons."""
     log.info(f"Fetching skater stats (season {season_id})...")
 
-    data = ht_get(
-        {
-            "view": "players",
-            "season": season_id,
-            "context": "overall",
-            "position": "skaters",
-            "rookie": "false",
-            "limit": "500",
-            "sort": "points",
-        }
-    )
-    if not data:
-        log.warning("  No skater data")
+    try:
+        data = ht_get(
+            {
+                "view": "players",
+                "season": season_id,
+                "context": "overall",
+                "position": "skaters",
+                "rookie": "false",
+                "limit": "500",
+                "sort": "points",
+            }
+        )
+    except FetchError as e:
+        log.warning(f"  No skater data: {e}")
         return
 
     rows_raw = extract_rows(data)
@@ -356,19 +363,20 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
     """Fetch league-wide goalie stats and upsert to pwhl_goalie_seasons."""
     log.info(f"Fetching goalie stats (season {season_id})...")
 
-    data = ht_get(
-        {
-            "view": "players",
-            "season": season_id,
-            "context": "overall",
-            "position": "goalies",
-            "rookie": "false",
-            "limit": "100",
-            "sort": "wins",
-        }
-    )
-    if not data:
-        log.warning("  No goalie data")
+    try:
+        data = ht_get(
+            {
+                "view": "players",
+                "season": season_id,
+                "context": "overall",
+                "position": "goalies",
+                "rookie": "false",
+                "limit": "100",
+                "sort": "wins",
+            }
+        )
+    except FetchError as e:
+        log.warning(f"  No goalie data: {e}")
         return
 
     rows_raw = extract_rows(data)
@@ -491,35 +499,44 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
     """Fetch standings and upsert to pwhl_team_seasons."""
     log.info(f"Fetching team stats (season {season_id})...")
 
-    data = ht_get(
-        {
-            "view": "teams",
-            "season": season_id,
-            "context": "overall",
-            "groupTeamsBy": "division",
-            "sort": "points",
-            "special": "false",
-            "conference_id": "-1",
-            "division_id": "-1",
-        }
-    )
-    if not data:
-        log.warning("  No team stat data")
+    try:
+        data = ht_get(
+            {
+                "view": "teams",
+                "season": season_id,
+                "context": "overall",
+                "groupTeamsBy": "division",
+                "sort": "points",
+                "special": "false",
+                "conference_id": "-1",
+                "division_id": "-1",
+            }
+        )
+    except FetchError as e:
+        log.warning(f"  No team stat data: {e}")
         return
 
-    # Also fetch special teams data (PP%, PK%)
-    data_special = ht_get(
-        {
-            "view": "teams",
-            "season": season_id,
-            "context": "overall",
-            "groupTeamsBy": "division",
-            "sort": "points",
-            "special": "true",
-            "conference_id": "-1",
-            "division_id": "-1",
-        }
-    )
+    # Also fetch special teams data (PP%, PK%) -- optional enrichment, a
+    # failure here degrades to an empty special_map rather than aborting
+    # the whole function (matches this function's existing tolerance for
+    # data_special being unavailable).
+    try:
+        data_special = ht_get(
+            {
+                "view": "teams",
+                "season": season_id,
+                "context": "overall",
+                "groupTeamsBy": "division",
+                "sort": "points",
+                "special": "true",
+                "conference_id": "-1",
+                "division_id": "-1",
+            }
+        )
+    except FetchError as e:
+        log.warning(f"  No special teams data: {e}")
+        data_special = None
+
     # Build special teams map: team_code → row
     special_map = {}
     if data_special:
@@ -697,16 +714,17 @@ def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
     log.info(f"Fetching game log (season {season_id})...")
 
-    data = ht_get(
-        {
-            "view": "schedule",
-            "season": season_id,
-            "month": "0",
-            "team_id": "-1",
-        }
-    )
-    if not data:
-        log.warning("  No game log data")
+    try:
+        data = ht_get(
+            {
+                "view": "schedule",
+                "season": season_id,
+                "month": "0",
+                "team_id": "-1",
+            }
+        )
+    except FetchError as e:
+        log.warning(f"  No game log data: {e}")
         return
 
     rows_raw = extract_rows(data)

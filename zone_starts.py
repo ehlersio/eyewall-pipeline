@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db import NHL_SEASON, get_client
+from pipeline_common import FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -76,8 +77,7 @@ def nhl_get(url, params=None):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  GET failed: {url} -- {e}")
-        return None
+        raise FetchError(f"GET failed: {url} -- {e}") from e
 
 
 def mmss_to_secs(mmss):
@@ -97,8 +97,10 @@ def get_all_completed_games(season):
     seen = set()
     games = []
     for team in ALL_TEAMS:
-        data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
-        if not data:
+        try:
+            data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
+        except FetchError as e:
+            print(f"  {e}")
             continue
         for g in data.get("games", []):
             gid = g.get("id")
@@ -178,8 +180,12 @@ def mark_skipped(client, game_id, season, reason="no_data"):
 
 
 def get_shift_chart(game_id):
-    data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
-    if not data:
+    """Catches FetchError itself (unlike this module's other helpers) --
+    process_game()'s "no JSON shifts -> fall back to HTML" logic (below)
+    deliberately treats "fetch broke" and "no data" the same way."""
+    try:
+        data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
+    except FetchError:
         return []
     return data.get("data", [])
 
@@ -196,10 +202,11 @@ def get_shift_chart(game_id):
 def fetch_roster_for_html(game_id):
     """Fetch player roster from play-by-play API.
     Returns dict mapping (LAST, FIRST) and LAST -> (player_id, team_abbrev, pos_code).
+
+    Lets FetchError propagate -- process_one()'s broad except already
+    isolates one game's fetch failure from the rest of the run.
     """
     data = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-    if not data:
-        return {}, ""
 
     team_map = {}
     for t in ["awayTeam", "homeTeam"]:
@@ -329,7 +336,7 @@ def process_game(game_id, season, home_team):
     reports if the JSON API returns no data.
     """
     pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-    if not pbp or not pbp.get("plays"):
+    if not pbp.get("plays"):
         return []
 
     # Always get home team from PBP -- most reliable source regardless of what was passed in

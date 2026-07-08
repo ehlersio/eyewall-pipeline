@@ -35,7 +35,7 @@ class TestRunSubstageIsolation:
 
         moneypuck._run_substage(failures, "game_xg", boom)
 
-        assert failures == ["moneypuck.game_xg"]
+        assert failures == ["moneypuck.game_xg (ValueError)"]
 
     def test_exception_does_not_propagate(self):
         """The whole point: one sub-stage crashing must not stop the others
@@ -70,4 +70,4 @@ class TestRunSubstageIsolation:
         moneypuck._run_substage(failures, "goalie_qs", make_stage("goalie_qs", True))
 
         assert attempted == ["game_xg", "team_xgf_rollup", "goalie_qs"]
-        assert failures == ["moneypuck.game_xg", "moneypuck.goalie_qs"]
+        assert failures == ["moneypuck.game_xg (RuntimeError)", "moneypuck.goalie_qs (RuntimeError)"]

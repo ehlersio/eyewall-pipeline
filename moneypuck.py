@@ -321,7 +321,7 @@ def _run_substage(failures: list, label: str, fn, *args, **kwargs):
     except Exception as e:
         print(f"  !! {label} FAILED: {type(e).__name__}: {e}")
         traceback.print_exc()
-        failures.append(f"moneypuck.{label}")
+        failures.append(f"moneypuck.{label} ({type(e).__name__})")
 
 
 def run(season: int = NHL_SEASON) -> list[str]:
@@ -499,7 +499,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
             "-- every player's WAR this run falls back to the xG-based method below"
         )
         traceback.print_exc()
-        failures.append("moneypuck.rapm_values_load")
+        failures.append(f"moneypuck.rapm_values_load ({type(e).__name__})")
 
     # ── League averages for WAR fallback ─────────────────────────────
     def avg(pool):

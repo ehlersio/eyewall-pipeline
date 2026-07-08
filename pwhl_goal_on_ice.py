@@ -46,6 +46,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from pipeline_common import FetchError
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -92,7 +93,10 @@ def _resolve_season_type(season_id: str) -> str | None:
 def _hockeytech_get(view: str, game_id: int):
     """Independent copy of the shared fetch helper -- see
     pwhl_penalty_shots.py's identical docstring for why this isn't a
-    cross-import."""
+    cross-import. Returns None if the API responded with an error payload
+    (legitimate "no data", not a fetch failure); raises FetchError after
+    exhausting 3 retries (a genuine fetch failure)."""
+    last_err = None
     for attempt in range(3):
         try:
             r = requests.get(
@@ -111,6 +115,7 @@ def _hockeytech_get(view: str, game_id: int):
             )
             if r.status_code != 200:
                 log.warning(f"    {view} {game_id} status {r.status_code}")
+                last_err = f"status {r.status_code}"
                 continue
             text = r.text.strip()
             if "(" in text:
@@ -122,9 +127,10 @@ def _hockeytech_get(view: str, game_id: int):
             return data
         except Exception as e:
             log.warning(f"    {view} {game_id} attempt {attempt + 1}: {e}")
+            last_err = str(e)
         if attempt < 2:
             time.sleep(2**attempt)
-    return None
+    raise FetchError(f"{view} {game_id}: failed after 3 attempts ({last_err})")
 
 
 def fetch_game_summary(game_id: int) -> dict | None:
@@ -337,7 +343,15 @@ def run(season_id: str | None = None) -> None:
         home_id = game["home_team_id"] or 0
         away_id = game["away_team_id"] or 0
         log.info(f"  [{i + 1}/{len(todo)}] game {gid}")
-        total += ingest_game(sb, gid, home_id, away_id, season_id, season_type)
+        try:
+            total += ingest_game(sb, gid, home_id, away_id, season_id, season_type)
+        except FetchError as e:
+            # _hockeytech_get() now raises after exhausting retries instead
+            # of swallowing to None -- without this, one bad game's fetch
+            # failure would crash the entire sweep instead of being skipped.
+            log.warning(f"    Fetch failed for game {gid}, skipping: {e}")
+        except Exception:
+            log.exception(f"    CRASHED on game {gid}, skipping")
         time.sleep(0.5)
 
     log.info(f"=== PWHL Goal On-Ice complete -- {total} row(s) upserted ===")

@@ -17,6 +17,8 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from pipeline_common import FetchError
+
 load_dotenv()
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
@@ -30,14 +32,13 @@ REQUEST_DELAY = 0.5  # seconds between NHL API calls — stay well under rate li
 # ---------------------------------------------------------------------------
 
 
-def nhl_get(url: str) -> dict | None:
+def nhl_get(url: str) -> dict:
     try:
         r = requests.get(url, headers={"User-Agent": "EyeWall-Analytics/1.0"}, timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  NHL API error for {url}: {e}")
-        return None
+        raise FetchError(f"NHL API error for {url}: {e}") from e
 
 
 def get_season_schedule(season: int) -> list:
@@ -49,9 +50,10 @@ def get_season_schedule(season: int) -> list:
     print(f"Fetching schedule for season {season}...")
 
     # Get all team abbrevs from standings
-    standings = nhl_get(f"{NHL_BASE}/standings/now")
-    if not standings:
-        print("  Failed to fetch standings — cannot get team list")
+    try:
+        standings = nhl_get(f"{NHL_BASE}/standings/now")
+    except FetchError as e:
+        print(f"  Failed to fetch standings — cannot get team list ({e})")
         return []
 
     teams = [t["teamAbbrev"]["default"] for t in standings.get("standings", [])]
@@ -60,10 +62,13 @@ def get_season_schedule(season: int) -> list:
     all_games = {}
     for abbrev in teams:
         url = f"{NHL_BASE}/club-schedule-season/{abbrev}/{season}"
-        data = nhl_get(url)
-        time.sleep(REQUEST_DELAY)
-        if not data:
+        try:
+            data = nhl_get(url)
+        except FetchError as e:
+            print(f"  {abbrev} schedule fetch failed, skipping: {e}")
             continue
+        finally:
+            time.sleep(REQUEST_DELAY)
         for g in data.get("games", []):
             gid = g.get("id")
             if gid and is_completed(g):
@@ -183,12 +188,13 @@ def process_game(game_id: int, season: int, force: bool = False) -> bool:
         print(f"  {game_id} — already processed, skipping")
         return True
 
-    pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-    time.sleep(REQUEST_DELAY)
-
-    if not pbp:
-        print(f"  {game_id} — failed to fetch PBP")
+    try:
+        pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
+    except FetchError as e:
+        print(f"  {game_id} — failed to fetch PBP ({e})")
         return False
+    finally:
+        time.sleep(REQUEST_DELAY)
 
     rows = parse_goals_from_pbp(pbp, game_id, season)
     if not rows:

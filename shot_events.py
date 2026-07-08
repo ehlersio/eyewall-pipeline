@@ -29,6 +29,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
+from pipeline_common import FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 CAR_ABBR = "CAR"
@@ -78,8 +79,7 @@ def nhl_get(url):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"  ERROR {url} -- {e}")
-        return None
+        raise FetchError(f"{url} -- {e}") from e
 
 
 def get_all_completed_games(season):
@@ -87,8 +87,10 @@ def get_all_completed_games(season):
     seen = set()
     games = []
     for team in ALL_TEAMS:
-        data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
-        if not data:
+        try:
+            data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
+        except FetchError as e:
+            print(f"  ERROR {e}")
             continue
         for g in data.get("games", []):
             gid = g.get("id")
@@ -134,7 +136,7 @@ def process_game(game, season):
     is_playoff = game.get("gameType") == 3
 
     pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
-    if not pbp or not pbp.get("plays"):
+    if not pbp.get("plays"):
         return []
 
     # Build team ID -> abbrev map from PBP roster
@@ -207,26 +209,23 @@ def run(season=NHL_SEASON):
         return
 
     total_shots = 0
-    errors = (
-        0  # process_game() returned no data (nhl_get already swallowed the fetch failure/absence)
-    )
-    crashed = (
-        0  # process_game() itself raised -- a real parsing/schema exception, not a fetch failure
-    )
+    errors = 0  # process_game() returned no data (game has no PBP plays yet, e.g. postponed)
+    fetch_failed = 0  # nhl_get() raised FetchError -- the fetch itself broke, not a parser bug
+    crashed = 0  # process_game() raised something else -- a real parsing/schema exception
 
     for i, game in enumerate(pending):
         try:
             shots = process_game(game, season)
+        except FetchError as e:
+            # Fetch failed (network/HTTP/JSON) after nhl_get()'s own handling -- kept
+            # separate from `crashed` so "Games that crashed the parser" isn't inflated
+            # by fetch failures that have nothing to do with parsing logic.
+            print(f"  !! FETCH FAILED on game {game.get('id')}: {e}")
+            fetch_failed += 1
+            continue
         except Exception as e:
             # One malformed game must not abort the whole season's run -- log loudly
-            # (full traceback + game_id) and move on to the next game. Kept as its own
-            # `crashed` bucket rather than folded into `errors` because this is a
-            # different failure shape than "no data": nhl_get() already swallows
-            # network/JSON failures to None before this point (see Item 3 in
-            # SESSION_46_SCOPE.md -- once that lands with a distinct FetchError,
-            # this except block should catch that separately from other exceptions
-            # too, same reasoning as here: "fetch failed" and "parsing broke" are
-            # different signals worth keeping apart in the logs).
+            # (full traceback + game_id) and move on to the next game.
             print(f"  !! CRASHED on game {game.get('id')}: {type(e).__name__}: {e}")
             traceback.print_exc()
             crashed += 1
@@ -249,6 +248,8 @@ def run(season=NHL_SEASON):
     print(f"   Shots inserted: {total_shots:,}")
     if errors:
         print(f"   Games with no data: {errors}")
+    if fetch_failed:
+        print(f"   Games where the fetch failed: {fetch_failed}")
     if crashed:
         print(f"   Games that crashed the parser: {crashed}")
 

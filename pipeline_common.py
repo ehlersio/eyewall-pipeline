@@ -24,6 +24,15 @@ NHL_BASE = "https://api-web.nhle.com/v1"
 _LOGGING_CONFIGURED = False
 
 
+class FetchError(Exception):
+    """Raised by HTTP-fetch helpers on failure, instead of swallowing to a
+    falsy value (None/[]). Network flakiness is fine to absorb, but "no data
+    exists" and "the fetch broke" collapsing into the same falsy return left
+    callers unable to tell the two apart. Callers catch this explicitly and
+    decide what to do (skip an item, abort a stage, etc.) -- the helper
+    itself no longer makes that call silently."""
+
+
 def get_logger(name: str) -> logging.Logger:
     """One shared logging format/level across all pipeline scripts."""
     global _LOGGING_CONFIGURED
