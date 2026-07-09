@@ -63,6 +63,16 @@ If the venv needs activating:
 
 If it's active but out of sync with `requirements.txt`, ask before running `pip install -r requirements.txt` rather than assuming it's safe to just sync silently.
 
+## Ruff: check and format together (standing rule — read before every commit/PR)
+
+`ruff check` alone is not sufficient — always run `ruff format` in the same pass before committing or opening a PR. The CI pipeline (`nightly.yml`) enforces formatting separately from linting, so a clean `ruff check` with un-formatted files will still fail in GitHub Actions (happened 2026-07-09: `ruff check .` passed, `ruff format --check .` didn't, failing the whole nightly run). Run both locally before every commit:
+
+```
+ruff check . && ruff format --check .
+```
+
+If `ruff format --check .` reports files that would be reformatted, run `ruff format .` (no `--check`) to actually fix them before committing.
+
 ## Live season resolution (built Session 35–36)
 
 `season_lookup.py` reads `GET /config/seasons` from the `eyewall-poller` Worker (with an env-var fallback if the Worker is unreachable), and is the entry point other modules use instead of hardcoding season constants:
