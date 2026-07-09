@@ -99,7 +99,12 @@ class TestMoneypuckGoalieQS:
     def test_paginates_shot_events_past_page_boundary(self):
         # 1200 shot-on-goal rows across 2 goalies -- exceeds one 999-row page
         rows = [
-            {"id": i, "goalie_id": 1 if i % 2 == 0 else 2, "game_id": 500, "event_type": "shot-on-goal"}
+            {
+                "id": i,
+                "goalie_id": 1 if i % 2 == 0 else 2,
+                "game_id": 500,
+                "event_type": "shot-on-goal",
+            }
             for i in range(1, 1201)
         ]
         client = _paged_client({"shot_events": rows})
