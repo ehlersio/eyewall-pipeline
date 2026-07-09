@@ -43,6 +43,18 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 TANKATHON_URL = "https://www.tankathon.com/nhl/draft-order"
 
+# Bump manually once a year, in lockstep with draft_ingest.py's own DRAFT_YEAR
+# (same convention there — drafts are a one-off annual event with no live
+# "current season" resolver like NHL_SEASON/PWHL_SEASON to hang this off of).
+# TANKATHON_URL has no year in it -- the page always serves "whichever draft
+# is next," and rolls over to the following year's order right after the
+# current draft concludes. Session 49 confirmed this already silently
+# clobbered draft_pick_order_2026 with 2027 team assignments (30/32 R1 picks
+# mismatched) via the scheduled weekly sync, undetected for at least one run.
+# _extract_draft_year() + the check in scrape_draft_order() exist specifically
+# to make that fail loud instead of writing silently wrong data again.
+DRAFT_YEAR = 2026
+
 ROUND_STARTS = {1: 1, 2: 33, 3: 65, 4: 97, 5: 129, 6: 161, 7: 193}
 
 # Tankathon SVG filenames don't always match NHL abbrevs exactly.
@@ -97,6 +109,14 @@ def svg_to_abbr(svg_name: str) -> str:
     return abbr
 
 
+def _extract_draft_year(html: str) -> int | None:
+    """Pull the draft year Tankathon's page is currently showing, from its
+    <title> tag (e.g. "2027 NHL Draft Order | Tankathon"). Returns None
+    (never a guess) if the title doesn't match the expected shape."""
+    m = re.search(r"<title>\s*(\d{4})\s+NHL Draft Order", html)
+    return int(m.group(1)) if m else None
+
+
 def scrape_draft_order() -> list[dict]:
     """
     Fetch Tankathon draft order page and parse all pick rows.
@@ -116,6 +136,18 @@ def scrape_draft_order() -> list[dict]:
     r.raise_for_status()
     html = r.text
     log.info(f"  Fetched {len(html):,} bytes")
+
+    scraped_year = _extract_draft_year(html)
+    if scraped_year != DRAFT_YEAR:
+        raise RuntimeError(
+            f"Tankathon is showing the {scraped_year!r} draft order, not "
+            f"{DRAFT_YEAR} — refusing to write. The site rolls over to "
+            f"'next draft' right after the current one concludes; writing "
+            f"this into draft_pick_order_{DRAFT_YEAR} would corrupt "
+            f"historical data (this already happened once, Session 49). "
+            f"Bump DRAFT_YEAR (and the target table) once {DRAFT_YEAR}'s "
+            f"draft-order tracking is genuinely done for good."
+        )
 
     rows = []
     # Split into round blocks by round-title divs
