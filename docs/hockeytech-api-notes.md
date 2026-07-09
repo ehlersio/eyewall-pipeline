@@ -750,9 +750,20 @@ Still open:
   null across 10 games (regular season + playoffs, multiple rounds)
   2026-07-05. Not usable unless a populated example turns up later (e.g.
   once real preseason/regular-season games are underway again)
-- Validate whether `player` view's `playerShots[]` coordinate space matches
-  `pwhl_shot_events.py`'s `CANVAS_W=600/CANVAS_H=300` convention before ever
-  treating the two as interchangeable (saw x values up to 641 in one pull)
+- ~~Validate whether `player` view's `playerShots[]` coordinate space matches
+  `pwhl_shot_events.py`'s convention~~ — confirmed Session 49 (live pull,
+  shooter_id=44/season_id=1, games 2/36/39): same raw pixel canvas as
+  `pwhl_shot_events`, just rendered at 7/6 scale (explains the "x up to 641"
+  oddity — resolution, not a different rink). Not a simple same-or-negated
+  binary though: `playerShots[]` carries its own independent `orientation`
+  flag that HockeyTech uses to pre-fold every shot onto one consistent
+  attacking side, on top of the raw-canvas scale difference —
+  `pwhl_shot_events.py`'s own `transform_coords()` fold (period-parity +
+  `is_home`) is a separate derivation from the same raw coordinates, not
+  interchangeable with `orientation` without unfolding it first. Also:
+  `playerShots[]` is shots-on-goal only (excludes `blocked_shot` rows) — a
+  strict subset of what `pwhl_shot_events` already ingests via full PBP, so
+  not worth integrating as a data source.
 - Compare `gameCenterPreview`'s server-computed `powerPlayStats`/
   `penaltyKillStats` percentages against `special_teams.py`'s own
   calculations — either a useful validation check or a sign the two define
