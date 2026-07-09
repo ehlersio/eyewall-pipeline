@@ -4,6 +4,7 @@ Supabase client shared across pipeline modules.
 
 import os
 
+import httpx
 from dotenv import load_dotenv
 
 # Import ClientOptions from the package root, not from supabase.lib.client_options.
@@ -26,8 +27,13 @@ PRIMARY_TEAM_ABBR = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
 
 
 def get_client() -> Client:
+    # httpx_client (not postgrest_client_timeout) — supabase-py's own glue code
+    # unconditionally forwards postgrest_client_timeout to a deprecated
+    # SyncPostgrestClient(timeout=...) constructor arg internally (confirmed via
+    # 2.31.0's supabase/_sync/client.py:_init_postgrest_client); passing a
+    # pre-built httpx client bypasses that path entirely, timeout still applies.
     return create_client(
-        SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=120)
+        SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client(timeout=120))
     )
 
 

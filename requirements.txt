@@ -1,5 +1,6 @@
 requests==2.34.2
 python-dotenv==1.2.2
+httpx==0.28.1
 supabase==2.31.0
 gotrue==2.12.4
 postgrest==2.31.0
