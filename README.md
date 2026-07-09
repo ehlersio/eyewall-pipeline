@@ -246,6 +246,17 @@ python pwhl_shot_events.py --game 338           # Single game_id (debug -- inges
 
 **Penalty shots moved out (Session 42):** penalty-shot goals are NOT ingested here anymore — `extract_gamesummary_goals()` explicitly skips any goal with `isPenaltyShot=true` rather than trying to match it against a `pwhl_shot_events` row that will never exist (penalty shots have no coordinates at all, confirmed live for both makes and misses; see `pwhl_penalty_shots.py`). `is_penalty_shot` remains a column on this table but will only ever read `false` going forward — likely dead weight, left in place rather than dropped this session.
 
+### `pwhl_game_boxscore.py` (added Session 41, wired into nightly Session 50)
+Ingests `gameSummary`'s `homeTeam`/`visitingTeam.skaters[]`/`goalies[]` — full per-player, per-game stat lines (TOI, hits, blocked shots, faceoffs, etc.) that don't exist anywhere else in the pipeline. Writes to `pwhl_skater_game_box` / `pwhl_goalie_game_box`, one row per player per game. Independent fetch from `pwhl_shot_events.py`'s gameSummary merge (that one reads `periods[].goals[]` for per-goal data; this one reads `homeTeam`/`visitingTeam` for full box-score lines).
+
+Was manual-only from Session 41 until Session 50 added it to `pwhl-nightly.yml` — like every other nightly PWHL step, the default (no season arg) invocation only sweeps the live-resolved **regular** season (`resolvePWHLSeason()` deliberately prefers "most recent regular" over "most recent of any type"), so a completed playoff season needs an explicit manual backfill, same as `pwhl_shot_events.py`/`pwhl_pbp_events.py`.
+
+```bash
+python pwhl_game_boxscore.py            # Ingest current (live-resolved regular) season
+python pwhl_game_boxscore.py 9          # Specific season (e.g. a completed playoffs)
+python pwhl_game_boxscore.py --game 338 # Single game_id (debug)
+```
+
 ### `pwhl_penalty_shots.py` (added Session 42)
 Ingests penalty shots (makes AND misses) from `gameSummary`'s `penaltyShots.homeTeam[]`/`visitingTeam[]` — not the PBP `"penaltyshot"` event and not `periods[].goals[]` (which only has goals, so misses are invisible there). Confirmed via a full scan of all 329 completed games: 9 games had a penalty shot, only 1 was a goal (game 277) — misses dominate 8-to-1. No coordinate data exists for these events at all, on a make or a miss, so `pwhl_penalty_shots` has no x/y columns and these rows are never written to `pwhl_shot_events` (a coordinate-based shot-map table).
 
@@ -399,6 +410,8 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_game_log` | Game results with scores, dates, venue, OT/SO flags |
 | `pwhl_shot_events` | Shot coordinates (x_norm, y_norm), event_type, shooter_id, team_id, period, time; goal rows also carry `assist1_id`/`assist2_id`, `is_power_play`/`is_short_handed`/`is_empty_net`/`is_game_winning_goal`, `game_goal_id` (merged from gameSummary, Session 34 — NULL until merged). `is_penalty_shot` always `false` now (Session 42 — see `pwhl_penalty_shots` below) |
 | `pwhl_pbp_events` | PBP events: faceoffs (homeWin string), hits, penalties, goalie changes |
+| `pwhl_skater_game_box` | (Session 41, nightly since Session 50) Per-skater per-game box score: G/A/P, PIM, +/-, faceoff attempts/wins, shots, hits, blocked_shots, toi_seconds, position_raw/position_group, starting/status. Sourced from `gameSummary`'s `homeTeam`/`visitingTeam.skaters[]` |
+| `pwhl_goalie_game_box` | (Session 41, nightly since Session 50) Per-goalie per-game box score: G/A/P, PIM, +/-, faceoff attempts/wins, toi_seconds, shots_against, goals_against, saves, starting/status. Sourced from `gameSummary`'s `homeTeam`/`visitingTeam.goalies[]` |
 | `pwhl_penalty_shots` | (Session 42) Penalty shots (makes + misses), no coordinates: game_id, season_id, team_id, player_id (shooter), goalie_id, period_id, time_seconds, is_goal. Sourced from `gameSummary.penaltyShots`, not PBP |
 | `pwhl_goal_on_ice` | (Session 42) On-ice skater roster per goal, one row per (game_goal_id, player_id): team_id, on_ice_for, is_power_play/is_short_handed/is_empty_net/is_penalty_shot. Sourced from `gameSummary`'s `plus_players[]`/`minus_players[]` |
 | `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
@@ -418,7 +431,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
 | `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) |
-| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL PBP events + PWHL news — 20 min offset to avoid Supabase contention |
+| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news — 20 min offset to avoid Supabase contention |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
 | `reddit-ingest.yml` | Every 30 min | Reddit (32 subreddits) + SBNation atom feeds → Worker |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | Tankathon draft order scrape |

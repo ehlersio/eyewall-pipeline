@@ -69,6 +69,27 @@ jobs:
         #   python pwhl_pbp_events.py 7
         #   python pwhl_pbp_events.py 8 --force
 
+      - name: Ingest PWHL game box scores (per-player TOI/hits/blocks/faceoffs)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_game_boxscore.py
+        # Skips games already in pwhl_skater_game_box (idempotent by default,
+        # see get_processed_games()). Was previously manual-only (Session 41
+        # built it but never wired it in) -- same gap pwhl_goal_on_ice.py and
+        # pwhl_penalty_shots.py (Session 42) still have.
+        #
+        # Same caveat as pwhl_stats.py/pwhl_shot_events.py/pwhl_pbp_events.py
+        # above: this defaults to PWHL_SEASON, which resolve_pwhl_season()
+        # deliberately resolves to the most recent *regular* season, not
+        # whatever season_id is chronologically current. During a playoff
+        # window this step will NOT pick up playoff games automatically --
+        # same pre-existing limitation the sibling steps above already have.
+        # Run a manual `python pwhl_game_boxscore.py <playoff_season_id>`
+        # backfill after each playoff round, same as this file's existing
+        # PBP backfill pattern.
+
       - name: Run pwhl_milestones.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
