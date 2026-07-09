@@ -70,4 +70,7 @@ class TestRunSubstageIsolation:
         moneypuck._run_substage(failures, "goalie_qs", make_stage("goalie_qs", True))
 
         assert attempted == ["game_xg", "team_xgf_rollup", "goalie_qs"]
-        assert failures == ["moneypuck.game_xg (RuntimeError)", "moneypuck.goalie_qs (RuntimeError)"]
+        assert failures == [
+            "moneypuck.game_xg (RuntimeError)",
+            "moneypuck.goalie_qs (RuntimeError)",
+        ]

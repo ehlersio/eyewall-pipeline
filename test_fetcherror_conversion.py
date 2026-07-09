@@ -198,4 +198,6 @@ class TestPwhlPerGameFetchIsolation:
 
         pwhl_goal_on_ice.run(season_id="8")
 
-        assert attempted == [111, 222], "both games must be attempted despite game 111's fetch failure"
+        assert attempted == [111, 222], (
+            "both games must be attempted despite game 111's fetch failure"
+        )
