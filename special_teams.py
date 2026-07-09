@@ -24,6 +24,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from itertools import combinations
 
+import httpx
 from dotenv import load_dotenv
 
 # ClientOptions must come from the package root, not supabase.lib.client_options
@@ -86,7 +87,7 @@ PP_UNIT_SIZE = 5  # forwards + D on PP
 PK_UNIT_SIZE = 4  # forwards + D on PK
 
 supabase = create_client(
-    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=60)
+    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client(timeout=60))
 )
 
 

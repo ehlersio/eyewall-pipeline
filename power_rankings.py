@@ -25,6 +25,7 @@ import os
 import time
 from datetime import date
 
+import httpx
 import requests
 from dotenv import load_dotenv
 
@@ -81,7 +82,7 @@ ALL_TEAMS = [
 ALL_TEAMS = list(dict.fromkeys(ALL_TEAMS))
 
 supabase = create_client(
-    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(postgrest_client_timeout=30)
+    SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client(timeout=30))
 )
 
 
