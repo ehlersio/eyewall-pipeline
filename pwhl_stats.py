@@ -7,6 +7,15 @@ from the HockeyTech API used by thepwhl.com and writes to Supabase.
 Usage:
     python pwhl_stats.py                  # current season (PWHL_SEASON)
     python pwhl_stats.py 5                # specific season_id (5 = 2024-25 Regular)
+    python pwhl_stats.py --shot-totals-only [season_id]
+        # Just run_team_shot_totals() (team Corsi/Fenwick from pwhl_shot_events),
+        # skipping roster/player/goalie/game-log fetches. Exists so
+        # pwhl-nightly.yml can run this AFTER pwhl_shot_events.py ingests that
+        # night's newly-completed games — running it as part of the main run()
+        # (which executes before pwhl_shot_events.py, since shot_events.py
+        # needs a current pwhl_game_log first) computed corsi_for_pct from
+        # yesterday's shot_events snapshot, silently stale by up to 24-48h
+        # on exactly the days a game just finished. See pwhl-nightly.yml.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -803,12 +812,31 @@ def run(season_id: str | None = None) -> None:
     fetch_goalie_stats(sb, season_id, season_type)
     fetch_roster(sb, season_id)
     fetch_team_stats(sb, season_id, season_type)
-    run_team_shot_totals(sb, season_id, season_type)
     fetch_game_log(sb, season_id)
 
     log.info("=== PWHL Stats pipeline complete ===")
 
 
+def run_shot_totals_only(season_id: str | None = None) -> None:
+    """Run just run_team_shot_totals(), for the post-shot-events-ingestion
+    nightly step — see the --shot-totals-only usage note above."""
+    season_id = season_id or PWHL_SEASON
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping shot-totals-only run"
+        )
+        return
+    log.info(f"=== PWHL shot totals (Corsi/Fenwick) — season {season_id} ({season_type}) ===")
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    run_team_shot_totals(sb, season_id, season_type)
+    log.info("=== PWHL shot totals complete ===")
+
+
 if __name__ == "__main__":
-    season_arg = sys.argv[1] if len(sys.argv) > 1 else None
-    run(season_arg)
+    args = sys.argv[1:]
+    if "--shot-totals-only" in args:
+        args = [a for a in args if a != "--shot-totals-only"]
+        run_shot_totals_only(args[0] if args else None)
+    else:
+        run(args[0] if args else None)
