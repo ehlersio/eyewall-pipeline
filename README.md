@@ -127,10 +127,10 @@ Forward lines and D pairs inferred from shift + shot events. Computes per-unit x
 PP/PK unit inference from shift + shot events → `special_teams_units` table.
 
 ### `draft_ingest.py`
-Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `--poll-picks` loops every 60s, exits code 99 when all 224 picks complete.
+Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `--poll-picks` loops every 60s, exits code 99 when all 224 picks complete. `--sync-pick-order` (Session 51) re-derives `draft_pick_order_2026` from `/draft/picks/{year}/all` — the NHL API's authoritative completed-draft results, now that the 2026 draft is over and Tankathon's projected order no longer applies to this table.
 
 ### `tankathon_ingest.py`
-2026 draft pick order scraper → `draft_pick_order_2026`.
+Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
 ### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_persona.py`, `ai_context.py`)
 
@@ -398,7 +398,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
 | `draft_picks_2026` | Live/completed draft picks |
-| `draft_pick_order_2026` | Pick order per team (Tankathon) |
+| `draft_pick_order_2026` | Pick order per team (NHL API, `draft_ingest.py --sync-pick-order` — Session 51; Tankathon-sourced before the 2026 draft concluded) |
 
 ### PWHL Tables
 | Table | Description |
@@ -434,7 +434,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news — 20 min offset to avoid Supabase contention |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
 | `reddit-ingest.yml` | Every 30 min | Reddit (32 subreddits) + SBNation atom feeds → Worker |
-| `tankathon-sync.yml` | Weekly (Tue 8am ET) | Tankathon draft order scrape |
+| `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 
 ---

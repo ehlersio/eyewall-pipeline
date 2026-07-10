@@ -1,10 +1,22 @@
-name: Tankathon Draft Order Sync
+name: Draft Pick Order Sync
+
+# Session 51: repointed from tankathon_ingest.py to draft_ingest.py
+# --sync-pick-order. The 2026 draft is over, so Tankathon (a pre-draft
+# projected-order source) is no longer the right source for
+# draft_pick_order_2026 -- the NHL API's actual results are authoritative
+# now. tankathon.com itself has already rolled over to serving the 2027
+# draft order (confirmed 2026-07-10), which is exactly the page
+# tankathon_ingest.py's Session 49 year-guard (PR #20) exists to refuse --
+# running it here would just fail loudly every week from now on. That guard
+# is untouched; tankathon_ingest.py is simply no longer scheduled against
+# this table. See draft_ingest.py's sync_pick_order() docstring for details.
 
 on:
   schedule:
-    # Every Tuesday at 8:00 AM ET (noon UTC) — catches weekend trade activity
+    # Every Tuesday at 8:00 AM ET (noon UTC) — cheap idempotent re-sync in
+    # case the NHL API ever corrects a posted pick after the fact
     - cron: '0 12 * * 2'
-  workflow_dispatch: # manual trigger anytime a trade happens
+  workflow_dispatch: # manual trigger anytime a correction is needed
 
 jobs:
   sync:
@@ -23,12 +35,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Sync draft order from Tankathon
+      - name: Sync draft order from NHL API
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python tankathon_ingest.py
+        run: python draft_ingest.py --sync-pick-order
 
       - name: Summary
         if: always()
-        run: echo "Tankathon draft order sync complete."
+        run: echo "Draft pick order sync complete."
