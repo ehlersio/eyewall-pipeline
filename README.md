@@ -180,8 +180,9 @@ Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 reg
 - `fetch_skater_stats()` — upserts to `pwhl_player_seasons`
 - `fetch_goalie_stats()` — upserts to `pwhl_goalie_seasons`
 - `fetch_team_stats()` — two HockeyTech calls (`special=false` + `special=true`): standings + PP%/PK%/special teams raw counts → `pwhl_team_seasons`
-- `run_team_shot_totals()` — computes CF/CA/FF/FA from `pwhl_shot_events` joined to `pwhl_game_log` → `pwhl_team_seasons`
 - `fetch_game_log()` — upserts to `pwhl_game_log` including `game_date` (parsed from `date_with_day` via `_parse_game_date()`), `venue_name`, `venue_city`
+
+**`run_team_shot_totals()` — computes CF/CA/FF/FA from `pwhl_shot_events` joined to `pwhl_game_log` → `pwhl_team_seasons`.** Run separately via `python pwhl_stats.py --shot-totals-only [season_id]`, NOT as part of the default `run()` above (split out Session 51). It has to run *after* `pwhl_shot_events.py` ingests that night's newly-completed games in `pwhl-nightly.yml` — `run()` runs *before* that step (it needs to write a current `pwhl_game_log` first, which `pwhl_shot_events.py` itself depends on to know which games to fetch). Computing shot totals as part of the original `run()` meant `corsi_for_pct` was silently ~24-48h stale on exactly the days a game just finished — found while scoping a PWHL prediction feature that needed same-night-accurate Corsi.
 
 **Special teams note:** HockeyTech `view=teams&special=true` returns PP%/PK% as strings like `"23.0%"`. `_parse_pct()` converts to float (0.23).
 

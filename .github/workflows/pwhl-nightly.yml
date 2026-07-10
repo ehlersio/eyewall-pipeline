@@ -56,6 +56,20 @@ jobs:
         # explicitly skips shot/goal events (owns hits/penalties/faceoffs/
         # goalie changes instead). Also was NOT previously scheduled.
 
+      - name: Compute PWHL team shot totals (Corsi/Fenwick from tonight's games)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_stats.py --shot-totals-only
+        # Must run AFTER pwhl_shot_events.py above, not as part of the
+        # pwhl_stats.py step earlier in this file. run_team_shot_totals()
+        # (pwhl_team_seasons.corsi_for_pct etc.) reads from pwhl_shot_events —
+        # computing it before that table has tonight's newly-completed games
+        # ingested left corsi_for_pct silently ~24-48h stale on exactly the
+        # days a game just finished (found Session 51, while scoping a
+        # PWHL prediction feature that depends on same-night-accurate Corsi).
+
       - name: Ingest PWHL PBP events (current season)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
