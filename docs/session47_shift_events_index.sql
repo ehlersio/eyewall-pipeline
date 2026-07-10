@@ -1,42 +1,105 @@
--- Session 47 — recommended index for shift_events, found while verifying
--- the rapm.py/score_state.py keyset-pagination fix. Run this in the
--- Supabase SQL editor. This file is a reference copy, not executed by any
--- pipeline code (this repo has no migration tooling — schema changes are
--- applied directly in Supabase, same as every existing pwhl_* table).
+-- shift_events index for rapm.py / score_state.py's league-wide,
+-- season-only shift_events pool loads. Session 47 diagnosed the need for
+-- this; Session 50 found the Session 47 recommendation was necessary but
+-- NOT sufficient, and landed the index that actually fixes it. Run
+-- statements in the Supabase SQL editor, same as every existing pwhl_*
+-- table -- this repo has no migration tooling.
 --
--- Background: line_combinations.py's fetch_all() proved keyset (cursor)
--- pagination fixes the `57014` statement-timeout risk for a team-scoped,
--- single-season shift_events query. rapm.py and score_state.py needed the
--- same fix for their league-wide (season-only, no team filter) pool loads
--- — but live verification against production (2026-07-08) showed that
--- query shape can still hit `57014` even with keyset pagination: a single
--- page (999 rows, `season = X AND id > last_seen_id ORDER BY id LIMIT
--- 999`) took 7.4s on its own, and a full-season fetch (~1.1M rows)
--- succeeded once in 83.8s but failed outright on a retry. That strongly
--- suggests there's no index supporting an efficient scan for "season = X,
--- ordered by id" at this selectivity (no team filter narrows it down) —
--- keyset still helps (cost no longer compounds with page depth, so this
--- is a probabilistic failure now, not a guaranteed one at large offsets),
--- but it isn't a complete fix without a supporting index.
+-- ============================================================================
+-- Background (Session 47)
+-- ============================================================================
+-- line_combinations.py's fetch_all() proved keyset (cursor) pagination fixes
+-- the `57014` statement-timeout risk for a team-scoped, single-season
+-- shift_events query. rapm.py and score_state.py needed the same fix for
+-- their league-wide (season-only, no team filter) pool loads -- but live
+-- verification against production (2026-07-08) showed that query shape can
+-- still hit `57014` even with keyset pagination: a single page (999 rows,
+-- `season = X AND id > last_seen_id ORDER BY id LIMIT 999`) took 7.4s on its
+-- own, and a full-season fetch (~1.1M rows) succeeded once in 83.8s but
+-- failed outright on a retry.
 --
--- This composite index lets Postgres satisfy "WHERE season = X ORDER BY
--- id" directly from the index (season as the leading/equality column,
--- id as the sort column within that partition) instead of scanning the
--- full id-ordered range and filtering by season row-by-row.
+-- Session 47's fix: a plain composite index --
+--   create index concurrently if not exists shift_events_season_id_idx
+--     on public.shift_events (season, id);
+-- This was applied 2026-07-10 (Session 50) but did NOT fix the nightly
+-- pipeline's `rapm` stage -- still failed with the same `57014` on the very
+-- first page of the very first pool season (20232024).
 --
+-- ============================================================================
+-- Root cause, actually diagnosed (Session 50, 2026-07-10)
+-- ============================================================================
+-- `EXPLAIN (ANALYZE, BUFFERS)` on the exact failing query showed Postgres
+-- was choosing `Index Scan using shift_events_pkey` (i.e. scanning `id`
+-- ascending and filtering by `season` row-by-row) INSTEAD of the new
+-- composite index -- discarding 1,068,671 non-matching rows before finding
+-- 999 that matched `season = 20232024`.
+--
+-- This is not stale statistics (`ANALYZE shift_events;` made zero difference
+-- to the plan -- only sped up execution via caching, same rows discarded).
+-- It's not query shape (`ORDER BY season, id` instead of `ORDER BY id`
+-- didn't change the plan either, since season is constant in the filtered
+-- result). It's a genuine Postgres planner blind spot: `season = 20232024`
+-- matches ~1.06M of ~1.14M+ total rows in the table (season 20232024 was
+-- apparently backfilled *after* other seasons already had lower ids
+-- assigned, so its rows are NOT uniformly distributed across the id range --
+-- they're clustered at the high end). Postgres's cost model for
+-- `ORDER BY id LIMIT 999` with an early-termination filter assumes matches
+-- ARE uniformly distributed, so it drastically underestimates the real cost
+-- of the pkey-scan-then-filter plan and picks it over the composite index,
+-- even though the composite index would let it jump straight to the
+-- `season = 20232024` partition and never touch the other ~1.07M rows.
+--
+-- A `WITH ... AS MATERIALIZED` CTE barrier (forcing the filter to be
+-- evaluated before LIMIT is visible to the planner) DID get Postgres to use
+-- a season-based index for the filter -- but broke LIMIT pushdown entirely,
+-- forcing it to materialize and sort all ~1.06M matching rows before
+-- trimming to 999. Worse (12.2s), not better. Not used.
+--
+-- ============================================================================
+-- The actual fix: a covering index (Index Only Scan)
+-- ============================================================================
+-- Adding the queried columns via INCLUDE makes an Index Only Scan possible
+-- (no heap fetch needed at all -- `Heap Fetches: 0`), which has a
+-- dramatically lower cost estimate than a regular Index Scan. That's enough
+-- to overturn the planner's bad LIMIT-cost comparison outright, rather than
+-- hoping it reconsiders the same regular-Index-Scan trade-off differently.
+-- Verified (2026-07-10): 11.235ms, down from ~9.3s. `rapm.py` needed NO
+-- code changes -- the existing Python-built query already produces the
+-- right SQL shape; it just needed an index the planner would actually pick.
+--
+-- The plain (non-covering) shift_events_season_id_idx from Session 47 above
+-- is superseded by this and was dropped (2026-07-10) -- it added write
+-- overhead with no benefit once this one existed.
+create index concurrently if not exists shift_events_season_id_covering_idx
+  on public.shift_events (season, id)
+  include (game_id, player_id, team, start_secs, end_secs);
+
 -- CONCURRENTLY: shift_events is a live table (read by eyewall-poller,
 -- written by the nightly pipeline). A plain CREATE INDEX takes an
 -- ACCESS EXCLUSIVE lock for the whole build, which would block reads and
 -- writes against a ~1M+ row table. CONCURRENTLY avoids that lock (at the
--- cost of a slower build, and it can't run inside an explicit
--- transaction block -- run this as its own single statement, which is
--- how the Supabase SQL editor executes it by default).
-create index concurrently if not exists shift_events_season_id_idx
-  on public.shift_events (season, id);
+-- cost of a slower build, and it can't run inside an explicit transaction
+-- block or alongside other statements in the same submission -- run each
+-- statement in this file separately).
 
 -- shot_events did NOT show this problem in verification (a full-season
--- keyset fetch, 173,972 rows, completed cleanly and quickly) — likely
+-- keyset fetch, 173,972 rows, completed cleanly and quickly) -- likely
 -- because it's a much smaller table per season than shift_events (one row
 -- per shot vs. one row per shift). No index change proposed for
 -- shot_events at this time; revisit if it starts showing the same
 -- symptom as the table grows.
+
+-- If the pool seasons rapm.py queries change (POOL_SEASONS is always the
+-- current season + 2 prior), re-run the EXPLAIN below for whichever season
+-- is now first in that list before assuming this index still helps -- the
+-- underlying cause (clustered, non-uniform row distribution vs. id order)
+-- is specific to season 20232024's backfill history, not guaranteed to
+-- recur identically for future seasons, though the covering index should
+-- help regardless since it makes the cheapest plan cheaper in general.
+--
+-- explain (analyze, buffers)
+-- select game_id, player_id, team, start_secs, end_secs
+-- from shift_events
+-- where season = 20232024 and id > 0
+-- order by id
+-- limit 999;
