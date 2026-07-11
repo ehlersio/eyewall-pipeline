@@ -89,12 +89,11 @@ from db import get_client
 from pipeline_common import get_logger
 from pwhl_stats import TEAM_ID_MAP
 from pwhl_stats import _resolve_season_type as resolve_season_type
+from pwhl_strength_state import elapsed_seconds as _elapsed_seconds
+from pwhl_strength_state import get_penalties_for_game
+from pwhl_strength_state import penalty_window as _penalty_window
 
 log = get_logger(__name__)
-
-# Full period length in seconds (20:00) — used only to sanity-check sort
-# order, NOT to derive an elapsed clock time (OT length unconfirmed).
-PERIOD_SECONDS = 1200
 
 # Backed by real 2025-26 season data (30 GP/team, single-season record
 # 33 pts / 16 goals — see module docstring).
@@ -141,71 +140,14 @@ def _team_abbr(team_id: int | None) -> str | None:
 # situation_code is hardcoded "5v5" (see module docstring) and can't be
 # used for this at all.
 #
-# SCOPE — this is directionally correct for the common case (one team has
-# one active penalty, a goal is scored during it) but has real gaps, listed
-# here rather than silently glossed over:
-#   - Regulation periods (1-3) ONLY. OT (period_id=4) goals are NEVER
-#     flagged SH — OT period length is unconfirmed, so there's no reliable
-#     way to convert PWHL's countdown clock to elapsed time for it.
-#   - Does NOT model a power-play goal ending the opponent's minor early.
-#     In real hockey the first PP goal cancels the offending minor; this
-#     isn't tracked, so a goal shortly after an already-cancelled penalty
-#     could be misflagged SH.
-#   - Coincidental/offsetting penalties (4-on-4 play) ARE handled — only
-#     penalties HockeyTech itself flags is_power_play=True are used to
-#     build windows, so simultaneous matching minors correctly produce no
-#     SH/PP flag for either side.
-#   - Double minors are treated as one continuous 4:00 window, not two
-#     independent 2:00 penalties.
-#   - Penalties are assumed to end within the period they're taken in —
-#     no carryover across period breaks.
-#
-# Needs validation against at least one real, known SH goal before being
-# trusted for milestone thresholds. Not attempted here — flagging as the
-# next step before this goes further.
+# The penalty-window construction itself (_elapsed_seconds, _penalty_window,
+# get_penalties_for_game) now lives in pwhl_strength_state.py, imported
+# above — see that module's docstring for the full scope note (OT excluded,
+# no early-PP-goal-cancellation modeling, coincidental penalties handled via
+# HockeyTech's own is_power_play flag, double minors as one window, no
+# cross-period carryover). It's shared with pwhl_stats.py's 5v5-filtered
+# Corsi aggregation (run_team_shot_totals_5v5), not reimplemented there.
 # ---------------------------------------------------------------------------
-
-
-def _elapsed_seconds(period_id: int | None, time_seconds: int) -> int | None:
-    """time_seconds is already elapsed within the period (see module
-    docstring) — this just validates scope. Returns None outside
-    regulation (period_id not in 1-3), since OT length is unconfirmed
-    and we can't sanity-bound an elapsed value there yet."""
-    if period_id not in (1, 2, 3):
-        return None
-    return time_seconds or 0
-
-
-def get_penalties_for_game(sb, game_id: int) -> list[dict]:
-    r = (
-        sb.table("pwhl_pbp_events")
-        .select(
-            "team_id, period_id, time_seconds, penalty_minutes, is_bench_penalty, is_power_play"
-        )
-        .eq("game_id", game_id)
-        .eq("event_type", "penalty")
-        .eq("is_power_play", True)  # excludes coincidental/offsetting minors —
-        # HockeyTech already flags those isPowerPlay=False, which is a more
-        # reliable signal than trying to infer 4-on-4 from window overlap
-        # ourselves (confirmed via game 261: two simultaneous penalties,
-        # one per team, both isPowerPlay=False — a true coincidental minor,
-        # not a shorthanded situation for either side).
-        .execute()
-    )
-    return r.data or []
-
-
-def _penalty_window(penalty: dict) -> tuple[int, int, int] | None:
-    """(period_id, elapsed_start, elapsed_end) for one penalty, capped at
-    period end. Bench penalties count (they still cost the team a
-    skater) — the server just isn't tracked separately."""
-    period_id = penalty.get("period_id")
-    elapsed_start = _elapsed_seconds(period_id, penalty.get("time_seconds") or 0)
-    if elapsed_start is None:
-        return None
-    minutes = penalty.get("penalty_minutes") or 2
-    elapsed_end = min(elapsed_start + minutes * 60, PERIOD_SECONDS)
-    return period_id, elapsed_start, elapsed_end
 
 
 def detect_shorthanded_goals(sb, game: dict, ordered_goals: list[dict]) -> dict[tuple, bool]:

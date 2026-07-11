@@ -8,14 +8,17 @@ Usage:
     python pwhl_stats.py                  # current season (PWHL_SEASON)
     python pwhl_stats.py 5                # specific season_id (5 = 2024-25 Regular)
     python pwhl_stats.py --shot-totals-only [season_id]
-        # Just run_team_shot_totals() (team Corsi/Fenwick from pwhl_shot_events),
-        # skipping roster/player/goalie/game-log fetches. Exists so
-        # pwhl-nightly.yml can run this AFTER pwhl_shot_events.py ingests that
-        # night's newly-completed games — running it as part of the main run()
-        # (which executes before pwhl_shot_events.py, since shot_events.py
-        # needs a current pwhl_game_log first) computed corsi_for_pct from
-        # yesterday's shot_events snapshot, silently stale by up to 24-48h
-        # on exactly the days a game just finished. See pwhl-nightly.yml.
+        # Runs run_team_shot_totals() (all-situations team Corsi/Fenwick
+        # from pwhl_shot_events) and run_team_shot_totals_5v5() (the same,
+        # filtered to 5v5 play via pwhl_pbp_events penalty windows —
+        # Session 52), skipping roster/player/goalie/game-log fetches.
+        # Exists so pwhl-nightly.yml can run this AFTER pwhl_shot_events.py
+        # AND pwhl_pbp_events.py ingest that night's newly-completed games —
+        # running it as part of the main run() (which executes before both,
+        # since they need a current pwhl_game_log first) computed
+        # corsi_for_pct from yesterday's snapshot, silently stale by up to
+        # 24-48h on exactly the days a game just finished. See
+        # pwhl-nightly.yml.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -46,6 +49,8 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from pipeline_common import FetchError
+from pwhl_strength_state import get_penalties_for_season
+from pwhl_strength_state import penalty_window as _penalty_window
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -626,19 +631,43 @@ def run_team_shot_totals(sb, season_id: str, season_type: str = "regular") -> No
       Fenwick Against (FA) = shots + goals by opponents in our games
 
     No missed shots in HockeyTech data, so FF is SOG-based Fenwick proxy.
+
+    Fetches pwhl_shot_events via keyset pagination on `id`, not a single
+    .limit(50000) call — PostgREST silently caps any one response at 1000
+    rows regardless of the .limit() value passed, confirmed empirically
+    Session 52: a full regular season has ~9,600 shot_events rows, so the
+    single-query form this replaced was silently computing Corsi/Fenwick
+    from only the first ~10% of the season's shots (whichever games got
+    inserted first) for the entire time this function has been live. Same
+    keyset convention as shot_events.py::get_already_processed and
+    moneypuck.py::run_goalie_qs.
     """
     log.info(f"Computing team shot totals (season {season_id}, {season_type})...")
 
     # Fetch all shot events for the season
-    res = (
-        sb.table("pwhl_shot_events")
-        .select("game_id,team_id,event_type")
-        .eq("season_id", int(season_id))
-        .eq("season_type", season_type)
-        .limit(50000)
-        .execute()
-    )
-    events = res.data or []
+    events = []
+    last_id = 0
+    while True:
+        batch = (
+            sb.table("pwhl_shot_events")
+            .select("id,game_id,team_id,event_type")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        events.extend(batch)
+        last_id = batch[-1]["id"]
+        if len(events) % 4995 == 0:  # every ~5 pages (Session 52 follow-up
+            # — a fully-silent multi-page scan reads as a hung CI step)
+            log.info(f"    ...{len(events)} shot events loaded so far")
+        if len(batch) < 999:
+            break
     if not events:
         log.warning(f"  No shot events for season {season_id}/{season_type}")
         return
@@ -717,6 +746,145 @@ def run_team_shot_totals(sb, season_id: str, season_type: str = "regular") -> No
         ).execute()
 
     log.info(f"  Shot totals upserted for season {season_id}/{season_type}")
+
+
+def run_team_shot_totals_5v5(sb, season_id: str, season_type: str = "regular") -> None:
+    """
+    Compute 5v5-filtered Corsi/Fenwick for each team from pwhl_shot_events,
+    cross-referenced against pwhl_pbp_events penalty windows, and upsert to
+    pwhl_team_seasons' *_5v5 columns.
+
+    Same shot-attempt definitions as run_team_shot_totals() (CF/CA include
+    shot+goal+blocked_shot; FF/FA are SOG-based, no missed-shot data),
+    restricted to shot attempts where neither team had an active power play
+    in that period at that moment -- i.e. genuine 5v5 play, not
+    all-situations. Reuses pwhl_strength_state.py's penalty-window logic
+    (originally built and validated in pwhl_milestones.py for shorthanded-
+    goal detection, re-validated Session 52 against 5 more live games) —
+    not reimplemented here.
+
+    Inherits pwhl_strength_state.py's scope limits as-is: OT (period_id
+    outside 1-3) is dropped from the 5v5 bucket entirely rather than risk
+    misclassifying it, no early-PP-goal-cancellation modeling, no
+    cross-period penalty carryover.
+
+    Fetches pwhl_shot_events via keyset pagination on `id` (see
+    run_team_shot_totals()'s docstring for why a single .limit(N) call
+    would silently truncate a full season to its first ~1000 rows).
+    """
+    log.info(f"Computing 5v5-filtered team shot totals (season {season_id}, {season_type})...")
+
+    events = []
+    last_id = 0
+    while True:
+        batch = (
+            sb.table("pwhl_shot_events")
+            .select("id,game_id,team_id,event_type,period_id,time_seconds")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        events.extend(batch)
+        last_id = batch[-1]["id"]
+        if len(events) % 4995 == 0:  # every ~5 pages (Session 52 follow-up)
+            log.info(f"    ...{len(events)} shot events loaded so far")
+        if len(batch) < 999:
+            break
+    if not events:
+        log.warning(f"  No shot events for season {season_id}/{season_type}")
+        return
+
+    res2 = (
+        sb.table("pwhl_game_log")
+        .select("game_id,home_team_id,away_team_id")
+        .eq("season_id", int(season_id))
+        .eq("game_state", "Final")
+        .limit(500)
+        .execute()
+    )
+    games = {g["game_id"]: g for g in (res2.data or [])}
+
+    from collections import defaultdict
+
+    # game_windows[game_id] = [(penalized_team_id, period_id, elapsed_start, elapsed_end), ...]
+    penalties = get_penalties_for_season(sb, int(season_id), season_type)
+    game_windows = defaultdict(list)
+    for p in penalties:
+        w = _penalty_window(p)
+        if w is None:  # outside regulation (OT) -- see pwhl_strength_state.py
+            continue
+        period_id, start, end = w
+        game_windows[p["game_id"]].append((p["team_id"], period_id, start, end))
+
+    def is_5v5(game_id, period_id, time_seconds: int) -> bool:
+        if period_id not in (1, 2, 3):
+            return False
+        return not any(
+            p_period == period_id and start <= time_seconds < end
+            for _team_id, p_period, start, end in game_windows.get(game_id, [])
+        )
+
+    game_shots = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    for e in events:
+        if not is_5v5(e["game_id"], e.get("period_id"), e.get("time_seconds") or 0):
+            continue
+        game_shots[e["game_id"]][e["team_id"]][e["event_type"]] += 1
+
+    team_totals = defaultdict(lambda: {"cf": 0, "ca": 0, "ff": 0, "fa": 0})
+
+    for game_id, game in games.items():
+        home_id = game["home_team_id"]
+        away_id = game["away_team_id"]
+        if not home_id or not away_id:
+            continue
+
+        for our_id, opp_id in [(home_id, away_id), (away_id, home_id)]:
+            our = game_shots[game_id][our_id]
+            opp = game_shots[game_id][opp_id]
+
+            cf = our.get("shot", 0) + our.get("goal", 0) + our.get("blocked_shot", 0)
+            ca = opp.get("shot", 0) + opp.get("goal", 0) + opp.get("blocked_shot", 0)
+            ff = our.get("shot", 0) + our.get("goal", 0)
+            fa = opp.get("shot", 0) + opp.get("goal", 0)
+
+            team_totals[our_id]["cf"] += cf
+            team_totals[our_id]["ca"] += ca
+            team_totals[our_id]["ff"] += ff
+            team_totals[our_id]["fa"] += fa
+
+    if not team_totals:
+        log.warning("  No 5v5 team totals computed")
+        return
+
+    log.info(f"  Computed 5v5 shot totals for {len(team_totals)} teams")
+    for tid, t in sorted(team_totals.items()):
+        cfp = t["cf"] / (t["cf"] + t["ca"]) * 100 if (t["cf"] + t["ca"]) > 0 else 0
+        ffp = t["ff"] / (t["ff"] + t["fa"]) * 100 if (t["ff"] + t["fa"]) > 0 else 0
+        log.info(
+            f"    team {tid}: CF_5v5={t['cf']} CA_5v5={t['ca']} CF%_5v5={cfp:.1f}% "
+            f"FF_5v5={t['ff']} FA_5v5={t['fa']} FF%_5v5={ffp:.1f}%"
+        )
+
+        sb.table("pwhl_team_seasons").update(
+            {
+                "corsi_for_5v5": t["cf"],
+                "corsi_against_5v5": t["ca"],
+                "corsi_for_pct_5v5": round(cfp, 4),
+                "fenwick_for_5v5": t["ff"],
+                "fenwick_against_5v5": t["fa"],
+                "fenwick_for_pct_5v5": round(ffp, 4),
+            }
+        ).eq("team_id", tid).eq("season_id", int(season_id)).eq(
+            "season_type", season_type
+        ).execute()
+
+    log.info(f"  5v5 shot totals upserted for season {season_id}/{season_type}")
 
 
 def fetch_game_log(sb, season_id: str) -> None:
@@ -818,8 +986,11 @@ def run(season_id: str | None = None) -> None:
 
 
 def run_shot_totals_only(season_id: str | None = None) -> None:
-    """Run just run_team_shot_totals(), for the post-shot-events-ingestion
-    nightly step — see the --shot-totals-only usage note above."""
+    """Run run_team_shot_totals() and run_team_shot_totals_5v5(), for the
+    post-shot-events-ingestion nightly step — see the --shot-totals-only
+    usage note above. The 5v5 variant additionally needs pwhl_pbp_events
+    for the same games, so this must run after both pwhl_shot_events.py
+    AND pwhl_pbp_events.py in the nightly workflow (Session 52)."""
     season_id = season_id or PWHL_SEASON
     season_type = _resolve_season_type(season_id)
     if season_type is None:
@@ -830,6 +1001,7 @@ def run_shot_totals_only(season_id: str | None = None) -> None:
     log.info(f"=== PWHL shot totals (Corsi/Fenwick) — season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     run_team_shot_totals(sb, season_id, season_type)
+    run_team_shot_totals_5v5(sb, season_id, season_type)
     log.info("=== PWHL shot totals complete ===")
 
 

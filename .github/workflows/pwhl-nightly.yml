@@ -56,6 +56,22 @@ jobs:
         # explicitly skips shot/goal events (owns hits/penalties/faceoffs/
         # goalie changes instead). Also was NOT previously scheduled.
 
+      - name: Ingest PWHL PBP events (current season)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_pbp_events.py
+        # Skips games already in pwhl_pbp_events (idempotent by default).
+        # Only processes new completed games since last run.
+        # For the initial full backfill, run locally:
+        #   python pwhl_pbp_events.py 6
+        #   python pwhl_pbp_events.py 7
+        #   python pwhl_pbp_events.py 8 --force
+        #
+        # Must run BEFORE the shot-totals step below, not after — see that
+        # step's comment (Session 52).
+
       - name: Compute PWHL team shot totals (Corsi/Fenwick from tonight's games)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -69,19 +85,13 @@ jobs:
         # ingested left corsi_for_pct silently ~24-48h stale on exactly the
         # days a game just finished (found Session 51, while scoping a
         # PWHL prediction feature that depends on same-night-accurate Corsi).
-
-      - name: Ingest PWHL PBP events (current season)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_pbp_events.py
-        # Skips games already in pwhl_pbp_events (idempotent by default).
-        # Only processes new completed games since last run.
-        # For the initial full backfill, run locally:
-        #   python pwhl_pbp_events.py 6
-        #   python pwhl_pbp_events.py 7
-        #   python pwhl_pbp_events.py 8 --force
+        #
+        # Session 52: also moved to run AFTER pwhl_pbp_events.py (was
+        # before it). This step now additionally runs
+        # run_team_shot_totals_5v5(), which joins pwhl_shot_events against
+        # pwhl_pbp_events penalty windows to compute 5v5-filtered Corsi/
+        # Fenwick -- it needs tonight's pwhl_pbp_events rows to exist first,
+        # same freshness reasoning as the pwhl_shot_events dependency above.
 
       - name: Ingest PWHL game box scores (per-player TOI/hits/blocks/faceoffs)
         env:
