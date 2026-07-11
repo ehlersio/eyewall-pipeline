@@ -54,9 +54,10 @@ class TestRunStage:
 
 class TestRunAiPipelineIsolation:
     def test_one_failing_substage_does_not_block_the_others(self, monkeypatch):
-        """game_scoring, ai_summaries, and ai_scouting don't depend on each
-        other's output -- if game_scoring crashes, the other two must still
-        run, and the failure must be reported rather than silently dropped."""
+        """game_scoring, ai_summaries, ai_scouting, and ai_results_vs_process
+        don't depend on each other's output -- if game_scoring crashes, the
+        other three must still run, and the failure must be reported rather
+        than silently dropped."""
         attempted = []
 
         def fake_run_subprocess(label, cmd):
@@ -68,7 +69,7 @@ class TestRunAiPipelineIsolation:
 
         failures = run.run_ai_pipeline()
 
-        assert len(attempted) == 3, "all three sub-stages must be attempted"
+        assert len(attempted) == 4, "all four sub-stages must be attempted"
         assert len(failures) == 1
         assert "game_scoring" in failures[0]
 

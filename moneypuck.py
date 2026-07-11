@@ -34,6 +34,16 @@ MIN_GP = 10  # minimum games for percentile pool
 GOALS_PER_WIN = 5.4  # NHL goals per win approximation
 PEN_MIN_VALUE = 0.11  # goals per penalty minute (TopDownHockey methodology)
 
+# Session 55's investigation found NHL's bucketed-stdev elbow for on-ice GF%
+# lands around 20-25 GP, not lower than PWHL's ~15 GP finding despite NHL's
+# longer season -- variance here is driven by on-ice goal-event count, not
+# games played, and per-game exposure is similar across leagues. This is the
+# ONLY place this number is defined: on_ice_gf_pct/results_vs_process_diff
+# are nulled below it at write time, so every downstream consumer (ai_context,
+# eyewall-poller, the frontend) just checks "is the column null", not a
+# duplicated GP comparison. Don't reintroduce a second GP check elsewhere.
+RESULTS_VS_PROCESS_MIN_GP = 25
+
 
 def fetch_csv() -> list[dict]:
     print("  Fetching MoneyPuck CSV...")
@@ -56,6 +66,33 @@ def per60(stat, icetime_sec):
     if not icetime_sec or icetime_sec < 60:
         return 0.0
     return (n(stat) / icetime_sec) * 3600
+
+
+def compute_on_ice_gf_pct(ev_row: dict | None) -> float | None:
+    """On-ice goals-for percentage at 5v5 -- GF/(GF+GA) from a MoneyPuck
+    5on5-situation row. Pure/module-level (unlike the other per-player metric
+    functions in run(), which are closures over ev_map) specifically so the
+    results-vs-process guardrail logic below is unit-testable without a full
+    CSV fetch."""
+    if not ev_row:
+        return None
+    gf = n(ev_row.get("OnIce_F_goals", 0))
+    ga = n(ev_row.get("OnIce_A_goals", 0))
+    total = gf + ga
+    return gf / total if total > 0 else None
+
+
+def apply_results_vs_process_guardrail(
+    games_played: float, on_ice_gf_pct_val: float | None, process_xgf_pct_val: float | None
+) -> tuple[float | None, float | None]:
+    """Returns (on_ice_gf_pct, results_vs_process_diff), both forced to None
+    below RESULTS_VS_PROCESS_MIN_GP -- this is the ONE place that GP number
+    is checked. Every downstream consumer (ai_context.py,
+    eyewall-poller, the frontend) just tests "is the column null"."""
+    if games_played < RESULTS_VS_PROCESS_MIN_GP or on_ice_gf_pct_val is None:
+        return None, None
+    diff = on_ice_gf_pct_val - process_xgf_pct_val if process_xgf_pct_val is not None else None
+    return on_ice_gf_pct_val, diff
 
 
 def percentile_rank(value, sorted_pool: list) -> int | None:
@@ -595,6 +632,14 @@ def run(season: int = NHL_SEASON) -> list[str]:
             return None
         return n(ev["onIce_xGoalsPercentage"]) - n(ev["offIce_xGoalsPercentage"])
 
+    def on_ice_gf_pct(row):
+        """On-ice goals-for percentage at 5v5 -- GF/(GF+GA) while this player
+        is on the ice. The "results" half of the results-vs-process pairing;
+        process is ev_off_pct (on-ice xGF%, already computed by ev_off()
+        above) -- deliberately not duplicated under a second column name."""
+        ev = ev_map.get(row["playerId"])
+        return compute_on_ice_gf_pct(ev)
+
     # ── Build sorted pools once ────────────────────────────────────
     print("  Building percentile pools...")
     fwd_pools = {
@@ -751,6 +796,11 @@ def run(season: int = NHL_SEASON) -> list[str]:
         xga_val = xga_per60(row)
         hdca_val = hdca_per60(row)
 
+        gp_val = n(row.get("games_played", 0))
+        gf_pct_val, rvp_diff_val = apply_results_vs_process_guardrail(
+            gp_val, on_ice_gf_pct(row), ev_off_val
+        )
+
         team = row.get("team", "")
         updates.append(
             {
@@ -780,6 +830,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
                 "game_score": round(n(row.get("gameScore", 0)), 3),
                 "xga_per60": xga_val,
                 "hdca_per60": hdca_val,
+                "on_ice_gf_pct": round(gf_pct_val, 4) if gf_pct_val is not None else None,
+                "results_vs_process_diff": round(rvp_diff_val, 4)
+                if rvp_diff_val is not None
+                else None,
                 # Percentiles
                 "pct_ev_off": percentile_rank(ev_off_val, pools["ev_off"]),
                 "pct_ev_def": percentile_rank(ev_def_val, pools["ev_def"]),

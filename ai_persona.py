@@ -517,6 +517,36 @@ def build_player_scouting_prompt(player: dict, team: str) -> str:
     return "\n".join(lines) + "\n\n" + task
 
 
+def build_results_vs_process_prompt(player: dict, team: str) -> str:
+    """'Results vs. process' narrative -- explains *why* a player's on-ice
+    goal results (on_ice_gf_pct) are diverging from their underlying process
+    (process_xgf_pct), not just restating the two numbers. Caller must only
+    pass players with a non-null results_vs_process_diff (moneypuck.py's
+    games-played guardrail) -- this function doesn't re-check GP itself."""
+    diff = player.get("results_vs_process_diff", 0)
+    direction = "outperforming" if diff > 0 else "underperforming"
+
+    lines = [
+        f"Results-vs-process data for {player.get('name')} ({player.get('position')}) — {team}:"
+    ]
+    for k, v in player.items():
+        if v is not None and k not in ("name", "position"):
+            lines.append(f"  {k}: {v}")
+    lines.append(f"  direction: {direction} process")
+
+    task = (
+        f"This player is {direction} their underlying process at 5v5 -- their on-ice goals-for "
+        f"percentage (on_ice_gf_pct) doesn't match what their on-ice expected-goals share "
+        f"(process_xgf_pct) says it should be. Write a blurb explaining *why* this gap likely "
+        f"exists -- think finishing/shooting luck, goaltending support, or sustainability -- and "
+        f"whether it's the kind of gap that tends to regress toward the process number over time. "
+        f"Reference the specific numbers. Do not just restate the two percentages back at the "
+        f"reader without explaining what the gap means. Plain text only, no bullet points."
+    )
+
+    return "\n".join(lines) + "\n\n" + task
+
+
 # ---------------------------------------------------------------------------
 # Quick test
 # ---------------------------------------------------------------------------
