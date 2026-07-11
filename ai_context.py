@@ -346,6 +346,60 @@ def get_player_context(
     return result
 
 
+def get_results_vs_process_context(team: str = None, season: int = None, top_n: int = 50) -> list:
+    """
+    Returns players with a qualifying (non-null) results_vs_process_diff for
+    a team/season -- moneypuck.py already nulls that column (and
+    on_ice_gf_pct) for anyone under the games-played reliability threshold,
+    so filtering on "not null" here is the single guardrail check; this
+    function doesn't need its own copy of the GP number.
+    """
+    team = team or PRIMARY_TEAM
+    season = season or NHL_SEASON
+
+    rows = (
+        supabase.table("player_seasons")
+        .select("player_id, team, games_played, ev_off_pct, on_ice_gf_pct, results_vs_process_diff")
+        .eq("team", team)
+        .eq("season", season)
+        .eq("game_type", 2)  # regular season
+        .not_.is_("results_vs_process_diff", "null")
+        .order("results_vs_process_diff", desc=True)
+        .limit(top_n)
+        .execute()
+        .data
+    )
+
+    if not rows:
+        return []
+
+    player_ids = [r["player_id"] for r in rows]
+    players = (
+        supabase.table("players").select("id, name, position").in_("id", player_ids).execute().data
+    )
+    name_map = {p["id"]: {"name": p["name"], "position": p["position"]} for p in players}
+
+    result = []
+    for r in rows:
+        pid = r["player_id"]
+        info = name_map.get(pid, {"name": f"Player {pid}", "position": "?"})
+        result.append(
+            {
+                "name": info["name"],
+                "position": info["position"],
+                "games_played": r.get("games_played"),
+                "on_ice_gf_pct": float(r["on_ice_gf_pct"])
+                if r.get("on_ice_gf_pct") is not None
+                else None,
+                "process_xgf_pct": float(r["ev_off_pct"])
+                if r.get("ev_off_pct") is not None
+                else None,
+                "results_vs_process_diff": float(r["results_vs_process_diff"]),
+            }
+        )
+    return result
+
+
 def get_goalie_context(team: str = None, season: int = None, min_gp: int = 5) -> list:
     """
     Returns goalies for a team with key stats from goalie_seasons.

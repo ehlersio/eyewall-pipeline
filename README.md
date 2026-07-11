@@ -53,6 +53,8 @@ python ai_summaries.py --game 2025030414 --force # Single game, force regenerate
 python ai_predictions.py                         # Pre-game predictions
 python ai_scouting.py --missing                  # Missing scouting blurbs only (skaters + goalies)
 python ai_scouting.py --team CAR --dry-run       # Preview prompts for one team
+python ai_results_vs_process.py --missing        # Missing results-vs-process blurbs (NHL skaters only)
+python ai_results_vs_process.py --team CAR --dry-run  # Preview prompts for one team
 python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
 
 # PWHL — run individually (no orchestrator yet)
@@ -77,7 +79,7 @@ python pwhl_news.py            # Fetch PWHL news and POST to Worker
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting
+nhl_stats → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process
 ```
 
 ### `nhl_stats.py`
@@ -106,6 +108,8 @@ WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, 
 
 **`MP_URL` fix (2026-07):** used to hardcode `"2025"` directly in the MoneyPuck CSV URL, completely decoupled from `NHL_SEASON` — meaning a correct `NHL_SEASON` flip alone would NOT have fixed this fetch each October. Now derived as `MP_START_YEAR = int(str(NHL_SEASON)[:4])`, so there's exactly one place this needs to be right.
 
+**Results-vs-process columns (Session 56, NHL only):** `player_seasons.on_ice_gf_pct` (on-ice GF% at 5v5, from MoneyPuck's `OnIce_F_goals`/`OnIce_A_goals`) and `results_vs_process_diff` (`on_ice_gf_pct` minus the existing `ev_off_pct`, which is already on-ice xGF% at 5v5 — deliberately not duplicated under a new column name). Both are `NULL` below `RESULTS_VS_PROCESS_MIN_GP` (25 games — see Session 55's investigation) so every downstream consumer just checks "is this null", not a duplicated GP comparison. PWHL is out of scope — blocked on the same shift-event gap as PWHL WAR/RAPM, revisit in October. Requires `docs/session56_new_columns.sql` to be run in Supabase first (no migration tooling in this repo).
+
 ### `line_combinations.py`
 Forward lines and D pairs inferred from shift + shot events. Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
 
@@ -132,7 +136,7 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 ### `tankathon_ingest.py`
 Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
-### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_persona.py`, `ai_context.py`)
+### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_persona.py`, `ai_context.py`)
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
 
@@ -141,6 +145,10 @@ Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (S
 **`ai_persona.py`** — `build_player_scouting_prompt()` now branches on `position == 'G'` to give goalies a tailored prompt.
 
 **`power_rankings.py`** — AI narratives now cached per-team in Worker KV using `narrative:{period}:{gameId}:{carAbbr}` key pattern so each team's perspective is independently cached.
+
+**`ai_results_vs_process.py`** (Session 56, NHL only) — Generates "results vs. process" blurbs explaining *why* a player's on-ice goal results (`on_ice_gf_pct`) diverge from their underlying process (`ev_off_pct`), not just restating the two numbers. Pulls qualifying skaters (non-null `results_vs_process_diff` — moneypuck.py's GP≥25 guardrail is the only gate; this script never re-checks GP itself) via the new `get_results_vs_process_context()` in `ai_context.py`. Writes to a new `player_narratives` table rather than `player_scouting` — see that table's description below. Respects `--force`, `--missing`, `--dry-run`, `--team`, `--player` flags, same CLI shape as `ai_scouting.py`. Skater-only (MoneyPuck's on-ice GF/GA split doesn't exist for goalies).
+
+**`ai_persona.py`** — new `build_results_vs_process_prompt()`, dumps the player's on-ice GF%/process xGF%/diff and an explicit over/underperforming direction, with task instructions asking Sticks to explain the *why* (finishing luck, goaltending support, sustainability) rather than just restate the numbers.
 
 ---
 
@@ -392,6 +400,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `game_summaries` | AI post-game summaries |
 | `game_predictions` | AI pre-game predictions |
 | `player_scouting` | AI scouting blurbs |
+| `player_narratives` | (Session 56) AI narrative blurbs keyed on `(player_id, season, team, narrative_type)` — supports multiple future blurb types, not just `results_vs_process` (the only type written this round). Written by `ai_results_vs_process.py` |
 | `game_scoring` | Goal-by-goal scoring data |
 | `game_xg` | Per-game expected goals |
 | `line_combinations` | Inferred lines and D pairs |

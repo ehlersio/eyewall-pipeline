@@ -11,6 +11,7 @@ Nightly run order (important — modules depend on each other):
   7. game_scoring — PBP goals/assists parser -> game_scoring table
   8. ai_summaries — post-game summaries (all teams)
   9. ai_scouting  — missing scouting blurbs (all teams)
+  10. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -91,18 +92,24 @@ def run_stage(label, fn, *args, **kwargs):
 
 
 def run_ai_pipeline():
-    """AI pipeline — game_scoring, summaries, scouting. Runs after moneypuck.
+    """AI pipeline — game_scoring, summaries, scouting, results-vs-process.
+    Runs after moneypuck (results-vs-process needs its fresh
+    on_ice_gf_pct/results_vs_process_diff columns).
 
-    Each sub-stage is isolated: game_scoring, ai_summaries, and ai_scouting
-    don't depend on each other's output (confirmed — neither ai_summaries.py
-    nor ai_scouting.py reference game_scoring), so one crashing must not
-    prevent the other two from running.
+    Each sub-stage is isolated: none of the four depend on each other's
+    output (confirmed — neither ai_summaries.py, ai_scouting.py, nor
+    ai_results_vs_process.py reference game_scoring or each other), so one
+    crashing must not prevent the others from running.
     """
     failures = []
     for label, cmd in (
         ("game_scoring   — PBP goals/assists parser", ["game_scoring.py"]),
         ("ai_summaries   — post-game summaries", ["ai_summaries.py"]),
         ("ai_scouting    — missing scouting blurbs", ["ai_scouting.py", "--missing"]),
+        (
+            "ai_results_vs_process — missing results-vs-process blurbs",
+            ["ai_results_vs_process.py", "--missing"],
+        ),
     ):
         if run_stage(label, run_subprocess, label, cmd) is STAGE_FAILED:
             # Runs as a subprocess -- the exception seen here is always

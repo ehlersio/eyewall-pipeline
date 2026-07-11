@@ -59,6 +59,10 @@ jobs:
         run: python ai_scouting.py --missing
         continue-on-error: false
 
+      - name: Run ai_results_vs_process.py --missing
+        run: python ai_results_vs_process.py --missing
+        continue-on-error: false
+
   # --------------------------------------------------------------------------
   # MORNING JOB — pre-game predictions
   # Runs: daily at 2PM UTC (10AM ET)
