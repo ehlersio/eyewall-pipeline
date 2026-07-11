@@ -265,6 +265,21 @@ def format_prediction_context(ctx: dict) -> str:
         for z in zones[:6]:
             lines.append(f"  {z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}%")
 
+        # Real Corsi (Session 52) -- prefers 5v5-filtered over
+        # all-situations, same preference order as nhl.js's
+        # /prediction/analyze fallback tier. Omitted entirely (not printed
+        # as "—") when neither is populated yet, so the prompt doesn't
+        # imply a stat exists when it doesn't.
+        corsi = ctx.get(f"{side}_corsi")
+        if corsi and corsi.get("corsi_for_pct_5v5") is not None:
+            lines.append(
+                f"Corsi For% (5-on-5 shot-attempt share): {corsi['corsi_for_pct_5v5']:.1f}%"
+            )
+        elif corsi and corsi.get("corsi_for_pct") is not None:
+            lines.append(
+                f"Corsi For% (all-situations shot-attempt share, not 5v5-filtered): {corsi['corsi_for_pct']:.1f}%"
+            )
+
         lines.append("Recent form (last 10):")
         record = {"W": 0, "L": 0}
         for g in form:

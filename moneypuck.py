@@ -308,9 +308,173 @@ def run_goalie_qs(client, season: int):
     print(f"  ✓ goalie_seasons: QS% updated for {len(upserts)} goalies")
 
 
+CORSI_EVENT_TYPES = ("shot-on-goal", "missed-shot", "blocked-shot", "goal")
+FENWICK_EVENT_TYPES = ("shot-on-goal", "missed-shot", "goal")  # excludes blocked-shot
+SITUATION_5V5 = "1551"  # both teams at full strength — same convention rapm.py
+# and line_combinations.py already use for 5v5-only filtering.
+
+
+def run_team_corsi_rollup(client, season: int):
+    """Compute team-level Corsi/Fenwick (all-situations AND 5v5-filtered)
+    from shot_events and upsert to team_seasons. Replaces the SOG-share-only
+    proxy previously used by nhl.js's /prediction/analyze (Session 52).
+
+    Unlike PWHL's version (pwhl_stats.py::run_team_shot_totals /
+    run_team_shot_totals_5v5), which has to reconstruct 5v5 strength state
+    from a penalty log because PWHL's own situation_code is a hardcoded
+    placeholder, NHL's shot_events already carries a real situation_code
+    straight from the NHL API (already used in production by rapm.py and
+    line_combinations.py, both filtering situation_code == '1551' for
+    5v5-only work) — so the 5v5 variant here is a one-line filter on data
+    already being scanned, not a separate reconstruction pass.
+
+    Definitions (CF/CA mirror pwhl_stats.py::run_team_shot_totals; FF/FA
+    include missed-shot since, unlike PWHL, NHL's shot_events has real
+    missed-shot events — a genuine Fenwick, not a SOG-based proxy):
+      Corsi For (CF)  = shot-on-goal + missed-shot + blocked-shot + goal, our team
+      Corsi Against (CA) = same event types, the OTHER team in that game
+      Fenwick For (FF) = shot-on-goal + missed-shot + goal (unblocked attempts), our team
+      Fenwick Against (FA) = same, the other team
+
+    CA/FA are computed as "every attempt in this game_id not credited to
+    our team" rather than via a separate home/away lookup — shot_events
+    itself tells us which teams appear in a game (exactly 2, in every real
+    game), so no extra table join is needed.
+
+    Both all-situations and 5v5-filtered totals are computed in the same
+    single pass over shot_events (situation_code is already on every row),
+    to avoid scanning the ~800k-row league-wide table twice.
+    """
+    print("\n--- Team Corsi/Fenwick rollup (shot_events -> team_seasons) ---")
+    from collections import defaultdict
+
+    # game_totals[game_id][team] = {event_type: count}, all-situations
+    # game_totals_5v5[game_id][team] = same, situation_code == '1551' only
+    game_totals: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    game_totals_5v5: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+    # Keyset (not OFFSET) pagination — same convention as run_goalie_qs
+    # above and shot_events.py::get_already_processed, for the same
+    # season-scoped, ~800k-row-league-wide reason (see line_combinations.py
+    # ::fetch_all's docstring for the statement-timeout incident that
+    # motivated this pattern).
+    last_id = 0
+    total_rows = 0
+    while True:
+        rows = (
+            client.table("shot_events")
+            .select("id,game_id,team,event_type,situation_code")
+            .eq("season", season)
+            .in_("event_type", list(CORSI_EVENT_TYPES))
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
+            .execute()
+            .data
+        )
+        if not rows:
+            break
+        for r in rows:
+            team = r.get("team")
+            game_id = r.get("game_id")
+            event_type = r.get("event_type")
+            if not team or not game_id or not event_type:
+                continue
+            game_totals[game_id][team][event_type] += 1
+            if r.get("situation_code") == SITUATION_5V5:
+                game_totals_5v5[game_id][team][event_type] += 1
+        total_rows += len(rows)
+        last_id = rows[-1]["id"]
+        if total_rows % 9990 == 0:  # every ~10 pages — a full-season scan
+            # (~174k rows) is otherwise completely silent for several
+            # minutes, which reads as a hung CI step rather than a slow
+            # one (Session 52 follow-up).
+            print(f"    ...{total_rows} rows scanned so far")
+        if len(rows) < 999:
+            break
+
+    print(f"  Processed {total_rows} shot_events rows across {len(game_totals)} games")
+
+    if not game_totals:
+        print("  No shot_events rows found — skipping Corsi rollup")
+        return
+
+    def _attempts(counts: dict, types: tuple) -> int:
+        return sum(counts.get(t, 0) for t in types)
+
+    def _aggregate(per_game: dict) -> dict:
+        """per_game[game_id][team] = {event_type: count} -> team_totals[team]
+        = {cf, ca, ff, fa, gp}. CA/FA for a team = every OTHER team's
+        attempts in the same game_id (games are assumed 2-team; a game_id
+        with other than exactly 2 teams recorded is logged and skipped,
+        rather than guessing which team is "the opponent")."""
+        totals: dict = defaultdict(lambda: {"cf": 0, "ca": 0, "ff": 0, "fa": 0, "gp": 0})
+        for game_id, teams in per_game.items():
+            team_ids = list(teams.keys())
+            if len(team_ids) != 2:
+                print(
+                    f"  WARNING: game {game_id} has {len(team_ids)} team(s) with shot "
+                    f"attempts (expected 2) — skipping from Corsi rollup: {team_ids}"
+                )
+                continue
+            for our, opp in (team_ids, team_ids[::-1]):
+                our_counts = teams[our]
+                opp_counts = teams[opp]
+                totals[our]["cf"] += _attempts(our_counts, CORSI_EVENT_TYPES)
+                totals[our]["ca"] += _attempts(opp_counts, CORSI_EVENT_TYPES)
+                totals[our]["ff"] += _attempts(our_counts, FENWICK_EVENT_TYPES)
+                totals[our]["fa"] += _attempts(opp_counts, FENWICK_EVENT_TYPES)
+                totals[our]["gp"] += 1
+        return totals
+
+    all_totals = _aggregate(game_totals)
+    totals_5v5 = _aggregate(game_totals_5v5)
+
+    def _pct(numerator: int, denominator: int) -> float | None:
+        return round(numerator / denominator, 4) if denominator > 0 else None
+
+    upserts = []
+    all_teams = set(all_totals) | set(totals_5v5)
+    for team in all_teams:
+        t = all_totals.get(team, {"cf": 0, "ca": 0, "ff": 0, "fa": 0, "gp": 0})
+        t5 = totals_5v5.get(team, {"cf": 0, "ca": 0, "ff": 0, "fa": 0, "gp": 0})
+        upserts.append(
+            {
+                "team": team,
+                "season": season,
+                "game_type": 2,
+                "corsi_for": t["cf"],
+                "corsi_against": t["ca"],
+                "corsi_for_pct": _pct(t["cf"], t["cf"] + t["ca"]),
+                "fenwick_for": t["ff"],
+                "fenwick_against": t["fa"],
+                "fenwick_for_pct": _pct(t["ff"], t["ff"] + t["fa"]),
+                "corsi_for_5v5": t5["cf"],
+                "corsi_against_5v5": t5["ca"],
+                "corsi_for_pct_5v5": _pct(t5["cf"], t5["cf"] + t5["ca"]),
+                "fenwick_for_5v5": t5["ff"],
+                "fenwick_against_5v5": t5["fa"],
+                "fenwick_for_pct_5v5": _pct(t5["ff"], t5["ff"] + t5["fa"]),
+            }
+        )
+
+    print(f"  Upserting Corsi/Fenwick for {len(upserts)} teams...")
+    client.table("team_seasons").upsert(upserts, on_conflict="team,season,game_type").execute()
+
+    sample = sorted(upserts, key=lambda x: x["corsi_for_pct"] or 0, reverse=True)[:5]
+    for s in sample:
+        print(
+            f"    {s['team']}: CF%={s['corsi_for_pct']} FF%={s['fenwick_for_pct']} "
+            f"CF%_5v5={s['corsi_for_pct_5v5']} FF%_5v5={s['fenwick_for_pct_5v5']}"
+        )
+    print(
+        f"  ✓ team_seasons: Corsi/Fenwick (all-situations + 5v5) updated for {len(upserts)} teams"
+    )
+
+
 def _run_substage(failures: list, label: str, fn, *args, **kwargs):
     """Run one of this module's optional sub-stages (game_xg / team_xgf_rollup
-    / goalie_qs) in isolation. These don't depend on each other, so one
+    / goalie_qs / team_corsi_rollup) in isolation. These don't depend on each other, so one
     raising must not stop the others, nor the player_seasons.war/percentile
     upsert that already completed earlier in run(). Logs loudly (full
     traceback + label) and records the failure in `failures` so run()'s
@@ -642,6 +806,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
     _run_substage(failures, "game_xg", run_game_xg, client, season)
     _run_substage(failures, "team_xgf_rollup", run_team_xgf_rollup, client, season)
     _run_substage(failures, "goalie_qs", run_goalie_qs, client, season)
+    _run_substage(failures, "team_corsi_rollup", run_team_corsi_rollup, client, season)
 
     if failures:
         print(

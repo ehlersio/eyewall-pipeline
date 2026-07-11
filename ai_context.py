@@ -675,6 +675,43 @@ def build_game_summary_context(game_id: int, team: str = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def get_team_corsi(team: str, season: int = None) -> dict | None:
+    """Real Corsi (shot-attempt share) for a team/season from team_seasons —
+    all-situations and 5v5-filtered (Session 52; replaces the SOG-share-only
+    proxy nhl.js's /prediction/analyze fallback tier used to compute
+    inline). Returns None if the row doesn't exist or neither Corsi column
+    is populated yet (e.g. before moneypuck.py's nightly rollup has run for
+    this season) -- callers should treat that the same as "no Corsi data",
+    not synthesize a value from something else.
+
+    corsi_for_pct/corsi_for_pct_5v5 are stored as 0-1 fractions, same
+    convention as this table's existing xgf_pct column -- scaled to a
+    percentage here before being handed to the prompt formatter.
+    """
+    season = season or NHL_SEASON
+    rows = (
+        supabase.table("team_seasons")
+        .select("corsi_for_pct, corsi_for_pct_5v5")
+        .eq("team", team)
+        .eq("season", season)
+        .eq("game_type", 2)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    all_sit = row.get("corsi_for_pct")
+    v5 = row.get("corsi_for_pct_5v5")
+    if all_sit is None and v5 is None:
+        return None
+    return {
+        "corsi_for_pct": round(all_sit * 100, 1) if all_sit is not None else None,
+        "corsi_for_pct_5v5": round(v5 * 100, 1) if v5 is not None else None,
+    }
+
+
 def build_prediction_context(home_team: str, away_team: str) -> dict:
     """
     Assembles context for a pre-game prediction.
@@ -686,6 +723,8 @@ def build_prediction_context(home_team: str, away_team: str) -> dict:
     away_zones = get_zone_starts_context(team=away_team)
     home_form = get_recent_form(team=home_team, n_games=10)
     away_form = get_recent_form(team=away_team, n_games=10)
+    home_corsi = get_team_corsi(team=home_team)
+    away_corsi = get_team_corsi(team=away_team)
 
     return {
         "home_team": home_team,
@@ -696,6 +735,8 @@ def build_prediction_context(home_team: str, away_team: str) -> dict:
         "away_zones": away_zones,
         "home_form": home_form,
         "away_form": away_form,
+        "home_corsi": home_corsi,
+        "away_corsi": away_corsi,
     }
 
 
