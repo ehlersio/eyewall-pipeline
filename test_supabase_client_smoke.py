@@ -17,10 +17,22 @@ import os
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
+import warnings
+
 import db
+import tankathon_ingest
 
 
 def test_get_client_constructs_without_raising():
     client = db.get_client()
     assert client is not None
     assert client.table("pwhl_game_log") is not None
+
+
+def test_tankathon_get_supabase_constructs_without_deprecation_warning():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        client = tankathon_ingest.get_supabase()
+        # .table(...) forces lazy postgrest sub-client construction — the
+        # deprecation only fires there, not at create_client() itself.
+        assert client.table("draft_pick_order_2026") is not None

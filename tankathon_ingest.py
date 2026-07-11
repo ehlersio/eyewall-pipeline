@@ -21,6 +21,7 @@ import logging
 import os
 import re
 
+import httpx
 import requests
 from dotenv import load_dotenv
 
@@ -96,7 +97,12 @@ SVG_TO_ABBR = {
 
 
 def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY, options=ClientOptions())
+    # httpx_client (not postgrest_client_timeout) — see db.py's import comment;
+    # bare ClientOptions() was already using httpx's default timeout, so this
+    # is a warning-only fix, not a behavior change.
+    return create_client(
+        SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client())
+    )
 
 
 def svg_to_abbr(svg_name: str) -> str:
