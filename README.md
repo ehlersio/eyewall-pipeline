@@ -45,6 +45,7 @@ python run.py rapm             # RAPM regression only
 python run.py moneypuck        # MoneyPuck WAR + percentiles only
 python run.py lines            # Line combinations only
 python run.py rankings         # Power rankings + AI narratives only
+python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
 python run.py validate         # RAPM sanity checks
 
 # AI pipeline
@@ -79,11 +80,18 @@ python pwhl_news.py            # Fetch PWHL news and POST to Worker
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process
+nhl_stats → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process
 ```
 
 ### `nhl_stats.py`
 Rosters, skater/goalie/team stats, game log for all 32 teams. Accepts season argument: `python nhl_stats.py 20242025`. Runtime: ~2-3 min.
+
+**Standings enrichment (Session 57):** `fetch_standings()` (formerly `fetch_standings_l10()`) now parses the full `standings/now` response instead of discarding everything but L10 record. For regular-season (`game_type=2`) rows it's the canonical source for `team_seasons`' points/wins/losses/ot_losses/games_played (previously duplicated from `stats/rest/en/team/summary`, joined via a hardcoded teamId->abbr map) plus new columns: `division_abbrev`, `conference_abbrev`, `wildcard_sequence`, `regulation_wins`, `clinch_indicator`. `fetch_team_stats` (the summary endpoint) is now only used for the advanced stats standings/now doesn't carry (goals, PP%/PK%, shots/game). All five new columns are `NULL` for playoff (`game_type=3`) rows — standings/now has no bracket equivalent. Requires `docs/session57_new_columns.sql` to be run in Supabase first (no migration tooling in this repo).
+
+### `playoff_race.py` (Session 57)
+Magic number / elimination calculations for the regular season, run right after `nhl_stats.py` (needs its fresh `division_abbrev`/`conference_abbrev`/`points`/`games_played`). Writes `team_seasons.{magic_number, tragic_number, clinched, eliminated}`. Full algorithm, generic `clinched`/`eliminated`/`magic_number` functions, and the V1 simplifications (no tiebreak-chain modeling, 82-game season assumption) are documented in the module's own docstring — read that before changing the math. `tragic_number` is this module's own mirror of `magic_number` (the feature spec didn't define one) — see the docstring for the reasoning. Built-in nightly validation logs (doesn't fail the job) any team where computed `clinched`/`eliminated` disagrees with the NHL's own `clinch_indicator` once populated, plus a bonus cross-check against `wildcard_sequence` for pool-membership. Validated (Session 57) against the fully-resolved 2025-26 final standings — 0/32 mismatches on both checks — and against a `game_log`-reconstructed mid-season (2026-02-15) snapshot to exercise the games-remaining forecasting math (no live 2026-27 race existed yet to spot-check against an external tracker). `python playoff_race.py` runs standalone; accepts a season argument.
+
+Once `clinch_indicator` is populated for a team, it's ground truth from the NHL itself — computed `magic_number`/`clinched`/`eliminated` are a pre-clinch estimate only. Preferring `clinch_indicator` for display is a Worker/frontend concern, not implemented in this pipeline pass.
 
 ### `shot_events.py`
 League-wide shot coordinates from PBP. Incremental. Runtime: ~2 min nightly, ~10-15 min backfill.
@@ -389,7 +397,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `players` | Player master |
 | `player_seasons` | Per-player stats + WAR/RAPM/percentiles |
 | `goalie_seasons` | Per-goalie stats + GSAX/percentiles |
-| `team_seasons` | Per-team stats + `xgf_pct` + `roster_war_score` |
+| `team_seasons` | Per-team stats + `xgf_pct` + `roster_war_score`. Regular-season rows also carry standings (`division_abbrev`/`conference_abbrev`/`wildcard_sequence`/`regulation_wins`/`clinch_indicator`, Session 57) and computed playoff race (`magic_number`/`tragic_number`/`clinched`/`eliminated`, `playoff_race.py`) — all `NULL` for playoff rows |
 | `game_log` | All-team game-by-game results (one row per team per game) |
 | `shot_events` | League-wide shot coordinates |
 | `shift_events` | Per-player shift times |

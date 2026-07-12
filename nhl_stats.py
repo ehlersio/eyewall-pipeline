@@ -191,11 +191,22 @@ def fetch_team_stats(season: int, game_type: int) -> list:
     return data.get("data", [])
 
 
-def fetch_standings_l10() -> dict:
+def fetch_standings() -> dict:
     """
-    Fetches current standings and returns L10 record keyed by team abbr.
-    Returns { 'CAR': {'l10_wins': 7, 'l10_losses': 2, 'l10_ot_losses': 1}, ... }
-    Only meaningful for regular season (game_type=2).
+    Fetches full current standings from the NHL API, keyed by team abbr.
+    Only meaningful for regular season (game_type=2) — standings/now has no
+    playoff-bracket equivalent.
+
+    Previously (fetch_standings_l10) this only extracted L10 record and
+    discarded everything else in the response, even though team_seasons'
+    points/wins/losses/otLosses/gamesPlayed were separately re-fetched from
+    a *different* endpoint (stats/rest/en/team/summary, see
+    fetch_team_stats) requiring a hardcoded teamId->abbr map to join. Now
+    the canonical source for those overlapping fields for regular-season
+    rows — keyed by abbr directly, no translation needed — plus the new
+    division/conference/wildcard/clinch/ROW fields playoff_race.py needs.
+    fetch_team_stats is still called for the advanced stats standings/now
+    doesn't carry (goals, PP%/PK%, shots/game).
     """
     try:
         data = nhl_get(f"{NHL_BASE}/standings/now")
@@ -208,6 +219,16 @@ def fetch_standings_l10() -> dict:
         if not abbr:
             continue
         result[abbr] = {
+            "points": t.get("points"),
+            "games_played": t.get("gamesPlayed"),
+            "wins": t.get("wins"),
+            "losses": t.get("losses"),
+            "ot_losses": t.get("otLosses"),
+            "regulation_wins": t.get("regulationWins"),
+            "division_abbrev": t.get("divisionAbbrev"),
+            "conference_abbrev": t.get("conferenceAbbrev"),
+            "wildcard_sequence": t.get("wildcardSequence"),
+            "clinch_indicator": t.get("clinchIndicator"),
             "l10_wins": t.get("l10Wins", 0),
             "l10_losses": t.get("l10Losses", 0),
             "l10_ot_losses": t.get("l10OtLosses", 0),
@@ -340,10 +361,11 @@ def run(season: int = NHL_SEASON):
     # ── 4. Team stats ─────────────────────────────────────────────
     print("\n[4/5] Fetching team stats...")
 
-    # L10 is only in the standings endpoint (not the summary endpoint).
-    # Fetch once — keyed by team abbr — and apply to game_type=2 rows only.
-    l10_map = fetch_standings_l10()
-    print(f"  L10 data: {len(l10_map)} teams from standings")
+    # Standings (L10, division/conference/wildcard/clinch/ROW) is only in
+    # the standings endpoint, not the summary endpoint. Fetch once — keyed
+    # by team abbr — and use as the canonical source for game_type=2 rows.
+    standings_map = fetch_standings()
+    print(f"  Standings data: {len(standings_map)} teams")
 
     # Build teamId → abbreviation map from standings endpoint
     # NHL team IDs are stable — hardcode the mapping
@@ -387,37 +409,83 @@ def run(season: int = NHL_SEASON):
         label = "Regular Season" if game_type == 2 else "Playoffs"
         print(f"  {label}...")
         teams = fetch_team_stats(season, game_type)
-        rows = []
+        summary_by_abbr = {}
         for t in teams:
-            tid = t.get("teamId")
-            abbr = TEAM_ID_TO_ABBR.get(tid, "")
-            if not abbr:
-                continue  # skip if we can't identify the team
-            l10 = l10_map.get(abbr, {}) if game_type == 2 else {}
-            rows.append(
-                {
-                    "team": abbr,
-                    "season": season,
-                    "game_type": game_type,
-                    "games_played": t.get("gamesPlayed"),
-                    "wins": t.get("wins"),
-                    "losses": t.get("losses"),
-                    "ot_losses": t.get("otLosses"),
-                    "points": t.get("points"),
-                    "goals_for": t.get("goalsFor"),
-                    "goals_against": t.get("goalsAgainst"),
-                    "goals_for_pg": t.get("goalsForPerGame"),
-                    "goals_ag_pg": t.get("goalsAgainstPerGame"),
-                    "pp_pct": t.get("powerPlayPct"),
-                    "pk_pct": t.get("penaltyKillPct"),
-                    "shots_for_pg": t.get("shotsForPerGame"),
-                    "shots_ag_pg": t.get("shotsAgainstPerGame"),
-                    # L10 — regular season only (null for playoffs)
-                    "l10_wins": l10.get("l10_wins"),
-                    "l10_losses": l10.get("l10_losses"),
-                    "l10_ot_losses": l10.get("l10_ot_losses"),
-                }
-            )
+            abbr = TEAM_ID_TO_ABBR.get(t.get("teamId"), "")
+            if abbr:
+                summary_by_abbr[abbr] = t
+
+        rows = []
+        if game_type == 2:
+            # standings_map is canonical for regular-season team-level
+            # fields (keyed by abbr directly); summary_by_abbr only fills
+            # in the advanced stats standings/now doesn't carry.
+            for abbr, s in standings_map.items():
+                summary = summary_by_abbr.get(abbr, {})
+                rows.append(
+                    {
+                        "team": abbr,
+                        "season": season,
+                        "game_type": game_type,
+                        "games_played": s.get("games_played"),
+                        "wins": s.get("wins"),
+                        "losses": s.get("losses"),
+                        "ot_losses": s.get("ot_losses"),
+                        "points": s.get("points"),
+                        "goals_for": summary.get("goalsFor"),
+                        "goals_against": summary.get("goalsAgainst"),
+                        "goals_for_pg": summary.get("goalsForPerGame"),
+                        "goals_ag_pg": summary.get("goalsAgainstPerGame"),
+                        "pp_pct": summary.get("powerPlayPct"),
+                        "pk_pct": summary.get("penaltyKillPct"),
+                        "shots_for_pg": summary.get("shotsForPerGame"),
+                        "shots_ag_pg": summary.get("shotsAgainstPerGame"),
+                        "l10_wins": s.get("l10_wins"),
+                        "l10_losses": s.get("l10_losses"),
+                        "l10_ot_losses": s.get("l10_ot_losses"),
+                        "division_abbrev": s.get("division_abbrev"),
+                        "conference_abbrev": s.get("conference_abbrev"),
+                        "wildcard_sequence": s.get("wildcard_sequence"),
+                        "regulation_wins": s.get("regulation_wins"),
+                        "clinch_indicator": s.get("clinch_indicator"),
+                    }
+                )
+        else:
+            # Playoffs — standings/now has no bracket equivalent, so this
+            # stays on the summary endpoint. Division/wildcard/clinch/ROW
+            # don't apply once a team is in the bracket.
+            for t in teams:
+                abbr = TEAM_ID_TO_ABBR.get(t.get("teamId"), "")
+                if not abbr:
+                    continue  # skip if we can't identify the team
+                rows.append(
+                    {
+                        "team": abbr,
+                        "season": season,
+                        "game_type": game_type,
+                        "games_played": t.get("gamesPlayed"),
+                        "wins": t.get("wins"),
+                        "losses": t.get("losses"),
+                        "ot_losses": t.get("otLosses"),
+                        "points": t.get("points"),
+                        "goals_for": t.get("goalsFor"),
+                        "goals_against": t.get("goalsAgainst"),
+                        "goals_for_pg": t.get("goalsForPerGame"),
+                        "goals_ag_pg": t.get("goalsAgainstPerGame"),
+                        "pp_pct": t.get("powerPlayPct"),
+                        "pk_pct": t.get("penaltyKillPct"),
+                        "shots_for_pg": t.get("shotsForPerGame"),
+                        "shots_ag_pg": t.get("shotsAgainstPerGame"),
+                        "l10_wins": None,
+                        "l10_losses": None,
+                        "l10_ot_losses": None,
+                        "division_abbrev": None,
+                        "conference_abbrev": None,
+                        "wildcard_sequence": None,
+                        "regulation_wins": None,
+                        "clinch_indicator": None,
+                    }
+                )
         # Deduplicate
         seen = set()
         deduped = []
