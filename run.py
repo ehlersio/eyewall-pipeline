@@ -3,21 +3,23 @@ run.py — EyeWall Analytics pipeline orchestrator.
 
 Nightly run order (important — modules depend on each other):
   1. nhl_stats    — rosters, player/team stats, game log
-  2. shot_events  — league-wide shot coordinates from PBP (incremental)
-  3. shift_data   — league-wide shift charts (incremental)
-  4. zone_starts  — per-player zone start counts from PBP (incremental)
-  5. rapm         — 3-year rolling ridge regression RAPM -> player_seasons.rapm
-  6. moneypuck    — WAR (RAPM-derived) + percentiles -> player_seasons
-  7. game_scoring — PBP goals/assists parser -> game_scoring table
-  8. ai_summaries — post-game summaries (all teams)
-  9. ai_scouting  — missing scouting blurbs (all teams)
-  10. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
+  2. playoff_race — magic/tragic numbers + clinched/eliminated (needs nhl_stats' fresh standings)
+  3. shot_events  — league-wide shot coordinates from PBP (incremental)
+  4. shift_data   — league-wide shift charts (incremental)
+  5. zone_starts  — per-player zone start counts from PBP (incremental)
+  6. rapm         — 3-year rolling ridge regression RAPM -> player_seasons.rapm
+  7. moneypuck    — WAR (RAPM-derived) + percentiles -> player_seasons
+  8. game_scoring — PBP goals/assists parser -> game_scoring table
+  9. ai_summaries — post-game summaries (all teams)
+  10. ai_scouting  — missing scouting blurbs (all teams)
+  11. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
 Usage:
   python run.py                  # run all pipelines (nightly order)
   python run.py nhl              # NHL stats only
+  python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
@@ -129,6 +131,7 @@ def run_all():
     import line_combinations
     import moneypuck
     import nhl_stats
+    import playoff_race
     import power_rankings
     import rapm
     import shift_data
@@ -145,6 +148,7 @@ def run_all():
         return result
 
     stage("nhl_stats", nhl_stats.run)
+    stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
     stage("shift_data", shift_data.run)
     stage("zone_starts", zone_starts.run)
@@ -203,6 +207,10 @@ if __name__ == "__main__":
         import nhl_stats
 
         nhl_stats.run()
+    elif arg == "playoffs":
+        import playoff_race
+
+        playoff_race.run()
     elif arg == "shots":
         import shot_events
 
