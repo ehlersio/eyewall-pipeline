@@ -454,7 +454,7 @@ def run(season=NHL_SEASON):
     client.table("line_combinations").delete().eq("season", season).eq("team", TEAM).execute()
     for i in range(0, len(rows), 500):
         client.table("line_combinations").insert(rows[i : i + 500]).execute()
-    print(f"  ✓ line_combinations: {len(rows)} rows written")
+    print(f"  OK line_combinations: {len(rows)} rows written")
     print("\nLine combinations pipeline complete")
 
 

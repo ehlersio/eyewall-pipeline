@@ -72,7 +72,7 @@ def run_team_xg_season(client, season: int):
         sample = sorted(upserts, key=lambda x: x["xgf_pct"] or 0, reverse=True)[:5]
         for s in sample:
             print(f"    {s['team']}: xGF% = {s['xgf_pct']}")
-        print(f"  ✓ team_seasons.xgf_pct updated for {len(upserts)} teams")
+        print(f"  OK team_seasons.xgf_pct updated for {len(upserts)} teams")
 
     except Exception as e:
         print(f"  WARNING: run_team_xg_season failed: {e}")

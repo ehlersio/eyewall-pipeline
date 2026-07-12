@@ -96,7 +96,7 @@ def get_all_completed_games(season):
         try:
             data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
         except FetchError as e:
-            print(f"  ✗ {e}")
+            print(f"  ERROR: {e}")
             continue
         for g in data.get("games", []):
             gid = g.get("id")

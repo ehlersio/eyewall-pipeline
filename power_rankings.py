@@ -567,7 +567,7 @@ def upsert_roster_war_scores(war_scores: dict[str, float], season: int) -> None:
         for team, score in war_scores.items()
     ]
     supabase.table("team_seasons").upsert(rows, on_conflict="team,season,game_type").execute()
-    print(f"  ✓ roster_war_score written for {len(rows)} teams")
+    print(f"  OK roster_war_score written for {len(rows)} teams")
 
 
 def upsert_narrative(
