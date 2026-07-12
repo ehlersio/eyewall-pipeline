@@ -61,7 +61,23 @@ class TestClinchedEliminatedMagicTragic:
 
     def test_leader_not_eliminated(self):
         assert pr.eliminated(A, DIVISION, 3) is False
-        assert pr.tragic_number(A, DIVISION, 3) == 24  # 104 - 80 (D's points)
+        assert pr.tragic_number(A, DIVISION, 3) == 25  # 104 - 80 (D's points) + 1
+
+    def test_tragic_number_boundary_matches_eliminated_exactly(self):
+        # Regression test for a real off-by-one shipped in an earlier draft:
+        # tragic_number must not hit 0 before eliminated() actually flips
+        # True. Here the Kth-ranked rival's current points exactly equal
+        # the team's ceiling (tied, not exceeded) -- eliminated() is still
+        # False (strict >), so tragic_number must read 1, not 0.
+        t = team("T", 80, 82)  # 0 games remaining -- ceiling == points == 80
+        pool = [t, team("R1", 90, 82), team("R2", 85, 82), team("R3", 80, 82)]
+        assert pr.eliminated(t, pool, 3) is False
+        assert pr.tragic_number(t, pool, 3) == 1
+
+        # One more point for R3 tips it past the ceiling -- now eliminated.
+        pool_tipped = [t, team("R1", 90, 82), team("R2", 85, 82), team("R3", 81, 82)]
+        assert pr.eliminated(t, pool_tipped, 3) is True
+        assert pr.tragic_number(t, pool_tipped, 3) == 0
 
     def test_magic_number_for_bubble_team(self):
         # D would need to reach the 3rd-highest rival ceiling (94) + 1,
@@ -91,9 +107,9 @@ class TestComposedTeamRace:
         assert result["clinched"] is True  # wc: 0 rivals can pass D's 80
         assert result["eliminated"] is False  # AND-composition saves D
         assert result["magic_number"] is None  # clinched -> no magic number
-        # tragic = max(division tragic=0, wildcard tragic=14) -- D still has
+        # tragic = max(division tragic=0, wildcard tragic=15) -- D still has
         # cushion via the path that actually matters for it.
-        assert result["tragic_number"] == 14
+        assert result["tragic_number"] == 15
 
     def test_top3_team_has_no_wildcard_path(self):
         result = pr.compute_team_race(A, DIVISION, wildcard_pool=[])

@@ -26,13 +26,27 @@ the conference wildcard race (K=2 spots):
                         or eliminated (no meaningful "points needed" left)
 
 tragic_number is this module's own generic mirror of magic_number (the task
-spec didn't give it an explicit formula) — the points-equivalent cushion
-before elimination, symmetric with magic_number's "points needed to
-clinch": both count down to a boundary value (0) using the Kth-ranked rival
-in the pool. Because overall elimination requires *both* applicable paths
-to be eliminated (AND, unlike clinching's OR), the overall tragic number is
-the MAX of the two paths' numbers — the team survives until whichever path
-has more cushion also runs out.
+spec didn't give it an explicit formula):
+
+  tragic_number(team, rival_pool, K):
+      # freeze the team's own ceiling; find the smallest number of points
+      # the Kth-ranked rival (by current points) still needs to bank -- on
+      # top of what they already have -- to strictly exceed it, which is
+      # exactly eliminated()'s trigger condition.
+      rival_points_sorted_desc = sorted([current_points(r) for r in rival_pool minus team], reverse=True)
+      kth_points = rival_points_sorted_desc[K-1] if len(...) >= K else None
+      if kth_points is None:
+          return ceiling(team)  # pool too small -- elimination impossible via this path
+      return max(0, ceiling(team) + 1 - kth_points)
+
+The "+1" mirrors magic_number's own "+1", for the same reason: at
+kth_points == ceiling(team) exactly (tied, not exceeded), eliminated() is
+still False (strict >), so tragic_number must not hit 0 there either — it
+should read 1, not 0, until the rival actually clears the ceiling. Because
+overall elimination requires *both* applicable paths to be eliminated (AND,
+unlike clinching's OR), the overall tragic number is the MAX of the two
+paths' numbers — the team survives until whichever path has more cushion
+also runs out.
 
 V1 simplifications (deliberately not modeling full NHL tiebreak rules —
 do not try to close all of these in this pass):
@@ -101,13 +115,22 @@ def magic_number(team: dict, pool: list, k: int) -> int:
 
 
 def tragic_number(team: dict, pool: list, k: int) -> int:
-    """Mirror of magic_number for elimination — see module docstring."""
+    """Mirror of magic_number for elimination — see module docstring.
+
+    Freeze the team's own ceiling, then find the smallest number of points
+    the Kth-ranked rival (by current points) still needs to bank -- on top
+    of what they already have -- to strictly exceed that ceiling, which is
+    exactly eliminated()'s trigger condition (points(rival) > ceiling(team)).
+    The "+1" mirrors magic_number's own "+1" for the identical reason: at
+    kth_points == ceiling(team) exactly (tied, not exceeded), eliminated()
+    is still False, so tragic_number must not hit 0 there either.
+    """
     rivals = _rivals(team, pool)
     rival_points = sorted((_points(r) for r in rivals), reverse=True)
     kth_points = rival_points[k - 1] if len(rival_points) >= k else None
     if kth_points is None:
         return ceiling(team)  # pool too small to ever eliminate via this path
-    return max(0, ceiling(team) - kth_points)
+    return max(0, ceiling(team) + 1 - kth_points)
 
 
 def _division_rank(team: dict, division_pool: list) -> int:
