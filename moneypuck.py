@@ -165,7 +165,7 @@ def run_game_xg(client, season: int):
     for i in range(0, len(upserts), 500):
         batch = upserts[i : i + 500]
         client.table("game_xg").upsert(batch, on_conflict="game_id,team,situation").execute()
-    print(f"  ✓ game_xg: {len(upserts)} rows upserted")
+    print(f"  OK game_xg: {len(upserts)} rows upserted")
 
 
 def run_team_xgf_rollup(client, season: int):
@@ -233,7 +233,7 @@ def run_team_xgf_rollup(client, season: int):
 
     print(f"  Upserting xgf_pct for {len(upserts)} teams...")
     client.table("team_seasons").upsert(upserts, on_conflict="team,season,game_type").execute()
-    print(f"  ✓ team_seasons.xgf_pct: {len(upserts)} rows updated")
+    print(f"  OK team_seasons.xgf_pct: {len(upserts)} rows updated")
 
 
 def run_goalie_qs(client, season: int):
@@ -342,7 +342,7 @@ def run_goalie_qs(client, season: int):
         client.table("goalie_seasons").upsert(
             upserts[i : i + 500], on_conflict="player_id,season,team,game_type"
         ).execute()
-    print(f"  ✓ goalie_seasons: QS% updated for {len(upserts)} goalies")
+    print(f"  OK goalie_seasons: QS% updated for {len(upserts)} goalies")
 
 
 CORSI_EVENT_TYPES = ("shot-on-goal", "missed-shot", "blocked-shot", "goal")
@@ -505,7 +505,7 @@ def run_team_corsi_rollup(client, season: int):
             f"CF%_5v5={s['corsi_for_pct_5v5']} FF%_5v5={s['fenwick_for_pct_5v5']}"
         )
     print(
-        f"  ✓ team_seasons: Corsi/Fenwick (all-situations + 5v5) updated for {len(upserts)} teams"
+        f"  OK team_seasons: Corsi/Fenwick (all-situations + 5v5) updated for {len(upserts)} teams"
     )
 
 
@@ -855,7 +855,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
         client.table("player_seasons").upsert(
             batch, on_conflict="player_id,season,team,game_type"
         ).execute()
-    print(f"  ✓ player_seasons: {len(updates)} analytics rows upserted")
+    print(f"  OK player_seasons: {len(updates)} analytics rows upserted")
 
     _run_substage(failures, "game_xg", run_game_xg, client, season)
     _run_substage(failures, "team_xgf_rollup", run_team_xgf_rollup, client, season)
@@ -864,10 +864,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
 
     if failures:
         print(
-            f"\n⚠️  MoneyPuck analytics pipeline complete with {len(failures)} failure(s): {failures}"
+            f"\n!  MoneyPuck analytics pipeline complete with {len(failures)} failure(s): {failures}"
         )
     else:
-        print("\n✅ MoneyPuck analytics pipeline complete")
+        print("\nOK MoneyPuck analytics pipeline complete")
 
     return failures
 
