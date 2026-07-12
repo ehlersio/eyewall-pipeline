@@ -71,7 +71,7 @@ def fetch_roster(team: str, season: int) -> list:
     try:
         data = nhl_get(f"{NHL_BASE}/roster/{team}/{season}")
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return []
     players = []
     for group in ["forwards", "defensemen", "goalies"]:
@@ -107,7 +107,7 @@ def fetch_skater_stats(season: int, game_type: int) -> list:
     try:
         data = nhl_get(url, params)
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return []
     return data.get("data", [])
 
@@ -128,7 +128,7 @@ def fetch_skater_scoring(season: int, game_type: int) -> dict:
     try:
         data = nhl_get(url, params)
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return {}
     return {r["playerId"]: r for r in data.get("data", [])}
 
@@ -148,7 +148,7 @@ def fetch_skater_realtime(season: int, game_type: int) -> dict:
     try:
         data = nhl_get(url, params)
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return {}
     return {r["playerId"]: r for r in data.get("data", [])}
 
@@ -167,7 +167,7 @@ def fetch_goalie_stats(season: int, game_type: int) -> list:
     try:
         data = nhl_get(url, params)
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return []
     return data.get("data", [])
 
@@ -186,7 +186,7 @@ def fetch_team_stats(season: int, game_type: int) -> list:
     try:
         data = nhl_get(url, params)
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return []
     return data.get("data", [])
 
@@ -211,7 +211,7 @@ def fetch_standings() -> dict:
     try:
         data = nhl_get(f"{NHL_BASE}/standings/now")
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return {}
     result = {}
     for t in data.get("standings", []):
@@ -240,7 +240,7 @@ def fetch_schedule(team: str, season: int) -> list:
     try:
         data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
     except FetchError as e:
-        print(f"  ✗ {e}")
+        print(f"  ERROR: {e}")
         return []
     return data.get("games", [])
 
@@ -322,7 +322,7 @@ def run(season: int = NHL_SEASON):
                         }
                     )
                 except FetchError as e:
-                    print(f"  ✗ {e}")
+                    print(f"  ERROR: {e}")
                 finally:
                     time.sleep(0.1)
             if missing_players:
@@ -536,7 +536,7 @@ def run(season: int = NHL_SEASON):
             total_rows += len(rows)
         time.sleep(0.1)
 
-    print(f"  ✓ game_log: {total_rows} rows upserted across all teams")
+    print(f"  OK game_log: {total_rows} rows upserted across all teams")
 
     # ── team_scored_first + PP/PK — incremental PBP fetch ────────
     # Fetch PBP only for rows where team_scored_first or pp_goals is null.
@@ -566,7 +566,7 @@ def run(season: int = NHL_SEASON):
         try:
             pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
         except FetchError as e:
-            print(f"  ✗ {e}")
+            print(f"  ERROR: {e}")
             time.sleep(0.3)
             continue
 
@@ -657,9 +657,9 @@ def run(season: int = NHL_SEASON):
         time.sleep(0.2)
 
     if updated:
-        print(f"  ✓ team_scored_first + PP/PK updated for {updated} team-game rows")
+        print(f"  OK team_scored_first + PP/PK updated for {updated} team-game rows")
 
-    print("\n✅ NHL stats pipeline complete")
+    print("\nOK NHL stats pipeline complete")
 
 
 if __name__ == "__main__":

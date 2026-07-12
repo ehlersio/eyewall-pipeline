@@ -282,10 +282,10 @@ def run(season: int = NHL_SEASON):
         )
 
     client.table("team_seasons").upsert(upserts, on_conflict="team,season,game_type").execute()
-    print(f"  ✓ team_seasons: magic/tragic numbers updated for {len(upserts)} teams")
+    print(f"  OK team_seasons: magic/tragic numbers updated for {len(upserts)} teams")
 
     if mismatches:
-        print(f"  ⚠ {len(mismatches)} clinch_indicator mismatch(es) — logged, not failing the job:")
+        print(f"  ! {len(mismatches)} clinch_indicator mismatch(es) — logged, not failing the job:")
         for m in mismatches:
             print(f"    {m}")
     else:
