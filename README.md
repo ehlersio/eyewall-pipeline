@@ -451,7 +451,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) |
 | `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news — 20 min offset to avoid Supabase contention |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
-| `reddit-ingest.yml` | Every 30 min | Reddit (32 subreddits) + SBNation atom feeds → Worker |
+| `sbnation-ingest.yml` | Every 4 hours | SBNation atom feeds → Worker (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence, since blog posts don't need 30-min freshness) |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 
@@ -499,7 +499,7 @@ True RAPM via ridge regression (alpha=2500):
 - **UTA missing from `team_seasons`:** Excluded from power rankings until their row appears.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
 - **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
-- **Reddit ingest:** GH Actions IPs blocked by Reddit. New app registration blocked by Responsible Builder Policy. Deferred to October 2026.
+- **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Revisit only if a workaround surfaces; not planned for October 2026 anymore.
 - **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
 - **HockeyTech boolean fields:** gameSummary's `properties` booleans arrive as strings (`"true"`/`"false"`), not JSON booleans — confirmed Session 34 via `pwhl_shot_events.py`'s gameSummary merge (a naive `bool(val)` marked every goal `true` for every flag). `gameCenterPlayByPlay`'s `isPowerPlay`/`isBench` on penalty events appear to be real JSON booleans by contrast (real `False` values already observed in production, pre-Session-34). Check any new HockeyTech boolean field against real data before trusting a bare `bool()` call on it.
 - **`pwhl_milestones.py` undocumented:** This README has no section for the milestones pipeline (NHL `milestones.py` or PWHL `pwhl_milestones.py`) — pre-existing gap, not from Session 34. Worth a dedicated write-up at some point.
