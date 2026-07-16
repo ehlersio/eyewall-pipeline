@@ -1,0 +1,71 @@
+name: SBNation News Ingest
+
+on:
+  schedule:
+    # Every 4 hours — blog posts don't need same-30-min freshness, and this
+    # ran alongside a Reddit fetch every 30 min for months even though
+    # Reddit has blocked GH Actions runner IPs the whole time (see README's
+    # Known Limitations) — that half was pure wasted Actions minutes,
+    # dropped here along with the frequency.
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch all SBNation atom feeds and POST to worker
+        run: |
+          # All SBNation/Vox Media blogs block Cloudflare datacenter IPs.
+          # GH-hosted runners are not blocked — fetch here and POST to worker.
+          declare -A FEEDS=(
+            # Only feeds confirmed reachable from GH-hosted runners
+            [canescountry]="https://www.canescountry.com/rss/current.xml"
+            [lighthousehockey]="https://www.lighthousehockey.com/rss/current.xml"
+            [milehighhockey]="https://www.milehighhockey.com/rss/current.xml"
+            [pensburgh]="https://www.pensburgh.com/rss/current.xml"
+            [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
+          )
+
+          TMPDIR=$(mktemp -d)
+          BUNDLE="{}"
+
+          for sourceId in "${!FEEDS[@]}"; do
+            feedUrl="${FEEDS[$sourceId]}"
+            echo "Fetching $sourceId..."
+            TMPFILE="$TMPDIR/$sourceId.xml"
+            curl -fsSL \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+              -H "Accept: application/rss+xml,application/atom+xml,text/xml,*/*" \
+              "$feedUrl" -o "$TMPFILE" 2>/dev/null || true
+
+            if [ ! -s "$TMPFILE" ] || [ "$(wc -c < "$TMPFILE")" -lt 100 ]; then
+              echo "  Skipping $sourceId (empty response)"
+              rm -f "$TMPFILE"
+              continue
+            fi
+
+            # Use --rawfile to avoid ARG_MAX limits on large XML blobs
+            BUNDLE=$(jq --rawfile v "$TMPFILE" --arg k "$sourceId" '. + {($k): $v}' <<< "$BUNDLE")
+            sleep 0.3
+          done
+
+          rm -rf "$TMPDIR"
+
+          FEED_COUNT=$(echo "$BUNDLE" | jq 'keys | length')
+          echo "Atom bundle: $FEED_COUNT feeds"
+
+          HTTP_STATUS=$(echo "$BUNDLE" | curl -s -o response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            --data-binary @- \
+            "https://eyewall-poller.billowing-queen-bf23.workers.dev/atom/ingest")
+
+          echo "Atom ingest: $HTTP_STATUS"
+          cat response.txt
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Atom ingest failed with status $HTTP_STATUS"
+            exit 1
+          fi
