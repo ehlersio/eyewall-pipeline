@@ -16,7 +16,7 @@ jobs:
           curl -fsSL \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             -H "Referer: https://moneypuck.com/" \
-            "https://moneypuck.com/moneypuck/playerData/seasonSummary/2025/regular/skaters.csv" \
+            "https://moneypuck.com/moneypuck/playerData/seasonSummary/2026/regular/skaters.csv" \
             -o skaters.csv
           ROWS=$(wc -l < skaters.csv)
           echo "Fetched $ROWS lines"
