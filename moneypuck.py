@@ -34,6 +34,16 @@ MIN_GP = 10  # minimum games for percentile pool
 GOALS_PER_WIN = 5.4  # NHL goals per win approximation
 PEN_MIN_VALUE = 0.11  # goals per penalty minute (TopDownHockey methodology)
 
+# Season TOI (minutes) floor for DISPLAYING an individual player's own
+# percentiles -- derived from p10 of the GP-qualified pool (season 20252026,
+# live-queried). MIN_GP=10 above only gates POOL membership (who counts as
+# reference data); it does nothing to stop a 3-shift call-up who happens to
+# clear 10 GP but with almost no ice time (70-170 minutes of season TOI seen
+# in production) from getting a computed -- and misleading -- percentile
+# badge off that tiny sample. This constant gates that player's own pct_*
+# values only; they still count in the pool for everyone else.
+MIN_TOI_MINUTES = {"F": 250, "D": 330}
+
 # Session 55's investigation found NHL's bucketed-stdev elbow for on-ice GF%
 # lands around 20-25 GP, not lower than PWHL's ~15 GP finding despite NHL's
 # longer season -- variance here is driven by on-ice goal-event count, not
@@ -93,6 +103,17 @@ def apply_results_vs_process_guardrail(
         return None, None
     diff = on_ice_gf_pct_val - process_xgf_pct_val if process_xgf_pct_val is not None else None
     return on_ice_gf_pct_val, diff
+
+
+def meets_toi_floor(is_fwd: bool, icetime_seconds) -> bool:
+    """True if a player's own season TOI clears MIN_TOI_MINUTES for their
+    position -- gates DISPLAY of that player's pct_* percentiles only, not
+    pool membership (which stays governed by MIN_GP/icetime>=300 in the
+    `qualified` filter in run()). Pure/module-level (like
+    apply_results_vs_process_guardrail above) specifically so the boundary
+    case is unit-testable without a full CSV fetch."""
+    floor_minutes = MIN_TOI_MINUTES["F"] if is_fwd else MIN_TOI_MINUTES["D"]
+    return (n(icetime_seconds) / 60) >= floor_minutes
 
 
 def percentile_rank(value, sorted_pool: list) -> int | None:
@@ -800,6 +821,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
         gf_pct_val, rvp_diff_val = apply_results_vs_process_guardrail(
             gp_val, on_ice_gf_pct(row), ev_off_val
         )
+        toi_ok = meets_toi_floor(is_fwd, row.get("icetime", 0))
 
         team = row.get("team", "")
         updates.append(
@@ -834,17 +856,26 @@ def run(season: int = NHL_SEASON) -> list[str]:
                 "results_vs_process_diff": round(rvp_diff_val, 4)
                 if rvp_diff_val is not None
                 else None,
-                # Percentiles
-                "pct_ev_off": percentile_rank(ev_off_val, pools["ev_off"]),
-                "pct_ev_def": percentile_rank(ev_def_val, pools["ev_def"]),
-                "pct_pp": percentile_rank(pp_val, pools["pp"]) if pp_val is not None else None,
-                "pct_pk": percentile_rank(pk_val, pools["pk"]) if pk_val is not None else None,
-                "pct_finishing": percentile_rank(fin_val, pools["finishing"]),
-                "pct_goals": percentile_rank(goals_val, pools["goals"]),
-                "pct_a1": percentile_rank(a1_val, pools["a1"]),
-                "pct_penalties": percentile_rank(pen_val, pools["penalties"]),
-                "pct_competition": percentile_rank(comp_val, pools["competition"]),
-                "pct_teammates": percentile_rank(tm_val, pools["teammates"]),
+                # Percentiles -- all nulled below MIN_TOI_MINUTES (see toi_ok
+                # above) regardless of pool membership; a player can still be
+                # counted in the pool for others while showing no badge of
+                # their own.
+                "pct_ev_off": percentile_rank(ev_off_val, pools["ev_off"]) if toi_ok else None,
+                "pct_ev_def": percentile_rank(ev_def_val, pools["ev_def"]) if toi_ok else None,
+                "pct_pp": percentile_rank(pp_val, pools["pp"])
+                if toi_ok and pp_val is not None
+                else None,
+                "pct_pk": percentile_rank(pk_val, pools["pk"])
+                if toi_ok and pk_val is not None
+                else None,
+                "pct_finishing": percentile_rank(fin_val, pools["finishing"]) if toi_ok else None,
+                "pct_goals": percentile_rank(goals_val, pools["goals"]) if toi_ok else None,
+                "pct_a1": percentile_rank(a1_val, pools["a1"]) if toi_ok else None,
+                "pct_penalties": percentile_rank(pen_val, pools["penalties"]) if toi_ok else None,
+                "pct_competition": percentile_rank(comp_val, pools["competition"])
+                if toi_ok
+                else None,
+                "pct_teammates": percentile_rank(tm_val, pools["teammates"]) if toi_ok else None,
             }
         )
 
