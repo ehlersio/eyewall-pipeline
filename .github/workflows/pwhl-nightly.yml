@@ -114,6 +114,48 @@ jobs:
         # backfill after each playoff round, same as this file's existing
         # PBP backfill pattern.
 
+      - name: Compute PWHL TOI/game rollup (percentile parity piece 1)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_stats.py --toi-rollup-only
+        # Must run AFTER pwhl_game_boxscore.py above -- rolls up
+        # pwhl_skater_game_box.toi_seconds into
+        # pwhl_player_seasons.toi_per_game (pwhl_stats.py's main run()
+        # hardcodes that column to None, HockeyTech's league-wide players
+        # view doesn't carry it). Feeds the per-60 rate stats computed by
+        # the percentiles step below.
+
+      - name: Compute PWHL shot-based xG proxy (percentile parity piece 2)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_shot_xg.py
+        # Reads pwhl_shot_events (ingested earlier this run) to compute a
+        # distance-bucket xG proxy per shooter (xg_for, finishing) --
+        # PWHL-native equivalent of rapm.py's NHL shot_xg(), independent
+        # copy against PWHL's own event_type vocabulary. No dependency on
+        # the TOI-rollup step above, but placed after it for readability
+        # (both are "percentile parity" pieces feeding the step below).
+        # NOTE: as of this step's introduction, pwhl_shot_events has zero
+        # rows for season 9 (2025-26 Playoffs) -- see pwhl_shot_xg.py's
+        # module docstring. This step degrades gracefully (logs a warning,
+        # upserts nothing) rather than failing for that season/type.
+
+      - name: Compute PWHL skater percentiles (percentile parity piece 3)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_percentiles.py
+        # Must run AFTER both steps above -- computes pct_goals/pct_a1/
+        # pct_penalties/pct_finishing from pwhl_player_seasons.toi_per_game
+        # (piece 1) and .finishing (piece 2). See pwhl_percentiles.py's
+        # module docstring for the position-split/MIN_GP/TOI-floor
+        # decisions and the same season-9-playoffs data gap.
+
       - name: Run pwhl_milestones.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

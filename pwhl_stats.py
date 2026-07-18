@@ -19,6 +19,14 @@ Usage:
         # corsi_for_pct from yesterday's snapshot, silently stale by up to
         # 24-48h on exactly the days a game just finished. See
         # pwhl-nightly.yml.
+    python pwhl_stats.py --toi-rollup-only [season_id]
+        # Runs compute_toi_per_game() only, rolling up
+        # pwhl_skater_game_box.toi_seconds into
+        # pwhl_player_seasons.toi_per_game (fetch_skater_stats() above
+        # hardcodes that column to None -- see its comment). Must run
+        # AFTER pwhl_game_boxscore.py has ingested that season's box rows,
+        # same ordering reasoning as --shot-totals-only above. See
+        # pwhl-nightly.yml.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -361,7 +369,13 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
                 "sh_goals": int(p.get("short_handed_goals", 0) or 0),
                 "sh_assists": int(p.get("short_handed_assists", 0) or 0),
                 "gw_goals": 0,  # not available in this API
-                "toi_per_game": None,  # not available in this API
+                "toi_per_game": None,  # not available in THIS view -- rolled
+                # up separately from pwhl_skater_game_box by
+                # compute_toi_per_game() below, run later in the nightly
+                # workflow (after pwhl_game_boxscore.py). Left None here
+                # rather than omitted from the payload so a player with no
+                # box-score rows yet (very start of a season) still reads
+                # as "unknown", not silently missing from the upsert.
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
@@ -887,6 +901,129 @@ def run_team_shot_totals_5v5(sb, season_id: str, season_type: str = "regular") -
     log.info(f"  5v5 shot totals upserted for season {season_id}/{season_type}")
 
 
+def _existing_player_teams(sb, season_id: str, season_type: str) -> set:
+    """(player_id, team_id) pairs already present in pwhl_player_seasons for
+    this season/type. Used to filter rollup upserts (TOI here, xg_for/
+    finishing in pwhl_shot_xg.py) so they can only UPDATE a row
+    fetch_skater_stats() already created, never silently INSERT a new,
+    mostly-empty season row for a (player_id, team_id) combination it
+    doesn't recognize -- pwhl_player_seasons' other columns (gp, goals,
+    etc.) are always populated together by fetch_skater_stats(), and a
+    stray rollup-only insert would leave those NULL/default instead.
+    Bounded by league roster size (a few hundred rows per season), same
+    "OFFSET pagination is fine at this scale" reasoning moneypuck.py uses
+    for its RAPM-values load.
+    """
+    rows = []
+    offset = 0
+    while True:
+        batch = (
+            sb.table("pwhl_player_seasons")
+            .select("player_id,team_id")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        rows.extend(batch)
+        offset += 1000
+        if len(batch) < 1000:
+            break
+    return {(r["player_id"], r["team_id"]) for r in rows if r.get("team_id") is not None}
+
+
+def compute_toi_per_game(sb, season_id: str, season_type: str) -> None:
+    """Roll up pwhl_skater_game_box.toi_seconds into
+    pwhl_player_seasons.toi_per_game -- fetch_skater_stats() above hardcodes
+    that column to None because HockeyTech's league-wide `players` view
+    genuinely doesn't carry it, but per-game TOI does exist on
+    pwhl_skater_game_box (pwhl_game_boxscore.py, gameSummary-sourced).
+
+    Must run AFTER pwhl_game_boxscore.py has ingested this season's box
+    rows -- see run_toi_rollup_only() / pwhl-nightly.yml for ordering.
+
+    Grouped by (player_id, team_id), same as pwhl_skater_game_box's own
+    per-game rows and pwhl_player_seasons' conflict key -- a mid-season
+    trade gets its TOI split across the two team rows rather than blended.
+
+    Stored in SECONDS, matching nhl_stats.py's toi_per_game convention
+    (NHL's `timeOnIcePerGame` is raw seconds; ai_context.py's `_fmt_toi`
+    formats it as MM:SS) -- not minutes.
+
+    Merge-upsert (moneypuck.py's convention): only toi_per_game is in the
+    payload, so this never clobbers gp/goals/etc. written by
+    fetch_skater_stats(). Additionally filtered to (player_id, team_id)
+    pairs _existing_player_teams() confirms already exist, so this can
+    only UPDATE, never INSERT -- see that helper's docstring.
+    """
+    log.info(f"Computing TOI/game rollup (season {season_id}, {season_type})...")
+
+    rows = []
+    last_id = 0
+    while True:
+        batch = (
+            sb.table("pwhl_skater_game_box")
+            .select("id,player_id,team_id,toi_seconds")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .not_.is_("toi_seconds", "null")
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        rows.extend(batch)
+        last_id = batch[-1]["id"]
+        if len(batch) < 999:
+            break
+
+    if not rows:
+        log.warning(f"  No skater_game_box TOI rows for season {season_id}/{season_type}")
+        return
+
+    from collections import defaultdict
+
+    totals = defaultdict(lambda: [0, 0])  # (player_id, team_id) -> [sum_seconds, games]
+    for r in rows:
+        key = (r["player_id"], r["team_id"])
+        totals[key][0] += r["toi_seconds"]
+        totals[key][1] += 1
+
+    existing = _existing_player_teams(sb, season_id, season_type)
+    updates = []
+    skipped = 0
+    for (pid, tid), (total_seconds, games) in totals.items():
+        if not games:
+            continue
+        if (pid, tid) not in existing:
+            skipped += 1
+            continue
+        updates.append(
+            {
+                "player_id": pid,
+                "team_id": tid,
+                "season_id": int(season_id),
+                "season_type": season_type,
+                "toi_per_game": round(total_seconds / games),
+            }
+        )
+
+    if skipped:
+        log.info(
+            f"  Skipped {skipped} (player_id, team_id) pair(s) with no existing "
+            "pwhl_player_seasons row"
+        )
+
+    n = upsert_chunk(sb, "pwhl_player_seasons", updates, "player_id,team_id,season_id,season_type")
+    log.info(f"  {n} player season rows updated with toi_per_game")
+
+
 def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
     log.info(f"Fetching game log (season {season_id})...")
@@ -1005,10 +1142,30 @@ def run_shot_totals_only(season_id: str | None = None) -> None:
     log.info("=== PWHL shot totals complete ===")
 
 
+def run_toi_rollup_only(season_id: str | None = None) -> None:
+    """Run compute_toi_per_game() only, for the post-boxscore nightly step —
+    see the --toi-rollup-only usage note above. Must run after
+    pwhl_game_boxscore.py in the nightly workflow."""
+    season_id = season_id or PWHL_SEASON
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping toi-rollup-only run"
+        )
+        return
+    log.info(f"=== PWHL TOI/game rollup — season {season_id} ({season_type}) ===")
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    compute_toi_per_game(sb, season_id, season_type)
+    log.info("=== PWHL TOI/game rollup complete ===")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if "--shot-totals-only" in args:
         args = [a for a in args if a != "--shot-totals-only"]
         run_shot_totals_only(args[0] if args else None)
+    elif "--toi-rollup-only" in args:
+        args = [a for a in args if a != "--toi-rollup-only"]
+        run_toi_rollup_only(args[0] if args else None)
     else:
         run(args[0] if args else None)
