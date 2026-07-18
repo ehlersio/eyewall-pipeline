@@ -21,8 +21,11 @@ from db import NHL_SEASON, get_client
 # it from NHL_SEASON instead means there's exactly one place this needs
 # to be right.
 MP_START_YEAR = int(str(NHL_SEASON)[:4])
-MP_URL = (
+MP_SKATERS_URL = (
     f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{MP_START_YEAR}/regular/skaters.csv"
+)
+MP_GOALIES_URL = (
+    f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{MP_START_YEAR}/regular/goalies.csv"
 )
 MP_TEAM_GAMES_URL = "https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv"
 HEADERS = {
@@ -45,9 +48,9 @@ PEN_MIN_VALUE = 0.11  # goals per penalty minute (TopDownHockey methodology)
 RESULTS_VS_PROCESS_MIN_GP = 25
 
 
-def fetch_csv() -> list[dict]:
-    print("  Fetching MoneyPuck CSV...")
-    r = requests.get(MP_URL, headers=HEADERS, timeout=60)
+def fetch_csv(url: str = MP_SKATERS_URL) -> list[dict]:
+    print(f"  Fetching {url.rsplit('/', 1)[-1]}...")
+    r = requests.get(url, headers=HEADERS, timeout=60)
     r.raise_for_status()
     reader = csv.DictReader(io.StringIO(r.text))
     rows = list(reader)
@@ -345,6 +348,151 @@ def run_goalie_qs(client, season: int):
     print(f"  OK goalie_seasons: QS% updated for {len(upserts)} goalies")
 
 
+def run_goalies(client, season: int = NHL_SEASON):
+    """Fetch MoneyPuck's goalies.csv and write goalie GSAX/save-pct analytics
+    to goalie_seasons. This is real, externally-modeled GSAX (Goals Saved
+    Above Expected, from MoneyPuck's flurry-adjusted xGoals model) -- distinct
+    from run_goalie_qs() above, which derives Quality Start % from our own
+    shot_events data. Both write to goalie_seasons on the same conflict key
+    (player_id,season,team,game_type) so they merge without clobbering each
+    other's columns.
+
+    Originally implemented in commit c9f7c054 ("goalie stats update"), this
+    ran once successfully, then was accidentally deleted two days later in
+    commit 8676e66 ("Update pipeline for RAPM-derived WAR") as collateral
+    damage from an unrelated MP_SKATERS_URL/MP_GOALIES_URL -> MP_URL /
+    fetch_csv(url) -> fetch_csv() refactor. Restored here with the same
+    metric definitions, adapted to this module's current (client, season)
+    substage signature and its n()/build_sorted_pool()/percentile_rank()
+    helpers.
+    """
+    print(f"\n--- Goalie GSAX / save% analytics (MoneyPuck) — Season {season} ---")
+    rows = fetch_csv(MP_GOALIES_URL)
+
+    # Split by situation
+    by_situation = {}
+    for r in rows:
+        sit = r.get("situation", "")
+        by_situation.setdefault(sit, {})[r["playerId"]] = r
+
+    all_map = by_situation.get("all", {})
+    ev_map = by_situation.get("5on5", {})
+    pk_map = by_situation.get("4on5", {})  # goalie's PK = 4on5 (skater down)
+
+    MIN_GOALIE_GP = 10
+
+    qualified = [r for r in all_map.values() if n(r.get("games_played", 0)) >= MIN_GOALIE_GP]
+    print(f"  Pool: {len(qualified)} goalies (min {MIN_GOALIE_GP} GP)")
+
+    # ── Metric functions ───────────────────────────────────────────
+    def gsax(row):
+        """Goals saved above expected (all situations, flurry-adjusted)."""
+        xg = n(row.get("flurryAdjustedxGoals", 0)) or n(row.get("xGoals", 0))
+        ga = n(row.get("goals", 0))
+        return xg - ga  # positive = better than expected
+
+    def gsax_per60(row):
+        it = n(row.get("icetime", 0))
+        if it < 60:
+            return None
+        return (gsax(row) / it) * 3600
+
+    def ev_sv_pct(row):
+        """5on5 save percentage."""
+        ev = ev_map.get(row["playerId"])
+        if not ev:
+            return None
+        shots = n(ev.get("ongoal", 0))
+        goals = n(ev.get("goals", 0))
+        if shots < 10:
+            return None
+        return (shots - goals) / shots
+
+    def hd_sv_pct(row):
+        """High danger save percentage (all situations)."""
+        hd_shots = n(row.get("highDangerShots", 0))
+        hd_goals = n(row.get("highDangerGoals", 0))
+        if hd_shots < 5:
+            return None
+        return (hd_shots - hd_goals) / hd_shots
+
+    def md_sv_pct(row):
+        """Medium danger save percentage."""
+        md_shots = n(row.get("mediumDangerShots", 0))
+        md_goals = n(row.get("mediumDangerGoals", 0))
+        if md_shots < 5:
+            return None
+        return (md_shots - md_goals) / md_shots
+
+    def pk_sv_pct(row):
+        """Penalty kill (4on5) save percentage."""
+        pk = pk_map.get(row["playerId"])
+        if not pk:
+            return None
+        shots = n(pk.get("ongoal", 0))
+        goals = n(pk.get("goals", 0))
+        if shots < 5:
+            return None
+        return (shots - goals) / shots
+
+    # ── Percentile pools ───────────────────────────────────────────
+    print("  Building goalie percentile pools...")
+    pools = {
+        "gsax": build_sorted_pool(qualified, gsax),
+        "gsax60": build_sorted_pool(qualified, gsax_per60),
+        "ev_sv_pct": build_sorted_pool(qualified, ev_sv_pct),
+        "hd_sv_pct": build_sorted_pool(qualified, hd_sv_pct),
+        "md_sv_pct": build_sorted_pool(qualified, md_sv_pct),
+        "pk_sv_pct": build_sorted_pool(qualified, pk_sv_pct),
+    }
+
+    # ── Compute and upsert ─────────────────────────────────────────
+    print("  Computing goalie analytics...")
+    updates = []
+    for pid, row in all_map.items():
+        gsax_val = gsax(row)
+        gsax60_val = gsax_per60(row)
+        ev_sv_val = ev_sv_pct(row)
+        hd_sv_val = hd_sv_pct(row)
+        md_sv_val = md_sv_pct(row)
+        pk_sv_val = pk_sv_pct(row)
+
+        updates.append(
+            {
+                "player_id": int(pid),
+                "season": season,
+                "team": row.get("team", ""),
+                "game_type": 2,
+                # Analytics
+                "gsax": round(gsax_val, 2),
+                "gsax_per60": round(gsax60_val, 3) if gsax60_val is not None else None,
+                "ev_sv_pct": round(ev_sv_val, 4) if ev_sv_val is not None else None,
+                "hd_sv_pct": round(hd_sv_val, 4) if hd_sv_val is not None else None,
+                "md_sv_pct": round(md_sv_val, 4) if md_sv_val is not None else None,
+                "pk_sv_pct": round(pk_sv_val, 4) if pk_sv_val is not None else None,
+                # Percentiles
+                "pct_gsax": percentile_rank(gsax_val, pools["gsax"]),
+                "pct_gsax60": percentile_rank(gsax60_val, pools["gsax60"]),
+                "pct_ev_sv": percentile_rank(ev_sv_val, pools["ev_sv_pct"]),
+                "pct_hd_sv": percentile_rank(hd_sv_val, pools["hd_sv_pct"]),
+                "pct_md_sv": percentile_rank(md_sv_val, pools["md_sv_pct"]),
+                "pct_pk_sv": percentile_rank(pk_sv_val, pools["pk_sv_pct"]),
+            }
+        )
+
+    if not updates:
+        print("  No goalie rows to upsert — skipping")
+        return
+
+    print(f"  Upserting {len(updates)} goalie analytics records...")
+    for i in range(0, len(updates), 500):
+        batch = updates[i : i + 500]
+        client.table("goalie_seasons").upsert(
+            batch, on_conflict="player_id,season,team,game_type"
+        ).execute()
+    print(f"  OK goalie_seasons: {len(updates)} GSAX/save% rows upserted")
+
+
 CORSI_EVENT_TYPES = ("shot-on-goal", "missed-shot", "blocked-shot", "goal")
 FENWICK_EVENT_TYPES = ("shot-on-goal", "missed-shot", "goal")  # excludes blocked-shot
 SITUATION_5V5 = "1551"  # both teams at full strength — same convention rapm.py
@@ -511,7 +659,7 @@ def run_team_corsi_rollup(client, season: int):
 
 def _run_substage(failures: list, label: str, fn, *args, **kwargs):
     """Run one of this module's optional sub-stages (game_xg / team_xgf_rollup
-    / goalie_qs / team_corsi_rollup) in isolation. These don't depend on each other, so one
+    / goalie_qs / goalies / team_corsi_rollup) in isolation. These don't depend on each other, so one
     raising must not stop the others, nor the player_seasons.war/percentile
     upsert that already completed earlier in run(). Logs loudly (full
     traceback + label) and records the failure in `failures` so run()'s
@@ -860,6 +1008,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
     _run_substage(failures, "game_xg", run_game_xg, client, season)
     _run_substage(failures, "team_xgf_rollup", run_team_xgf_rollup, client, season)
     _run_substage(failures, "goalie_qs", run_goalie_qs, client, season)
+    _run_substage(failures, "goalies", run_goalies, client, season)
     _run_substage(failures, "team_corsi_rollup", run_team_corsi_rollup, client, season)
 
     if failures:
