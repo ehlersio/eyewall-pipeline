@@ -207,6 +207,14 @@ def fetch_standings() -> dict:
     division/conference/wildcard/clinch/ROW fields playoff_race.py needs.
     fetch_team_stats is still called for the advanced stats standings/now
     doesn't carry (goals, PP%/PK%, shots/game).
+
+    standings/now is a *date* redirect (whatever date the NHL last actually
+    resolved standings for), not a season-scoped query — unlike every other
+    fetch_* in this module. Before a new season's games exist it keeps
+    redirecting to the prior season's finale and returns that season's real,
+    final data. Each row's own seasonId is included here (season_id) so
+    callers can detect that mismatch instead of trusting the response
+    unconditionally — see run()'s use of it below.
     """
     try:
         data = nhl_get(f"{NHL_BASE}/standings/now")
@@ -219,6 +227,7 @@ def fetch_standings() -> dict:
         if not abbr:
             continue
         result[abbr] = {
+            "season_id": t.get("seasonId"),
             "points": t.get("points"),
             "games_played": t.get("gamesPlayed"),
             "wins": t.get("wins"),
@@ -234,6 +243,21 @@ def fetch_standings() -> dict:
             "l10_ot_losses": t.get("l10OtLosses", 0),
         }
     return result
+
+
+def _stale_standings_abbrs(standings_map: dict, season: int) -> set:
+    """
+    Team abbrs whose standings/now row is stamped with a seasonId other than
+    the season we're writing for -- see fetch_standings()'s docstring for why
+    this happens. A missing season_id (e.g. an older cached fixture, or the
+    endpoint dropping the field) is not treated as evidence of staleness,
+    only an explicit mismatch is.
+    """
+    return {
+        abbr
+        for abbr, s in standings_map.items()
+        if s.get("season_id") is not None and s.get("season_id") != season
+    }
 
 
 def fetch_schedule(team: str, season: int) -> list:
@@ -365,6 +389,14 @@ def run(season: int = NHL_SEASON):
     # the standings endpoint, not the summary endpoint. Fetch once — keyed
     # by team abbr — and use as the canonical source for game_type=2 rows.
     standings_map = fetch_standings()
+    stale_standings_abbrs = _stale_standings_abbrs(standings_map, season)
+    if stale_standings_abbrs:
+        print(
+            f"  WARNING: standings/now redirected to a season other than "
+            f"{season} for {len(stale_standings_abbrs)} team(s) — skipping "
+            "team_seasons standings fields for those teams this run "
+            f"({sorted(stale_standings_abbrs)})"
+        )
     print(f"  Standings data: {len(standings_map)} teams")
 
     # Build teamId → abbreviation map from standings endpoint
@@ -421,6 +453,8 @@ def run(season: int = NHL_SEASON):
             # fields (keyed by abbr directly); summary_by_abbr only fills
             # in the advanced stats standings/now doesn't carry.
             for abbr, s in standings_map.items():
+                if abbr in stale_standings_abbrs:
+                    continue
                 summary = summary_by_abbr.get(abbr, {})
                 rows.append(
                     {
