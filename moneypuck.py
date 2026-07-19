@@ -706,7 +706,23 @@ def run(season: int = NHL_SEASON) -> list[str]:
     client = get_client()
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
-    rows = fetch_csv()
+    try:
+        rows = fetch_csv()
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            # MoneyPuck doesn't publish a season's CSV until real games have
+            # been played -- an early NHL_SEASON flip (KV override, ahead of
+            # the real schedule) makes this a normal, expected condition for
+            # weeks/months, not a pipeline failure. Everything below depends
+            # on `rows` existing, so there's nothing partial to salvage --
+            # skip the whole stage cleanly rather than letting run.py mark
+            # the nightly job red every night until the season starts.
+            print(
+                f"  MoneyPuck has no data published yet for season {season} "
+                "(404) -- skipping MoneyPuck analytics this run."
+            )
+            return failures
+        raise
 
     # Split by situation
     by_situation = {}
