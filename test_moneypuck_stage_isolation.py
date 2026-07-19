@@ -18,7 +18,48 @@ run.py's run_all() all the same, which folds this list into its own
 failed_stages report.
 """
 
+from unittest.mock import MagicMock
+
+import pytest
+
 import moneypuck
+
+
+class TestSeasonNotYetPublished:
+    """Session 66 follow-up: an early NHL_SEASON flip (KV override) makes
+    moneypuck.py request a season's CSV before MoneyPuck has published it,
+    which 404s. Before this fix that HTTPError propagated straight out of
+    run() uncaught, marking the whole nightly job red every night until the
+    real season starts -- not a partial degradation _run_substage() could
+    isolate, since nothing later in run() can proceed without `rows`."""
+
+    def test_404_on_initial_fetch_skips_cleanly(self, monkeypatch):
+        monkeypatch.setattr(moneypuck, "get_client", lambda: MagicMock())
+
+        def boom():
+            resp = MagicMock()
+            resp.status_code = 404
+            raise moneypuck.requests.HTTPError(response=resp)
+
+        monkeypatch.setattr(moneypuck, "fetch_csv", boom)
+
+        assert moneypuck.run(season=20262027) == []
+
+    def test_non_404_http_error_still_raises(self, monkeypatch):
+        """A real outage or a MoneyPuck URL-scheme change (has happened
+        before, see MP_START_YEAR's own docstring) must stay loud, not get
+        silently swallowed alongside the expected 404 case."""
+        monkeypatch.setattr(moneypuck, "get_client", lambda: MagicMock())
+
+        def boom():
+            resp = MagicMock()
+            resp.status_code = 500
+            raise moneypuck.requests.HTTPError(response=resp)
+
+        monkeypatch.setattr(moneypuck, "fetch_csv", boom)
+
+        with pytest.raises(moneypuck.requests.HTTPError):
+            moneypuck.run(season=20262027)
 
 
 class TestRunSubstageIsolation:
