@@ -186,16 +186,24 @@ def run_all():
     print(f"{'=' * 55}\n")
 
     # Allowlist, not a blocklist: rapm.run() returning anything other than
-    # "ok", or validate_rapm.run() returning anything other than "pass"/"warn"
-    # (including an unexpected None or STAGE_FAILED), fails the job loudly
-    # instead of being silently treated as success — see Session 45 for the
-    # incident this closed (rapm.run()'s abort paths returned nothing and
-    # player_seasons.rapm keeps stale prior-night values on abort, so
-    # validation could pass against stale data even when tonight's
-    # regression never ran). Any other stage failing (per-stage isolation,
-    # Session 46) also fails the job, but critically doesn't prevent the
-    # remaining stages from having run first.
-    if failed_stages or rapm_status != "ok" or validation_status not in ("pass", "warn"):
+    # "ok", or validate_rapm.run() returning anything other than
+    # "pass"/"warn"/"off_season" (including an unexpected None or
+    # STAGE_FAILED), fails the job loudly instead of being silently treated
+    # as success — see Session 45 for the incident this closed (rapm.run()'s
+    # abort paths returned nothing and player_seasons.rapm keeps stale
+    # prior-night values on abort, so validation could pass against stale
+    # data even when tonight's regression never ran). "off_season" is a
+    # narrow, separate carve-out (added after the off-season nightly run
+    # started failing on this check) for when game_log genuinely has zero
+    # completed games this season -- nothing stale to hide, nothing to
+    # validate, not the Session 45 failure mode. Any other stage failing
+    # (per-stage isolation, Session 46) also fails the job, but critically
+    # doesn't prevent the remaining stages from having run first.
+    if (
+        failed_stages
+        or rapm_status != "ok"
+        or validation_status not in ("pass", "warn", "off_season")
+    ):
         sys.exit(1)
 
 
@@ -249,7 +257,7 @@ if __name__ == "__main__":
 
         eh_csv = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         status = validate_rapm.run(eh_csv_path=eh_csv)
-        if status not in ("pass", "warn"):
+        if status not in ("pass", "warn", "off_season"):
             sys.exit(1)
     elif arg == "ai":
         if run_ai_pipeline():

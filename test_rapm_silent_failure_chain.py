@@ -50,17 +50,43 @@ def _chain_mock(data=None):
     return m
 
 
+def _table_mock(**per_table_data):
+    """Like _chain_mock, but returns different canned data per table name --
+    needed once a function reads more than one table and the tests care
+    about the tables disagreeing (e.g. player_seasons empty but game_log
+    non-empty)."""
+    client = MagicMock()
+
+    def table(name):
+        return _chain_mock(data=per_table_data.get(name, []))
+
+    client.table.side_effect = table
+    return client
+
+
 class TestValidateRapmReturnsExplicitStatus:
-    def test_no_rapm_values_returns_no_data_not_none(self, monkeypatch):
-        """player_seasons has no rows with a non-null rapm for this season —
-        e.g. a brand-new season rapm.py hasn't successfully computed yet."""
+    def test_no_rapm_values_with_completed_games_returns_no_data_not_none(self, monkeypatch):
+        """player_seasons has no rows with a non-null rapm for this season,
+        but game_log shows completed games -- rapm.py should have produced
+        values and didn't. A real failure, not an off-season gap."""
+        client = _table_mock(game_log=[{"game_id": 1}])
+        monkeypatch.setattr(validate_rapm, "get_client", lambda: client)
+
+        status = validate_rapm.run(season=20252026)
+
+        assert status == "no_data"
+        assert status is not None
+
+    def test_no_rapm_values_and_no_completed_games_returns_off_season(self, monkeypatch):
+        """Brand-new/not-yet-started season: player_seasons and game_log are
+        both empty -- nothing to validate yet, not a failure."""
         empty_client = MagicMock()
         empty_client.table.return_value = _chain_mock(data=[])
         monkeypatch.setattr(validate_rapm, "get_client", lambda: empty_client)
 
         status = validate_rapm.run(season=20252026)
 
-        assert status == "no_data"
+        assert status == "off_season"
         assert status is not None
 
 

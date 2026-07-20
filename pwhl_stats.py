@@ -961,25 +961,32 @@ def compute_toi_per_game(sb, season_id: str, season_type: str) -> None:
     """
     log.info(f"Computing TOI/game rollup (season {season_id}, {season_type})...")
 
+    # OFFSET pagination, not id-based keyset: pwhl_skater_game_box has no
+    # surrogate `id` column (its natural key is game_id,player_id, per the
+    # upsert in pwhl_game_boxscore.py) -- a prior version of this loop tried
+    # `.gt("id", last_id)` and 400'd every night with "column ... does not
+    # exist" (caught 2026-07-20, broke every nightly run since this landed).
+    # Single-season TOI rows are a bounded, small table (one PWHL season is
+    # at most a few thousand skater-games), well under the scale where OFFSET
+    # pagination's repeated-scan cost would matter -- same reasoning
+    # validate_rapm.py's fetch_all() already documents for its own tables.
     rows = []
-    last_id = 0
+    offset = 0
     while True:
         batch = (
             sb.table("pwhl_skater_game_box")
-            .select("id,player_id,team_id,toi_seconds")
+            .select("player_id,team_id,toi_seconds")
             .eq("season_id", int(season_id))
             .eq("season_type", season_type)
             .not_.is_("toi_seconds", "null")
-            .gt("id", last_id)
-            .order("id")
-            .limit(999)
+            .range(offset, offset + 998)
             .execute()
             .data
         )
         if not batch:
             break
         rows.extend(batch)
-        last_id = batch[-1]["id"]
+        offset += 999
         if len(batch) < 999:
             break
 

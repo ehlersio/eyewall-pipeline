@@ -13,14 +13,42 @@ jobs:
       - name: Fetch MoneyPuck CSV
         id: fetch
         run: |
-          curl -fsSL \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -H "Referer: https://moneypuck.com/" \
-            "https://moneypuck.com/moneypuck/playerData/seasonSummary/2026/regular/skaters.csv" \
-            -o skaters.csv
+          # PRIMARY_YEAR is MoneyPuck's season-start-year convention (e.g. 2025
+          # for the 2025-26 season). It's fine -- expected, even -- to bump this
+          # ahead of the real season flip each summer: MoneyPuck doesn't publish
+          # a season's CSV until real games exist, so a too-early primary just
+          # 404s and falls back to last year's data below instead of breaking
+          # the ingest. Once MoneyPuck actually publishes the new season, the
+          # primary fetch starts succeeding on its own -- no manual revert
+          # needed. (This bit us 2026-07-16→07-20: PRIMARY_YEAR was bumped to
+          # 2026 for an anticipated season flip that hadn't landed yet, and the
+          # ingest hard-failed for 4 days straight with no fallback.)
+          PRIMARY_YEAR=2026
+          FALLBACK_YEAR=$((PRIMARY_YEAR - 1))
+
+          fetch_year() {
+            curl -sSL -o skaters.csv -w "%{http_code}" \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+              -H "Referer: https://moneypuck.com/" \
+              "https://moneypuck.com/moneypuck/playerData/seasonSummary/$1/regular/skaters.csv"
+          }
+
+          YEAR_USED=$PRIMARY_YEAR
+          STATUS=$(fetch_year "$PRIMARY_YEAR")
+          if [ "$STATUS" != "200" ]; then
+            echo "MoneyPuck has no published data for $PRIMARY_YEAR yet (HTTP $STATUS) -- falling back to $FALLBACK_YEAR"
+            YEAR_USED=$FALLBACK_YEAR
+            STATUS=$(fetch_year "$FALLBACK_YEAR")
+          fi
+          if [ "$STATUS" != "200" ]; then
+            echo "MoneyPuck fetch failed for both $PRIMARY_YEAR and $FALLBACK_YEAR (HTTP $STATUS)"
+            exit 1
+          fi
+
           ROWS=$(wc -l < skaters.csv)
-          echo "Fetched $ROWS lines"
+          echo "Fetched $ROWS lines (season start year $YEAR_USED)"
           echo "rows=$ROWS" >> $GITHUB_OUTPUT
+          echo "year_used=$YEAR_USED" >> $GITHUB_OUTPUT
 
       - name: POST to EyeWall worker
         run: |
@@ -37,4 +65,4 @@ jobs:
           fi
 
       - name: Summary
-        run: echo "MoneyPuck ingest complete — ${{ steps.fetch.outputs.rows }} rows sent to worker"
+        run: echo "MoneyPuck ingest complete — ${{ steps.fetch.outputs.rows }} rows (season start year ${{ steps.fetch.outputs.year_used }}) sent to worker"
