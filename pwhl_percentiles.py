@@ -263,11 +263,20 @@ def compute_percentiles(sb, season_id: str, season_type: str) -> None:
 
     # ── Per-player metric values ────────────────────────────────────────
     def total_toi_seconds(row) -> int:
+        # toi_per_game is a Postgres bigint -- PostgREST serializes bigint/
+        # numeric columns as JSON strings (precision safety), unlike the
+        # plain `integer` columns (gp, goals, ...) this module reads
+        # elsewhere. Cast explicitly: `toi * gp` on an unconverted string
+        # is Python string-repetition, not multiplication, and blew up
+        # downstream in per60() with "unsupported operand type(s) for /:
+        # 'int' and 'str'" the first time this ever ran with a non-null
+        # toi_per_game (caught 2026-07-20, once compute_toi_per_game()'s
+        # own pagination bug was fixed and this path finally executed).
         toi = row.get("toi_per_game")
         gp = row.get("gp")
         if not toi or not gp:
             return 0
-        return toi * gp
+        return int(toi) * int(gp)
 
     def goals60(row):
         return per60(row.get("goals") or 0, total_toi_seconds(row))
@@ -285,10 +294,13 @@ def compute_percentiles(sb, season_id: str, season_type: str) -> None:
         return -per60(row.get("pim") or 0, tt)
 
     def finishing60(row):
+        # finishing is a Postgres `numeric` column -- same PostgREST
+        # string-serialization behavior as toi_per_game above, cast for the
+        # same reason.
         fin = row.get("finishing")
         if fin is None:
             return None
-        return per60(fin, total_toi_seconds(row))
+        return per60(float(fin), total_toi_seconds(row))
 
     # ── Qualified pools, split by position ──────────────────────────────
     qualified = [r for r in seasons if (r.get("gp") or 0) >= MIN_GP]
