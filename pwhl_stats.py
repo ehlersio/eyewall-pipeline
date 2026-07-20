@@ -27,6 +27,16 @@ Usage:
         # AFTER pwhl_game_boxscore.py has ingested that season's box rows,
         # same ordering reasoning as --shot-totals-only above. See
         # pwhl-nightly.yml.
+    python pwhl_stats.py --gw-goals-rollup-only [season_id]
+        # Runs compute_gw_goals() only, rolling up
+        # pwhl_shot_events.is_game_winning_goal into
+        # pwhl_player_seasons.gw_goals (fetch_skater_stats() above
+        # hardcodes that column to 0 -- see its comment; HockeyTech's
+        # league-wide `players` view doesn't carry it, but the per-goal
+        # flag exists on pwhl_shot_events via the gameSummary merge in
+        # pwhl_shot_events.py). Must run AFTER pwhl_shot_events.py has
+        # ingested that season's goals, same ordering reasoning as
+        # --toi-rollup-only above. See pwhl-nightly.yml.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -368,7 +378,10 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
                 "pp_assists": int(p.get("power_play_assists", 0) or 0),
                 "sh_goals": int(p.get("short_handed_goals", 0) or 0),
                 "sh_assists": int(p.get("short_handed_assists", 0) or 0),
-                "gw_goals": 0,  # not available in this API
+                "gw_goals": 0,  # not available in THIS view -- rolled up
+                # separately from pwhl_shot_events by compute_gw_goals()
+                # below, run later in the nightly workflow (after
+                # pwhl_shot_events.py).
                 "toi_per_game": None,  # not available in THIS view -- rolled
                 # up separately from pwhl_skater_game_box by
                 # compute_toi_per_game() below, run later in the nightly
@@ -1031,6 +1044,93 @@ def compute_toi_per_game(sb, season_id: str, season_type: str) -> None:
     log.info(f"  {n} player season rows updated with toi_per_game")
 
 
+def compute_gw_goals(sb, season_id: str, season_type: str) -> None:
+    """Roll up pwhl_shot_events.is_game_winning_goal into
+    pwhl_player_seasons.gw_goals -- fetch_skater_stats() above hardcodes
+    that column to 0 because HockeyTech's league-wide `players` view
+    genuinely doesn't carry it, but the per-goal GWG flag exists on
+    pwhl_shot_events (pwhl_shot_events.py's gameSummary merge, confirmed
+    live via games 261/326 -- see that module's docstring).
+
+    Must run AFTER pwhl_shot_events.py has ingested this season's goals --
+    see run_gw_goals_rollup_only() / pwhl-nightly.yml for ordering.
+
+    Grouped by (shooter_id, team_id), same as compute_toi_per_game()'s
+    (player_id, team_id) grouping and pwhl_player_seasons' conflict key --
+    a mid-season trade gets its GWGs split across the two team rows
+    rather than blended.
+
+    Merge-upsert (same convention as compute_toi_per_game()): only
+    gw_goals is in the payload, so this never clobbers gp/goals/etc.
+    written by fetch_skater_stats(). Additionally filtered to
+    (player_id, team_id) pairs _existing_player_teams() confirms already
+    exist, so this can only UPDATE, never INSERT.
+    """
+    log.info(f"Computing GW goals rollup (season {season_id}, {season_type})...")
+
+    # OFFSET pagination, not id-based keyset -- same reasoning (and the
+    # same bug) compute_toi_per_game() above documents: don't assume a
+    # queryable surrogate `id` column exists without checking. Goal rows
+    # are a small subset of pwhl_shot_events (goals only, not every shot),
+    # well under the scale where OFFSET's repeated-scan cost would matter.
+    rows = []
+    offset = 0
+    while True:
+        batch = (
+            sb.table("pwhl_shot_events")
+            .select("shooter_id,team_id")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .eq("event_type", "goal")
+            .eq("is_game_winning_goal", True)
+            .range(offset, offset + 998)
+            .execute()
+            .data
+        )
+        if not batch:
+            break
+        rows.extend(batch)
+        offset += 999
+        if len(batch) < 999:
+            break
+
+    if not rows:
+        log.warning(f"  No GW goals found for season {season_id}/{season_type}")
+        return
+
+    from collections import defaultdict
+
+    totals = defaultdict(int)  # (shooter_id, team_id) -> gw_goals count
+    for r in rows:
+        totals[(r["shooter_id"], r["team_id"])] += 1
+
+    existing = _existing_player_teams(sb, season_id, season_type)
+    updates = []
+    skipped = 0
+    for (pid, tid), count in totals.items():
+        if (pid, tid) not in existing:
+            skipped += 1
+            continue
+        updates.append(
+            {
+                "player_id": pid,
+                "team_id": tid,
+                "season_id": int(season_id),
+                "season_type": season_type,
+                "gw_goals": count,
+            }
+        )
+
+    if skipped:
+        log.info(
+            f"  Skipped {skipped} (player_id, team_id) pair(s) with no existing "
+            "pwhl_player_seasons row"
+        )
+
+    n = upsert_chunk(sb, "pwhl_player_seasons", updates, "player_id,team_id,season_id,season_type")
+    log.info(f"  {n} player season rows updated with gw_goals")
+
+
 def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
     log.info(f"Fetching game log (season {season_id})...")
@@ -1166,6 +1266,23 @@ def run_toi_rollup_only(season_id: str | None = None) -> None:
     log.info("=== PWHL TOI/game rollup complete ===")
 
 
+def run_gw_goals_rollup_only(season_id: str | None = None) -> None:
+    """Run compute_gw_goals() only, for the post-shot-events nightly step —
+    see the --gw-goals-rollup-only usage note above. Must run after
+    pwhl_shot_events.py in the nightly workflow."""
+    season_id = season_id or PWHL_SEASON
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping gw-goals-rollup-only run"
+        )
+        return
+    log.info(f"=== PWHL GW goals rollup — season {season_id} ({season_type}) ===")
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    compute_gw_goals(sb, season_id, season_type)
+    log.info("=== PWHL GW goals rollup complete ===")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if "--shot-totals-only" in args:
@@ -1174,5 +1291,8 @@ if __name__ == "__main__":
     elif "--toi-rollup-only" in args:
         args = [a for a in args if a != "--toi-rollup-only"]
         run_toi_rollup_only(args[0] if args else None)
+    elif "--gw-goals-rollup-only" in args:
+        args = [a for a in args if a != "--gw-goals-rollup-only"]
+        run_gw_goals_rollup_only(args[0] if args else None)
     else:
         run(args[0] if args else None)
