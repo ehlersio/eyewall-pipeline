@@ -113,6 +113,8 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
 
+**Off-season no longer fails the nightly job (2026-07-20):** `run()` returns `"off_season"` (distinct from `"no_data"`) when `player_seasons.rapm` is empty *and* `game_log` has zero completed games for the season — genuinely nothing to validate yet, not the Session 45 stale-data failure mode. `run.py`'s allowlist now accepts `"off_season"` alongside `"pass"`/`"warn"`. If RAPM is empty but completed games exist, it still returns `"no_data"` and fails loud, unchanged.
+
 ### `moneypuck.py`
 WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, `team_seasons.xgf_pct`. Accepts season argument.
 
@@ -456,7 +458,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 |----------|----------|-------------|
 | `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) |
 | `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news — 20 min offset to avoid Supabase contention |
-| `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked) |
+| `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `sbnation-ingest.yml` | Every 4 hours | SBNation atom feeds → Worker (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence, since blog posts don't need 30-min freshness) |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |

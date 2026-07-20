@@ -264,9 +264,11 @@ def run_eh_comparison(client, season, our_rapm, eh_csv_path):
 
 
 def run(season=NHL_SEASON, eh_csv_path=None):
-    """Returns "no_data" (rapm.py never ran or aborted before writing anything
-    this season), "pass", "warn", or "fail" — never None. Callers should
-    treat anything other than "pass"/"warn" as a hard failure."""
+    """Returns "off_season" (no completed games logged for this season yet --
+    nothing to validate, not a failure), "no_data" (games exist but rapm.py
+    never ran or aborted before writing anything this season -- a real
+    failure), "pass", "warn", or "fail" — never None. Callers should treat
+    anything other than "pass"/"warn"/"off_season" as a hard failure."""
     client = get_client()
     print(f"\n=== RAPM Validation -- Season {season} ===")
 
@@ -276,7 +278,23 @@ def run(season=NHL_SEASON, eh_csv_path=None):
     print(f"  EyeWall RAPM values loaded: {len(our_rapm)}")
 
     if not our_rapm:
-        print("  ERROR: No RAPM values found. Run rapm.py first.")
+        # Distinguish "off-season, nothing to validate yet" from "games have
+        # been played and rapm.py should have produced values but didn't" --
+        # only the latter is the Session 45 stale-data failure mode this
+        # module's hard-fail-by-default policy exists to catch (see run.py's
+        # allowlist comment). Same game_log/season convention rapm.py itself
+        # already reads from (rapm.py:224).
+        has_games = (
+            client.table("game_log").select("game_id").eq("season", season).limit(1).execute()
+        )
+        if not has_games.data:
+            print(
+                "  No completed games logged for this season yet — off-season, nothing to validate."
+            )
+            return "off_season"
+        print(
+            "  ERROR: No RAPM values found despite completed games this season. Run rapm.py first."
+        )
         return "no_data"
 
     # Run checks
