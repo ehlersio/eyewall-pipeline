@@ -56,6 +56,23 @@ jobs:
         # explicitly skips shot/goal events (owns hits/penalties/faceoffs/
         # goalie changes instead). Also was NOT previously scheduled.
 
+      - name: Compute PWHL game-winning-goals rollup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_stats.py --gw-goals-rollup-only
+        # Must run AFTER pwhl_shot_events.py directly above -- rolls up
+        # pwhl_shot_events.is_game_winning_goal into
+        # pwhl_player_seasons.gw_goals (pwhl_stats.py's main run()
+        # hardcodes that column to 0, HockeyTech's league-wide players
+        # view doesn't carry it, but the per-goal flag exists on
+        # pwhl_shot_events via that module's gameSummary merge). Same
+        # rollup shape as the TOI-rollup step further below, just placed
+        # here since its only dependency (pwhl_shot_events) is already
+        # satisfied at this point in the run — no need to wait for
+        # pwhl_game_boxscore.py.
+
       - name: Ingest PWHL PBP events (current season)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
