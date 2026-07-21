@@ -76,7 +76,7 @@ ALL_TEAMS = [
     "VAN",
     "VGK",
     "WPG",
-    "UTA",
+    "WSH",
 ]
 # Deduplicate while preserving order
 ALL_TEAMS = list(dict.fromkeys(ALL_TEAMS))
