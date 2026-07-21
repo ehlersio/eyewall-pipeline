@@ -853,6 +853,112 @@ def get_line_combos(team: str, season: int = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Line chemistry context (narrative generation)
+# ---------------------------------------------------------------------------
+
+
+def get_line_chemistry_context(team: str = None, season: int = None) -> dict:
+    """
+    Returns one team's inferred lines/D-pairs enriched for narrative
+    generation:
+      - each unit's own metrics (rank, players, TOI, xGF%)
+      - each member's individual 5v5 process stats (xgf_per60, xga_per60,
+        goals_per60, pct_ev_off, pct_ev_def) from player_seasons, so a
+        narrative can explain *why* a unit performs the way it does via its
+        personnel, not just restate the unit's own xGF%
+      - league-wide average xGF% per unit_type this season, for cross-team
+        comparison. None until line_combinations has rows from at least 2
+        teams for that unit_type -- a "league average" of one team isn't a
+        real comparison, and early in a 32-team backfill most teams won't
+        have rows yet.
+    """
+    team = team or PRIMARY_TEAM
+    season = season or NHL_SEASON
+
+    rows = (
+        supabase.table("line_combinations")
+        .select(
+            "team, unit_type, rank, player_a, player_b, player_c, "
+            "name_a, name_b, name_c, pos_a, pos_b, pos_c, toi_secs, xgf_pct"
+        )
+        .eq("season", season)
+        .order("unit_type")
+        .order("rank")
+        .execute()
+        .data
+    )
+    if not rows:
+        return {"team": team, "lines": [], "pairs": [], "league_avg_xgf_pct": {}}
+
+    # League-wide xGF% average per unit_type -- needs rows from >=2 teams to
+    # be a real comparison, not just this team's own number reflected back.
+    league_avg = {}
+    for ut in ("F", "D"):
+        ut_rows = [r for r in rows if r["unit_type"] == ut]
+        teams_seen = {r["team"] for r in ut_rows}
+        vals = [r["xgf_pct"] for r in ut_rows if r.get("xgf_pct") is not None]
+        league_avg[ut] = (
+            round(sum(vals) / len(vals) * 100, 1) if len(teams_seen) >= 2 and vals else None
+        )
+
+    team_rows = [r for r in rows if r["team"] == team]
+
+    player_ids = set()
+    for r in team_rows:
+        for pid in (r.get("player_a"), r.get("player_b"), r.get("player_c")):
+            if pid:
+                player_ids.add(pid)
+
+    stats_rows = (
+        supabase.table("player_seasons")
+        .select("player_id, xgf_per60, xga_per60, goals_per60, pct_ev_off, pct_ev_def")
+        .eq("team", team)
+        .eq("season", season)
+        .eq("game_type", 2)
+        .in_("player_id", list(player_ids))
+        .execute()
+        .data
+        if player_ids
+        else []
+    )
+    stats_by_pid = {r["player_id"]: r for r in stats_rows}
+
+    def member_stats(pid, name):
+        s = stats_by_pid.get(pid, {})
+        return {
+            "name": name,
+            "xgf_per60": float(s["xgf_per60"]) if s.get("xgf_per60") is not None else None,
+            "xga_per60": float(s["xga_per60"]) if s.get("xga_per60") is not None else None,
+            "goals_per60": float(s["goals_per60"]) if s.get("goals_per60") is not None else None,
+            "pct_ev_off": s.get("pct_ev_off"),
+            "pct_ev_def": s.get("pct_ev_def"),
+        }
+
+    lines, pairs = [], []
+    for r in team_rows:
+        members = [
+            (r["player_a"], r["name_a"], r["pos_a"]),
+            (r["player_b"], r["name_b"], r["pos_b"]),
+        ]
+        if r.get("player_c"):
+            members.append((r["player_c"], r["name_c"], r["pos_c"]))
+
+        unit = {
+            "rank": r["rank"],
+            "players": [{"name": n, "pos": p} for _, n, p in members if n],
+            "player_ids": [pid for pid, _, _ in members if pid],
+            "toi_mins": round(r["toi_secs"] / 60) if r.get("toi_secs") else None,
+            "xgf_pct": round(float(r["xgf_pct"]) * 100, 1)
+            if r.get("xgf_pct") is not None
+            else None,
+            "member_stats": [member_stats(pid, n) for pid, n, _ in members if pid],
+        }
+        (lines if r["unit_type"] == "F" else pairs).append(unit)
+
+    return {"team": team, "lines": lines, "pairs": pairs, "league_avg_xgf_pct": league_avg}
+
+
+# ---------------------------------------------------------------------------
 # Scouting blurbs context
 # ---------------------------------------------------------------------------
 

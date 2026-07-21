@@ -547,6 +547,89 @@ def build_results_vs_process_prompt(player: dict, team: str) -> str:
     return "\n".join(lines) + "\n\n" + task
 
 
+def build_line_chemistry_prompt(
+    unit_type: str,
+    unit: dict,
+    siblings: list[dict],
+    league_avg_xgf_pct: float | None,
+    team: str,
+) -> str:
+    """Line-chemistry narrative -- explains *why* a line/pair's 5v5 xGF% looks
+    the way it does relative to (a) the team's other lines/pairs of the same
+    type and (b) the league-wide average for that type, using the unit's own
+    TOI/xGF% plus its members' individual process stats as the causal
+    evidence. Deliberately steers away from claims this data can't support
+    (e.g. zone starts or quality of competition aren't in `unit` or
+    `siblings` -- neither is any per-line data source in this pipeline yet,
+    see line_combinations.py) -- the model should reason from TOI ranking
+    and personnel, not invent a deployment role it has no data for."""
+    kind = "forward line" if unit_type == "F" else "defence pair"
+    label = f"Line {unit['rank']}" if unit_type == "F" else f"Pair {unit['rank']}"
+
+    names = ", ".join(f"{p['name']} ({p['pos']})" for p in unit["players"])
+    lines = [f"{label} for {team} — {names}"]
+    if unit.get("toi_mins") is not None:
+        lines.append(f"  TOI together: {unit['toi_mins']} min")
+    if unit.get("xgf_pct") is not None:
+        lines.append(f"  xGF%: {unit['xgf_pct']}%")
+
+    lines.append("  Individual 5v5 process, by member:")
+    for m in unit["member_stats"]:
+        parts = [f"{k}={v}" for k, v in m.items() if k != "name" and v is not None]
+        lines.append(f"    {m['name']}: {', '.join(parts) if parts else 'no qualifying data'}")
+
+    # Precompute this unit's xGF% rank among its same-team, same-type siblings
+    # rather than handing the model a raw list and expecting it to infer
+    # relative position itself -- an 8B model reliably got this wrong in
+    # testing (claimed a unit with the *lowest* xGF% of the group "ranks
+    # second, just behind the top line"). Doing the comparison in Python and
+    # stating the answer as a given fact removes that failure mode.
+    xgf_rank_note = None
+    if siblings:
+        lines.append(f"\n  {team}'s other {kind}s this season, for comparison:")
+        for s in siblings:
+            sib_names = "/".join(p["name"] for p in s["players"])
+            xg = f"{s['xgf_pct']}%" if s.get("xgf_pct") is not None else "—"
+            lines.append(
+                f"    Rank {s['rank']} ({sib_names}): xGF%={xg}, TOI={s.get('toi_mins')}min"
+            )
+
+        ranked_by_xgf = sorted(
+            (u for u in [*siblings, unit] if u.get("xgf_pct") is not None),
+            key=lambda u: u["xgf_pct"],
+            reverse=True,
+        )
+        xgf_positions = {u["rank"]: i + 1 for i, u in enumerate(ranked_by_xgf)}
+        if unit["rank"] in xgf_positions:
+            xgf_rank_note = (
+                f"\n  By xGF%, this unit ranks {xgf_positions[unit['rank']]} of "
+                f"{len(ranked_by_xgf)} among {team}'s {kind}s this season -- the \"Rank "
+                f'{unit["rank"]}" label above is a TOI-based deployment order, not an xGF% '
+                f"order, so the two can differ."
+            )
+    if xgf_rank_note:
+        lines.append(xgf_rank_note)
+
+    if league_avg_xgf_pct is not None:
+        lines.append(f"\n  League-wide average xGF% for {kind}s this season: {league_avg_xgf_pct}%")
+    else:
+        lines.append("\n  (League-wide comparison not yet available this season.)")
+
+    task = (
+        f"Write a blurb explaining *why* this {kind} performs the way it does at 5v5 -- how its "
+        f"xGF% compares to {team}'s other {kind}s and, if given, the league average, and what its "
+        f"members' individual process stats (shot generation, shot suppression, finishing) suggest "
+        f"is driving that gap. Use the xGF% rank given above exactly as stated -- do not estimate "
+        f"or recompute a rank yourself. You can note whether its TOI-based deployment rank suggests "
+        f"a top-deployment or complementary role, but do not claim anything about zone starts, "
+        f"quality of competition, or matchups -- that data isn't provided here. Reference specific "
+        f"numbers as evidence, but do not just list the stats back at the reader -- explain what "
+        f"they add up to. Plain text only, no bullet points. Under 80 words."
+    )
+
+    return "\n".join(lines) + "\n\n" + task
+
+
 # ---------------------------------------------------------------------------
 # Quick test
 # ---------------------------------------------------------------------------
