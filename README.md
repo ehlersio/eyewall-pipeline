@@ -56,6 +56,8 @@ python ai_scouting.py --missing                  # Missing scouting blurbs only 
 python ai_scouting.py --team CAR --dry-run       # Preview prompts for one team
 python ai_results_vs_process.py --missing        # Missing results-vs-process blurbs (NHL skaters only)
 python ai_results_vs_process.py --team CAR --dry-run  # Preview prompts for one team
+python ai_line_chemistry.py --missing            # Missing line-chemistry blurbs (all 32 teams)
+python ai_line_chemistry.py --team CAR --dry-run # Preview prompts for one team
 python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
 
 # PWHL — run individually (no orchestrator yet)
@@ -80,7 +82,7 @@ python pwhl_news.py            # Fetch PWHL news and POST to Worker
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process
+nhl_stats → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
 ```
 
 ### `nhl_stats.py`
@@ -127,7 +129,9 @@ WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, 
 **Results-vs-process columns (Session 56, NHL only):** `player_seasons.on_ice_gf_pct` (on-ice GF% at 5v5, from MoneyPuck's `OnIce_F_goals`/`OnIce_A_goals`) and `results_vs_process_diff` (`on_ice_gf_pct` minus the existing `ev_off_pct`, which is already on-ice xGF% at 5v5 — deliberately not duplicated under a new column name). Both are `NULL` below `RESULTS_VS_PROCESS_MIN_GP` (25 games — see Session 55's investigation) so every downstream consumer just checks "is this null", not a duplicated GP comparison. PWHL is out of scope — blocked on the same shift-event gap as PWHL WAR/RAPM, revisit in October. Requires `docs/session56_new_columns.sql` to be run in Supabase first (no migration tooling in this repo).
 
 ### `line_combinations.py`
-Forward lines and D pairs inferred from shift + shot events. Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
+Forward lines and D pairs inferred from shift + shot events, for all 32 teams (loop; `--team` for one). Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
+
+**32-team expansion (2026-07):** previously CAR-only. Shot events are now fetched by looking up the target team's own `game_id`s from `game_log`, then filtering `shot_events` by that game_id list + `situation_code='1551'` — not `shot_events.car_game`, which only ever flags games CAR played in and can't be reused as a generic per-team filter. (`special_teams.py`'s own per-team shot fetch still has this exact bug — see that module's docstring — not fixed as part of this change.) Verified against CAR's previously-stored 20252026 rows: identical shift/shot counts, unit composition, TOI, and xGF% before and after the refactor.
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via Workers AI ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
@@ -152,7 +156,7 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 ### `tankathon_ingest.py`
 Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
-### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_persona.py`, `ai_context.py`)
+### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_persona.py`, `ai_context.py`)
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
 
@@ -165,6 +169,12 @@ Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (S
 **`ai_results_vs_process.py`** (Session 56, NHL only) — Generates "results vs. process" blurbs explaining *why* a player's on-ice goal results (`on_ice_gf_pct`) diverge from their underlying process (`ev_off_pct`), not just restating the two numbers. Pulls qualifying skaters (non-null `results_vs_process_diff` — moneypuck.py's GP≥25 guardrail is the only gate; this script never re-checks GP itself) via the new `get_results_vs_process_context()` in `ai_context.py`. Writes to a new `player_narratives` table rather than `player_scouting` — see that table's description below. Respects `--force`, `--missing`, `--dry-run`, `--team`, `--player` flags, same CLI shape as `ai_scouting.py`. Skater-only (MoneyPuck's on-ice GF/GA split doesn't exist for goalies).
 
 **`ai_persona.py`** — new `build_results_vs_process_prompt()`, dumps the player's on-ice GF%/process xGF%/diff and an explicit over/underperforming direction, with task instructions asking Sticks to explain the *why* (finishing luck, goaltending support, sustainability) rather than just restate the numbers.
+
+**`ai_line_chemistry.py`** (2026-07, all 32 teams) — Generates "line chemistry" blurbs explaining *why* an inferred line/D-pair performs the way it does: how its xGF% compares to the team's other units of the same type and to the league-wide average, and what its members' individual 5v5 process stats (`xgf_per60`, `xga_per60`, `goals_per60`, `pct_ev_off`, `pct_ev_def`) suggest is driving that gap. Pulls context via the new `get_line_chemistry_context()` in `ai_context.py`. Writes to `player_narratives` (`narrative_type='line_chemistry'`) — since that table is keyed one row per player, a unit's blurb is written identically to each of its 2-3 members' rows rather than once per unit. Respects `--force`, `--missing`, `--dry-run`, `--team` flags, same CLI shape as `ai_results_vs_process.py` (no `--player` mode — units aren't single-player-addressable the same way).
+
+`get_line_chemistry_context()`'s league-wide average is `None` until `line_combinations` has rows from at least 2 teams for that unit type — a "league average" of one team isn't a real comparison, which matters early in the 32-team backfill.
+
+**`build_line_chemistry_prompt()` precomputes the unit's xGF% rank** among its same-team, same-type siblings rather than handing the model a raw list and trusting it to infer relative position — an 8B model reliably got this wrong in testing (claimed a unit with the *lowest* xGF% of its group "ranks second, just behind the top line"). Doing the comparison in Python and stating the rank as a given fact in the prompt, with an explicit instruction not to recompute it, eliminated the hallucination in spot-checks across CAR's 7 units. The prompt also deliberately avoids inviting claims about zone starts, quality of competition, or matchups — no per-line data source for any of those exists yet.
 
 ---
 
@@ -418,10 +428,10 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `game_summaries` | AI post-game summaries |
 | `game_predictions` | AI pre-game predictions |
 | `player_scouting` | AI scouting blurbs |
-| `player_narratives` | (Session 56) AI narrative blurbs keyed on `(player_id, season, team, narrative_type)` — supports multiple future blurb types, not just `results_vs_process` (the only type written this round). Written by `ai_results_vs_process.py` |
+| `player_narratives` | (Session 56) AI narrative blurbs keyed on `(player_id, season, team, narrative_type)` — supports multiple blurb types. Written by `ai_results_vs_process.py` (`narrative_type='results_vs_process'`) and `ai_line_chemistry.py` (`narrative_type='line_chemistry'`, one row per unit member) |
 | `game_scoring` | Goal-by-goal scoring data |
 | `game_xg` | Per-game expected goals |
-| `line_combinations` | Inferred lines and D pairs |
+| `line_combinations` | Inferred lines and D pairs, all 32 teams (2026-07 — previously CAR-only) |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |

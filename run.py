@@ -13,6 +13,9 @@ Nightly run order (important — modules depend on each other):
   9. ai_summaries — post-game summaries (all teams)
   10. ai_scouting  — missing scouting blurbs (all teams)
   11. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
+  12. ai_line_chemistry — missing line-chemistry blurbs (needs fresh line_combinations -- see
+      run_all()'s stage("line_combinations", ...) call, not numbered above since this docstring
+      predates that stage)
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -28,7 +31,7 @@ Usage:
   python run.py moneypuck        # MoneyPuck WAR + percentiles only
   python run.py validate         # Internal RAPM sanity checks
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
-  python run.py ai               # AI pipeline only (summaries + scouting)
+  python run.py ai               # AI pipeline only (summaries + scouting + narratives)
 """
 
 import subprocess
@@ -94,14 +97,15 @@ def run_stage(label, fn, *args, **kwargs):
 
 
 def run_ai_pipeline():
-    """AI pipeline — game_scoring, summaries, scouting, results-vs-process.
-    Runs after moneypuck (results-vs-process needs its fresh
-    on_ice_gf_pct/results_vs_process_diff columns).
+    """AI pipeline — game_scoring, summaries, scouting, results-vs-process,
+    line-chemistry. Runs after moneypuck (results-vs-process needs its fresh
+    on_ice_gf_pct/results_vs_process_diff columns) and after line_combinations
+    (line-chemistry needs fresh line_combinations rows to narrate).
 
-    Each sub-stage is isolated: none of the four depend on each other's
-    output (confirmed — neither ai_summaries.py, ai_scouting.py, nor
-    ai_results_vs_process.py reference game_scoring or each other), so one
-    crashing must not prevent the others from running.
+    Each sub-stage is isolated: none of the five depend on each other's
+    output (confirmed — neither ai_summaries.py, ai_scouting.py,
+    ai_results_vs_process.py, nor ai_line_chemistry.py reference game_scoring
+    or each other), so one crashing must not prevent the others from running.
     """
     failures = []
     for label, cmd in (
@@ -111,6 +115,10 @@ def run_ai_pipeline():
         (
             "ai_results_vs_process — missing results-vs-process blurbs",
             ["ai_results_vs_process.py", "--missing"],
+        ),
+        (
+            "ai_line_chemistry — missing line-chemistry blurbs",
+            ["ai_line_chemistry.py", "--missing"],
         ),
     ):
         if run_stage(label, run_subprocess, label, cmd) is STAGE_FAILED:
