@@ -39,7 +39,6 @@ supabase = get_client()
 # All 32 NHL teams — used when no --team flag is passed
 ALL_TEAMS = [
     "ANA",
-    "ARI",
     "BOS",
     "BUF",
     "CAR",
@@ -70,6 +69,7 @@ ALL_TEAMS = [
     "VAN",
     "VGK",
     "WPG",
+    "WSH",
 ]
 
 
