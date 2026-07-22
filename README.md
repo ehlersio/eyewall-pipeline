@@ -131,7 +131,7 @@ WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, 
 ### `line_combinations.py`
 Forward lines and D pairs inferred from shift + shot events, for all 32 teams (loop; `--team` for one). Computes per-unit xGF% and TOI. Must run after `shift_data` and `shot_events`.
 
-**32-team expansion (2026-07):** previously CAR-only. Shot events are now fetched by looking up the target team's own `game_id`s from `game_log`, then filtering `shot_events` by that game_id list + `situation_code='1551'` — not `shot_events.car_game`, which only ever flags games CAR played in and can't be reused as a generic per-team filter. (`special_teams.py`'s own per-team shot fetch still has this exact bug — see that module's docstring — not fixed as part of this change.) Verified against CAR's previously-stored 20252026 rows: identical shift/shot counts, unit composition, TOI, and xGF% before and after the refactor.
+**32-team expansion (2026-07):** previously CAR-only. Shot events are now fetched by looking up the target team's own `game_id`s from `game_log`, then filtering `shot_events` by that game_id list + `situation_code='1551'` — not `shot_events.car_game`, which only ever flags games CAR played in and can't be reused as a generic per-team filter. Verified against CAR's previously-stored 20252026 rows: identical shift/shot counts, unit composition, TOI, and xGF% before and after the refactor.
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via Workers AI ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
@@ -149,6 +149,8 @@ Forward lines and D pairs inferred from shift + shot events, for all 32 teams (l
 
 ### `special_teams.py`
 PP/PK unit inference from shift + shot events → `special_teams_units` table.
+
+**32-team fix (2026-07):** same `car_game` trap as `line_combinations.py` above — this module's own per-team shot fetch (`fetch_pp_shots_for_team`) was still silently CAR-scoped after that fix landed. Now resolves each team's own `game_id`s from `game_log` first (`fetch_game_ids_for_team`), then fetches PP and PK shots from the same situational-rows fetch (`fetch_situational_shots_for_team` + `filter_pp_shots`/`filter_pk_shots`) instead of a `car_game=True` filter.
 
 ### `draft_ingest.py`
 Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `--poll-picks` loops every 60s, exits code 99 when all 224 picks complete. `--sync-pick-order` (Session 51) re-derives `draft_pick_order_2026` from `/draft/picks/{year}/all` — the NHL API's authoritative completed-draft results, now that the 2026 draft is over and Tankathon's projected order no longer applies to this table.
