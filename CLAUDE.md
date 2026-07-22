@@ -98,6 +98,12 @@ HockeyTech IDs, including 2026-27 expansion teams: DET=10, HAM=11, LV=12, SJS=13
 
 New teams also need a `pwhl_teams` row seeded before `pwhl_players.team_id` FK inserts will work — see `seed_expansion_teams.py` as a reference pattern (disposable script, safe to delete, kept as an example of the seeding shape).
 
+## `shot_events.car_game` — means "Carolina played," not "the requested team played"
+
+`shot_events.py` writes a `car_game` boolean to every row of the league-wide `shot_events` table (`is_car_game = home_abbr == 'CAR' or away_abbr == 'CAR'`) — a holdover from when this app was Carolina-only. It is **not** a generic "this team's game" flag, and reusing it as one is a trap that's already been hit twice: `line_combinations.py` and `special_teams.py` both originally filtered `shot_events` on `car_game=True` before matching the actual requested team, which silently restricted every non-CAR team's results to that team's handful of games against Carolina. Both are now fixed the same way — resolve the team's own `game_id`s from `game_log` first (`fetch_all(..., "game_log", ...)` / `fetch_game_ids_for_team()`), then filter `shot_events` by that `game_id` list instead of `car_game`. If you're adding a new per-team query against `shot_events`, use that pattern from the start — don't reach for `car_game`.
+
+Renaming/removing the column outright would be a breaking schema change spanning this repo (writer), `eyewall-poller` (reader via raw Supabase REST query strings, not an ORM), and indirectly `eyewall-analytics` — not attempted as part of the 2026-07 fixes, which only changed query-side filtering.
+
 ## Known open items
 - Season ID 2 naming discrepancy: `SEASON_TYPE_MAP` here labels it `"showcase"`; the real HockeyTech `bootstrap` response calls it `"2024 Preseason"`. Don't silently "fix" either direction — verify against real 2024 game data first.
 - ~~`gameSummary`'s homeTeam/visitingTeam box score payload (rich per-player TOI/hits/blocked-shots/faceoffs) is not yet wired into any pipeline module~~ — resolved Session 41: wired into `pwhl_game_boxscore.py` / `pwhl_skater_game_box` + `pwhl_goalie_game_box`. Was manual-only until Session 50 added it to `pwhl-nightly.yml` — same gap `pwhl_goal_on_ice.py`/`pwhl_penalty_shots.py` below still have. Default nightly sweep only covers the live-resolved regular season; playoff seasons need a manual backfill run, same as PBP (season 9's playoffs backfilled Session 50).

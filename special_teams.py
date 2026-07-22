@@ -2,7 +2,10 @@
 special_teams.py — Infer PP and PK unit compositions from shift + shot data.
 
 For each team in the season:
-  1. Finds all power play shot events (situation codes where team has skater advantage)
+  1. Looks up the team's own game_ids from game_log, then its non-5v5
+     shot_events for those games (NOT shot_events.car_game, which only
+     ever flags games *Carolina* played in — see shot_events.py's
+     docstring; same trap line_combinations.py already routed around)
   2. Joins game_log to resolve home/away → correctly interpret situation codes
   3. Joins shift_events to find which players were on ice during each PP shot
   4. Clusters player combinations by co-occurrence frequency
@@ -113,26 +116,42 @@ def fetch_game_home_away(season: int) -> dict[int, tuple[str, str]]:
     return seen
 
 
-def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> list[dict]:
-    """
-    Returns PP shot events where `team` is the team on the power play.
-    Each row has: game_id, period, time_in_period.
-    """
-    # Fetch all non-5v5 shot events for games this team played in
-    # OFFSET pagination accepted as-is (Session 47 audit #10 pass): despite
-    # the name, this always queries CAR's own car_game=True dataset
-    # regardless of `team` (client-side filtered below), so it's bounded to
-    # one team's season -- same low-risk shape as line_combinations.py's
-    # proven-safe queries, just not yet converted to keyset. Revisit if
-    # this ever becomes genuinely league-wide.
+def fetch_game_ids_for_team(team: str, season: int) -> set[int]:
+    """Returns the game_ids `team` played in this season, from `game_log`
+    (one row per team per game) -- not `shot_events.car_game`, which only
+    ever flags games *Carolina* played in (see shot_events.py's docstring).
+    Same fix as line_combinations.py's fetch_all(..., "game_log", ...) call;
+    special_teams.py's per-team shot fetch was the trap that module's own
+    comment warned still existed here."""
+    rows = (
+        supabase.table("game_log")
+        .select("game_id")
+        .eq("season", season)
+        .eq("team", team)
+        .limit(200)  # a full season incl. playoffs is well under this
+        .execute()
+        .data
+    )
+    return {r["game_id"] for r in (rows or [])}
+
+
+def fetch_situational_shots_for_team(team: str, season: int, game_ids: set[int]) -> list[dict]:
+    """All non-5v5 shot_events rows for `team`'s own games this season,
+    scoped via `game_ids` (from fetch_game_ids_for_team) rather than
+    `shot_events.car_game`. Shared by both the PP and PK derivations below
+    -- they need the same raw rows, just interpreted from opposite
+    perspectives (team on the man advantage vs. team a skater down)."""
+    if not game_ids:
+        return []
     rows = []
     offset = 0
+    game_id_list = list(game_ids)
     while True:
         batch = (
             supabase.table("shot_events")
             .select("game_id,period,time_in_period,situation_code,team")
             .eq("season", season)
-            .eq("car_game", True)  # only games in our dataset
+            .in_("game_id", game_id_list)
             .not_.is_("situation_code", "null")
             .neq("situation_code", "1551")
             .range(offset, offset + 999)
@@ -145,10 +164,15 @@ def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> lis
         if len(batch) < 1000:
             break
         offset += 1000
+    return rows
 
-    # Filter to PP shots where this team is on the power play
+
+def filter_pp_shots(team: str, situational_rows: list[dict], game_home_away: dict) -> list[dict]:
+    """Filters situational shot rows down to PP shots where `team` is the
+    team on the power play. Each returned row has: game_id, period,
+    time_in_period."""
     pp_shots = []
-    for r in rows:
+    for r in situational_rows:
         gid = r["game_id"]
         code = r.get("situation_code", "")
         ha = game_home_away.get(gid)
@@ -170,6 +194,35 @@ def fetch_pp_shots_for_team(team: str, season: int, game_home_away: dict) -> lis
             )
 
     return pp_shots
+
+
+def filter_pk_shots(team: str, situational_rows: list[dict], game_home_away: dict) -> list[dict]:
+    """Filters situational shot rows down to PK shots where `team` is a
+    skater down (the opponent is on the power play) -- the mirror image of
+    filter_pp_shots."""
+    pk_shots = []
+    for r in situational_rows:
+        gid = r["game_id"]
+        code = r.get("situation_code", "")
+        ha = game_home_away.get(gid)
+        if not ha:
+            continue
+        home, away = ha
+
+        is_team_pk = False
+        if (code in HOME_PP_CODES and away == team) or (code in AWAY_PP_CODES and home == team):
+            is_team_pk = True
+
+        if is_team_pk:
+            pk_shots.append(
+                {
+                    "game_id": gid,
+                    "period": r["period"],
+                    "time_in_period": r["time_in_period"],
+                }
+            )
+
+    return pk_shots
 
 
 def fetch_shifts_for_team(team: str, season: int) -> list[dict]:
@@ -360,8 +413,14 @@ def run_team(team: str, season: int, game_home_away: dict, dry_run: bool = False
 
     shift_idx = build_shift_index(shifts)
 
+    game_ids = fetch_game_ids_for_team(team, season)
+    if not game_ids:
+        print("no games in game_log — skip")
+        return
+    situational_rows = fetch_situational_shots_for_team(team, season, game_ids)
+
     # ── PP ────────────────────────────────────────────────────
-    pp_shots = fetch_pp_shots_for_team(team, season, game_home_away)
+    pp_shots = filter_pp_shots(team, situational_rows, game_home_away)
     if len(pp_shots) < MIN_PP_SHOTS:
         print(f"insufficient PP shots ({len(pp_shots)}) — skip")
         return
@@ -369,38 +428,8 @@ def run_team(team: str, season: int, game_home_away: dict, dry_run: bool = False
     pp1_ids, pp2_ids = infer_units(pp_shots, shift_idx, PP_UNIT_SIZE)
 
     # ── PK ────────────────────────────────────────────────────
-    # PK = opponent is on PP. Reuse same shot events but flip perspective:
-    # shots where team is on PK (opponent has the man advantage)
-    pk_shots = []
-    for r_shot in (
-        supabase.table("shot_events")
-        .select("game_id,period,time_in_period,situation_code,team")
-        .eq("season", season)
-        .eq("car_game", True)
-        .not_.is_("situation_code", "null")
-        .execute()
-        .data
-        or []
-    ):
-        gid = r_shot["game_id"]
-        code = r_shot.get("situation_code", "")
-        ha = game_home_away.get(gid)
-        if not ha:
-            continue
-        home, away = ha
-        # Team is on PK when opponent is on PP
-        is_team_pk = False
-        if (code in HOME_PP_CODES and away == team) or (code in AWAY_PP_CODES and home == team):
-            is_team_pk = True
-        if is_team_pk:
-            pk_shots.append(
-                {
-                    "game_id": gid,
-                    "period": r_shot["period"],
-                    "time_in_period": r_shot["time_in_period"],
-                }
-            )
-
+    # PK = opponent is on PP. Same situational rows as PP, flipped perspective.
+    pk_shots = filter_pk_shots(team, situational_rows, game_home_away)
     pk1_ids, pk2_ids = infer_units(pk_shots, shift_idx, PK_UNIT_SIZE)
 
     # ── Report / write ────────────────────────────────────────

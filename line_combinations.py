@@ -31,9 +31,8 @@ Scope:
 Shot events are fetched by this team's own game_id list (via `game_log`),
 not the `shot_events.car_game` flag -- that flag only ever marks games CAR
 played in, so it can't be reused as a per-team filter (special_teams.py hit
-this same trap: its per-team shot fetch is still silently CAR-scoped, see
-that file's `fetch_pp_shots_for_team` docstring -- not fixed here, out of
-scope for this change).
+this same trap; its per-team shot fetch now uses the same game_id-list
+pattern, see that file's `fetch_game_ids_for_team`).
 
 Usage:
   python line_combinations.py                # current season, all 32 teams
