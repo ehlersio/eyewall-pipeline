@@ -73,6 +73,33 @@ ruff check . && ruff format --check .
 
 If `ruff format --check .` reports files that would be reformatted, run `ruff format .` (no `--check`) to actually fix them before committing.
 
+## Supabase RLS audit (standing check — run when creating or touching any table's RLS)
+
+`player_narratives` had RLS enabled with zero policies attached for an unknown period (2026-07) — Postgres RLS with no policies denies every operation for every role except one with `BYPASSRLS` (`service_role`), so this repo's own writes (service-role key, bypasses RLS) kept succeeding silently while `eyewall-poller`'s anon-key reads returned `[]` with no error. 1,092 real rows existed the whole time; nothing surfaced that they weren't reaching anyone. The table's original creation (`docs/session56_new_columns.sql`) never enabled RLS at all — something turned it on afterward without adding a policy, unclear when or why. Fixed in `docs/player_narratives_rls_fix.sql`.
+
+Run this in the Supabase SQL editor whenever adding a new table or touching RLS on an existing one — it surfaces both this failure mode and its mirror image (RLS never enabled at all — wide open to anyone with the anon key):
+
+```sql
+select
+  t.schemaname,
+  t.tablename,
+  case
+    when t.rowsecurity = false then 'RLS DISABLED (open to any grant-permitted role)'
+    when count(p.policyname) = 0 then 'RLS ENABLED, ZERO POLICIES (silently denies anon/authenticated)'
+  end as risk,
+  t.rowsecurity as rls_enabled,
+  count(p.policyname) as policy_count
+from pg_tables t
+left join pg_policies p
+  on p.schemaname = t.schemaname and p.tablename = t.tablename
+where t.schemaname = 'public'
+group by t.schemaname, t.tablename, t.rowsecurity
+having t.rowsecurity = false or count(p.policyname) = 0
+order by risk, t.tablename;
+```
+
+Zero rows back = clean (confirmed 2026-07, right after the `player_narratives` fix — nothing else in `public` has either gap). Properly-configured tables (RLS on, at least one real policy) never show up, so any row returned here is a real, previously-invisible problem, not noise.
+
 ## Live season resolution (built Session 35–36)
 
 `season_lookup.py` reads `GET /config/seasons` from the `eyewall-poller` Worker (with an env-var fallback if the Worker is unreachable), and is the entry point other modules use instead of hardcoding season constants:
