@@ -187,8 +187,8 @@ Added 2026-07 (replacing a yearly manual flip across ~8 hardcoded locations in 3
 ```python
 from season_lookup import get_nhl_season, get_pwhl_season
 
-nhl_season = get_nhl_season()      # int, e.g. 20252026
-pwhl = get_pwhl_season()           # {"season_id": 8, "season_type": "regular", "start_year": 2025}
+nhl_season = get_nhl_season()  # int, e.g. 20252026
+pwhl = get_pwhl_season()  # {"season_id": 8, "season_type": "regular", "start_year": 2025}
 ```
 
 **`db.py`** and **`pwhl_stats.py`** both call these at import time — `NHL_SEASON` and `PWHL_SEASON` are now the *live-resolved* values, with the `.env` values above used only as a fallback if the Worker is unreachable. `pwhl_salaries.py`'s `SEASON_LABEL` (e.g. `"2025-26"`) and `moneypuck.py`'s `MP_SKATERS_URL`/`MP_GOALIES_URL` year are both derived the same way, closing two separate bugs where those values used to be hardcoded independently of `NHL_SEASON`/`PWHL_SEASON` and could silently drift out of sync.
@@ -231,6 +231,7 @@ Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 reg
 **`fetch_roster()` season_id gotcha, found 2026-07:** unlike stats (which correctly want `PWHL_SEASON`, the current *regular* season), roster data for brand-new expansion teams only exists under whatever season HockeyTech has them assigned to *right now* — during the 2026-27 preseason window, that's season **10** (`2026-27 Pre-Season`), not `PWHL_SEASON` (which resolves to `8`, the 2025-26 regular season, where DET/HAM/LV/SJS didn't exist). `run()` currently passes the same `season_id` to every fetch step including `fetch_roster()`, so a normal pipeline run won't backfill a new expansion team's roster until it's called explicitly against the season where HockeyTech actually has that data:
 ```python
 from pwhl_stats import fetch_roster
+
 fetch_roster(sb, "10")
 ```
 `pwhl_players` has no season dimension at all (`on_conflict="player_id"` — one row per player, current team assignment only), so this is always safe to re-run and won't create duplicates or touch any other table. If this comes up again for a future expansion wave, worth considering whether `run()` should call `fetch_roster()` with the bootstrap's raw `current_season_id` instead of `PWHL_SEASON` by default, rather than needing a manual one-off call each time.
