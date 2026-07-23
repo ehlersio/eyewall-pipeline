@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 gcp_*.json
 .venv/
+
+# backtest run output -- regeneratable from backtest_predictions.py /
+# backtest_preseason.py in ~18 min / ~8 min; not source, not committed
+backtest_results.json
+backtest_summary.json
+backtest_preseason_results.json
+backtest_preseason_summary.json
