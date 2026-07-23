@@ -38,9 +38,9 @@ import time
 from collections import defaultdict
 from datetime import date, timedelta
 
-from db import get_client
 import rapm
 import score_state
+from db import get_client
 
 GOALS_PER_WIN = 5.4  # kept in sync with moneypuck.py:37
 
@@ -97,13 +97,18 @@ def pool_for(test_season):
 
 
 def game_ids_before(season_game_log_rows, cutoff):
-    return {r["game_id"] for r in season_game_log_rows if r["game_date"] and r["game_date"][:10] < cutoff}
+    return {
+        r["game_id"]
+        for r in season_game_log_rows
+        if r["game_date"] and r["game_date"][:10] < cutoff
+    }
 
 
 # ---------------------------------------------------------------------------
 # RAPM chain, cutoff-restricted (Part 1) -- mirrors rapm.py's own logic,
 # reusing its pure helper functions directly for fidelity.
 # ---------------------------------------------------------------------------
+
 
 def build_rapm_for_cutoff(test_season, cutoff):
     pool = pool_for(test_season)
@@ -150,24 +155,32 @@ def build_rapm_for_cutoff(test_season, cutoff):
     player_expected_sw = {}
     priors = [s for s in pool if s != test_season]
     for s in priors:
-        rows = rapm.fetch_all(client, "player_score_state_dist", "player_id,expected_weight", {"season": s})
+        rows = rapm.fetch_all(
+            client, "player_score_state_dist", "player_id,expected_weight", {"season": s}
+        )
         for r in rows:
             pid = r["player_id"]
             ew = float(r["expected_weight"])
-            player_expected_sw[pid] = (player_expected_sw[pid] + ew) / 2 if pid in player_expected_sw else ew
+            player_expected_sw[pid] = (
+                (player_expected_sw[pid] + ew) / 2 if pid in player_expected_sw else ew
+            )
 
     game_home = {r["game_id"]: r["home_team"] for s in pool for r in get_season_data(s)["game_log"]}
     gh_restricted, goal_timeline = score_state.build_goal_timeline(client, [test_season])
     cur_shifts_for_score_state = [
         sh for sh in get_season_data(test_season)["shifts"] if sh["game_id"] in allowlist
     ]
-    player_dist = score_state.compute_distributions(cur_shifts_for_score_state, gh_restricted, goal_timeline)
+    player_dist = score_state.compute_distributions(
+        cur_shifts_for_score_state, gh_restricted, goal_timeline
+    )
     for pid, dist in player_dist.items():
         total_secs = sum(dist.values())
         if total_secs < 60:
             continue
         ew = score_state.expected_weight(dist, rapm.SCORE_WEIGHTS)
-        player_expected_sw[pid] = (player_expected_sw[pid] + ew) / 2 if pid in player_expected_sw else ew
+        player_expected_sw[pid] = (
+            (player_expected_sw[pid] + ew) / 2 if pid in player_expected_sw else ew
+        )
 
     # ridge regression fit, mirroring rapm.py's design-matrix construction
     import numpy as np
@@ -189,7 +202,9 @@ def build_rapm_for_cutoff(test_season, cutoff):
     goal_timeline_all = defaultdict(list)
     for shot in all_shots:
         if shot["event_type"] == "goal":
-            goal_timeline_all[shot["game_id"]].append({"secs": shot_abs_secs(shot), "team": shot["team"]})
+            goal_timeline_all[shot["game_id"]].append(
+                {"secs": shot_abs_secs(shot), "team": shot["team"]}
+            )
 
     LEAGUE_AVG_SW = 1.0
 
@@ -226,7 +241,9 @@ def build_rapm_for_cutoff(test_season, cutoff):
         xg = rapm.shot_xg(shot["event_type"], shot.get("x") or 0, shot.get("y") or 0)
         if xg == 0:
             continue
-        active = [s for s in shift_index.get(game_id, []) if s["start_secs"] <= shot_sec <= s["end_secs"]]
+        active = [
+            s for s in shift_index.get(game_id, []) if s["start_secs"] <= shot_sec <= s["end_secs"]
+        ]
         if not active:
             continue
         shoot_skaters = [s for s in active if s["team"] == shooting_team]
@@ -238,7 +255,9 @@ def build_rapm_for_cutoff(test_season, cutoff):
         goals_so_far = [g for g in goal_timeline_all.get(game_id, []) if g["secs"] < shot_sec]
         home_score = sum(1 for g in goals_so_far if g["team"] == home_team)
         away_score = sum(1 for g in goals_so_far if g["team"] != home_team)
-        score_diff = (home_score - away_score) if shooting_team == home_team else (away_score - home_score)
+        score_diff = (
+            (home_score - away_score) if shooting_team == home_team else (away_score - home_score)
+        )
         sw = rapm.score_weight(score_diff)
 
         shoot_norm_weights = [normalised_sw(s["player_id"], sw) for s in shoot_skaters]
@@ -329,6 +348,7 @@ def log5_win_prob(impact_home, impact_away):
 # Standings scorecard, ported from nhl.js:2552-2567
 # ---------------------------------------------------------------------------
 
+
 def standings_inputs_asof(season_game_log_rows, team, cutoff):
     rows = [r for r in season_game_log_rows if r["team"] == team and r["game_date"][:10] < cutoff]
     rows.sort(key=lambda r: r["game_date"])
@@ -349,7 +369,9 @@ def standings_inputs_asof(season_game_log_rows, team, cutoff):
             streak_count += 1
         else:
             streak_code, streak_count = code, 1
-        points += 2 if won else 0  # OT/SO-loss point nuance not tracked in game_log; regulation-only approx
+        points += (
+            2 if won else 0
+        )  # OT/SO-loss point nuance not tracked in game_log; regulation-only approx
     gp = len(rows)
     return {
         "points": points,
@@ -397,6 +419,7 @@ def scorecard_win_pct(car, opp):
 # Scoring: Brier, log loss, accuracy, calibration
 # ---------------------------------------------------------------------------
 
+
 def brier(preds):
     return sum((p - y) ** 2 for p, y in preds) / len(preds)
 
@@ -436,8 +459,11 @@ def calibration(preds, buckets=10):
 # Orchestration
 # ---------------------------------------------------------------------------
 
+
 def monthly_cutoffs(season):
-    dates = sorted({r["game_date"][:10] for r in get_season_data(season)["game_log"] if r["game_date"]})
+    dates = sorted(
+        {r["game_date"][:10] for r in get_season_data(season)["game_log"] if r["game_date"]}
+    )
     if len(dates) < 20:
         return []
     start, end = date.fromisoformat(dates[0]), date.fromisoformat(dates[-1])
@@ -457,28 +483,35 @@ def games_in_window(season_game_log_rows, start_cutoff, end_cutoff):
             continue
         by_game.setdefault(r["game_id"], {})[r["team"]] = r
     games = []
-    for gid, teams in by_game.items():
+    for _gid, teams in by_game.items():
         if len(teams) != 2:
             continue
-        (ta, ra), (tb, rb) = list(teams.items())
+        (ta, ra), (_tb, rb) = list(teams.items())
         home_abbr = ra["home_team"]
         home_row = ra if ta == home_abbr else rb
         away_row = rb if ta == home_abbr else ra
-        games.append((home_row["team"], away_row["team"], home_row["team_score"] > home_row["opp_score"]))
+        games.append(
+            (home_row["team"], away_row["team"], home_row["team_score"] > home_row["opp_score"])
+        )
     return games
 
 
 def run_backtest():
     all_results = []
     for test_season in ALL_TEST_SEASONS:
-        pool = pool_for(test_season)
         get_season_data(test_season)  # populate cache/date range first
         cutoffs = monthly_cutoffs(test_season)
         degraded = test_season in DEGRADED_POOL_SEASONS
-        print(f"\n=== Season {test_season} ({'degraded' if degraded else 'full'}-pool) -- {len(cutoffs)} cutoffs ===")
+        print(
+            f"\n=== Season {test_season} ({'degraded' if degraded else 'full'}-pool) -- {len(cutoffs)} cutoffs ==="
+        )
 
         for i, cutoff in enumerate(cutoffs):
-            next_cutoff = cutoffs[i + 1] if i + 1 < len(cutoffs) else (date.fromisoformat(cutoff) + timedelta(days=60)).isoformat()
+            next_cutoff = (
+                cutoffs[i + 1]
+                if i + 1 < len(cutoffs)
+                else (date.fromisoformat(cutoff) + timedelta(days=60)).isoformat()
+            )
             games = games_in_window(get_season_data(test_season)["game_log"], cutoff, next_cutoff)
             if not games:
                 continue
@@ -557,8 +590,12 @@ if __name__ == "__main__":
 
     report = {
         "full_pool_all": summarize(results, lambda r: not r["degraded_pool"]),
-        "full_pool_early": summarize(results, lambda r: not r["degraded_pool"] and r["early_season"]),
-        "full_pool_mid_late": summarize(results, lambda r: not r["degraded_pool"] and not r["early_season"]),
+        "full_pool_early": summarize(
+            results, lambda r: not r["degraded_pool"] and r["early_season"]
+        ),
+        "full_pool_mid_late": summarize(
+            results, lambda r: not r["degraded_pool"] and not r["early_season"]
+        ),
         "degraded_pool_all": summarize(results, lambda r: r["degraded_pool"]),
     }
     with open("backtest_summary.json", "w") as f:
@@ -566,4 +603,6 @@ if __name__ == "__main__":
 
     print("\n=== SUMMARY ===")
     print(json.dumps(report, indent=2))
-    print("\nNo writes performed -- player_seasons/player_score_state_dist/zone_starts/players untouched.")
+    print(
+        "\nNo writes performed -- player_seasons/player_score_state_dist/zone_starts/players untouched."
+    )

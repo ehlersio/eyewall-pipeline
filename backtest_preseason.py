@@ -39,8 +39,8 @@ import backtest_predictions as bp
 import rapm
 
 TEST_SEASONS = [20242025, 20252026]  # 2023-24 excluded -- 2022-23 has no prior data at all
-ANCHOR_GAMES = 2   # team's own first N games -- used only to build the roster proxy
-SCORE_GAMES = 3    # next N games after the anchor -- these are what's actually scored
+ANCHOR_GAMES = 2  # team's own first N games -- used only to build the roster proxy
+SCORE_GAMES = 3  # next N games after the anchor -- these are what's actually scored
 LEAGUE_AVG_TOI_SECS = 900  # ~15 min/game fallback for true rookies with no prior-season row
 
 
@@ -63,7 +63,9 @@ def roster_proxy(test_season, team):
     anchor_game_ids = {r["game_id"] for r in anchor_rows}
     ready_date = sched[ANCHOR_GAMES]["game_date"][:10]
     shifts = bp.get_season_data(test_season)["shifts"]
-    roster = {s["player_id"] for s in shifts if s["game_id"] in anchor_game_ids and s["team"] == team}
+    roster = {
+        s["player_id"] for s in shifts if s["game_id"] in anchor_game_ids and s["team"] == team
+    }
     return roster, anchor_game_ids, ready_date
 
 
@@ -71,7 +73,9 @@ def prior_season_toi_map(prior_season):
     """player_id -> total prior-season TOI in seconds, any team (a traded
     player's own historical role, regardless of which team it was with)."""
     rows = rapm.fetch_all(
-        bp.client, "player_seasons", "player_id,team,games_played,toi_per_game",
+        bp.client,
+        "player_seasons",
+        "player_id,team,games_played,toi_per_game",
         {"season": prior_season, "game_type": 2},
     )
     toi = {}
@@ -96,7 +100,9 @@ def continuity_fraction(roster, prior_toi, prior_season, team):
     """Fraction of the team's prior-season total TOI attributable to
     players who are still on the roster (per the game-1 proxy)."""
     rows = rapm.fetch_all(
-        bp.client, "player_seasons", "player_id,games_played,toi_per_game",
+        bp.client,
+        "player_seasons",
+        "player_id,games_played,toi_per_game",
         {"season": prior_season, "team": team, "game_type": 2},
     )
     team_total = sum((r.get("toi_per_game") or 0) * (r.get("games_played") or 0) for r in rows)
@@ -141,7 +147,9 @@ def run_preseason_backtest():
         rapm_map, _ = bp.build_rapm_for_cutoff(test_season, season_start)
         print(f"  RAPM (prior-seasons-only pool) built in {time.time() - t0:.1f}s")
         if rapm_map is None:
-            print("  insufficient RAPM data at season start, skipping RAPM/Log5 variant for this season")
+            print(
+                "  insufficient RAPM data at season start, skipping RAPM/Log5 variant for this season"
+            )
 
         teams = sorted({r["team"] for r in bp.get_season_data(test_season)["game_log"]})
         team_data = {}
