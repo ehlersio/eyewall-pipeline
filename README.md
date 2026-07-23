@@ -431,7 +431,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `game_summaries` | AI post-game summaries |
 | `game_predictions` | AI pre-game predictions |
 | `player_scouting` | AI scouting blurbs |
-| `player_narratives` | (Session 56) AI narrative blurbs keyed on `(player_id, season, team, narrative_type)` — supports multiple blurb types. Written by `ai_results_vs_process.py` (`narrative_type='results_vs_process'`) and `ai_line_chemistry.py` (`narrative_type='line_chemistry'`, one row per unit member) |
+| `player_narratives` | (Session 56) AI narrative blurbs keyed on `(player_id, season, team, narrative_type)` — supports multiple blurb types. Written by `ai_results_vs_process.py` (`narrative_type='results_vs_process'`) and `ai_line_chemistry.py` (`narrative_type='line_chemistry'`, one row per unit member). **Found broken 2026-07:** RLS was enabled on this table at some point after creation with zero policies attached, silently blocking every anon-key read (`eyewall-poller`'s `/player-results-vs-process`) while writes kept succeeding via the pipeline's service-role key — the feature had real content (1,092 rows) that nobody could actually see. Fixed by `docs/player_narratives_rls_fix.sql` (adds the missing public-read policy); worth checking any other table for the same gap if this comes up again. |
 | `game_scoring` | Goal-by-goal scoring data |
 | `game_xg` | Per-game expected goals |
 | `line_combinations` | Inferred lines and D pairs, all 32 teams (2026-07 — previously CAR-only) |
