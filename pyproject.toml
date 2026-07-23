@@ -32,6 +32,10 @@ exclude = [
     ".git",
     "__pycache__",
     "*.egg-info",
+    # Raw HockeyTech API-mapping investigation output (2026-07) -- not
+    # source, and mapping_summary.md isn't valid UTF-8, which crashes a
+    # ruff version new enough to attempt formatting Markdown by default.
+    "hockeytech_mapping_results",
 ]
 
 [tool.ruff.lint.isort]

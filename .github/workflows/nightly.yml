@@ -27,7 +27,12 @@ jobs:
 
       - name: Lint (Ruff)
         run: |
-          pip install ruff --quiet
+          # Pinned -- an unpinned install previously picked up a new ruff
+          # release that promoted Markdown formatting from preview-only to
+          # default behavior, silently breaking CI on pre-existing .md files
+          # local dev had never been checking against (found 2026-07-23).
+          # Bump deliberately, not by surprise.
+          pip install ruff==0.15.20 --quiet
           ruff check .
           ruff format --check .
 
