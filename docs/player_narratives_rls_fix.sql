@@ -1,0 +1,32 @@
+-- player_narratives -- restore the missing SELECT policy for anon.
+-- Run this in the Supabase SQL editor.
+--
+-- Found while investigating an unrelated Supabase linter warning
+-- ("RLS Enabled No Policy" on public.player_narratives) surfaced
+-- alongside the Odds Persistence Writer work. Confirmed live, not just
+-- theoretical: the table has 1,092 real rows (verified via the pipeline's
+-- service-role key, most recent generated_at 2026-07-12), but a query
+-- using the same anon key eyewall-poller's nhl.js reads it with
+-- (GET /player-results-vs-process) returned an empty array. RLS is
+-- enabled on this table with zero policies -- Postgres RLS with no
+-- policies denies every operation for every role except one with
+-- BYPASSRLS (service_role, which is why the pipeline's writes via
+-- ai_results_vs_process.py/ai_line_chemistry.py kept succeeding and
+-- nobody noticed anything was wrong -- the content kept getting
+-- generated, nothing ever surfaced that no one could actually read it).
+--
+-- The original table creation (docs/session56_new_columns.sql) never
+-- enabled RLS at all -- something enabled it afterward (dashboard action,
+-- a security sweep, unclear which) without adding the policy this
+-- restores. This has likely been silently broken for end users since
+-- whenever that happened, not something this change introduced.
+--
+-- Read-only content (AI-generated narrative text, not sensitive), same
+-- posture as nhl_odds's read policy -- unrestricted SELECT is
+-- intentional here, not the thing the linter warns about (that warning
+-- is specifically about INSERT/UPDATE/DELETE with no real check).
+-- Writes stay service-role-only (the pipeline already uses
+-- SUPABASE_SERVICE_KEY, which bypasses RLS) -- no INSERT/UPDATE policy
+-- needed or added for anon.
+create policy "anon can read player_narratives" on public.player_narratives
+  for select to anon using (true);
