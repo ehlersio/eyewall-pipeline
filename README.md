@@ -416,7 +416,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 ### NHL Tables
 | Table | Description |
 |-------|-------------|
-| `players` | Player master |
+| `players` | Player master. `team` (current-team affiliation) added for the Combined Prediction Calibration work — was previously fetched per-team by `fetch_roster()` but discarded before the upsert, leaving no way to answer "which team is player X on right now" anywhere in the codebase |
 | `player_seasons` | Per-player stats + WAR/RAPM/percentiles |
 | `goalie_seasons` | Per-goalie stats + GSAX/percentiles |
 | `team_seasons` | Per-team stats + `xgf_pct` + `roster_war_score`. Regular-season rows also carry standings (`division_abbrev`/`conference_abbrev`/`wildcard_sequence`/`regulation_wins`/`clinch_indicator`, Session 57) and computed playoff race (`magic_number`/`tragic_number`/`clinched`/`eliminated`, `playoff_race.py`) — all `NULL` for playoff rows |

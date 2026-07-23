@@ -79,6 +79,7 @@ def fetch_roster(team: str, season: int) -> list:
             players.append(
                 {
                     "id": p["id"],
+                    "team": team,
                     "name": f"{p['firstName']['default']} {p['lastName']['default']}",
                     "position": p.get("positionCode"),
                     "shoots": p.get("shootsCatches"),
