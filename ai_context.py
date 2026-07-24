@@ -24,9 +24,10 @@ def _fmt_toi(seconds: int | None) -> str | None:
 
 
 def decode_situation(code: str) -> str:
+    """code = [awayGoalie][awaySkaters][homeSkaters][homeGoalie]."""
     if not code or len(code) != 4:
         return "unknown"
-    h_sk, a_sk = int(code[1]), int(code[2])
+    a_sk, h_sk = int(code[1]), int(code[2])
     if h_sk == 5 and a_sk == 5:
         return "5v5"
     if h_sk == 5 and a_sk == 4:

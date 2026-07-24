@@ -67,6 +67,37 @@ def nhl_get(url, params=None):
         raise FetchError(f"NHL GET failed: {url} — {e}") from e
 
 
+def fetch_pp_stats(game_id: int) -> dict | None:
+    """Official per-game PP conversion from the NHL's own box score
+    (gamecenter/{id}/right-rail's teamGameStats), not reconstructed from
+    situationCode/penalty-duration parsing -- a prior in-house
+    reconstruction misindexed situationCode (sc[3] is the home goalie-in-net
+    flag, not the home skater count) and silently miscounted PP goals/opps
+    for essentially every game. The NHL has already resolved every edge case
+    (stacked minors, majors, 6-on-4, etc.) in this field; trust it instead.
+
+    Returns {"home": (goals, opps), "away": (goals, opps)}, or None if the
+    field is missing/malformed for this game.
+    """
+    try:
+        rr = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/right-rail")
+    except FetchError:
+        return None
+
+    pp = next((c for c in rr.get("teamGameStats", []) if c.get("category") == "powerPlay"), None)
+    if not pp:
+        return None
+
+    def parse(v):
+        goals, opps = str(v).split("/")
+        return int(goals), int(opps)
+
+    try:
+        return {"home": parse(pp["homeValue"]), "away": parse(pp["awayValue"])}
+    except (KeyError, ValueError):
+        return None
+
+
 def fetch_roster(team: str, season: int) -> list:
     try:
         data = nhl_get(f"{NHL_BASE}/roster/{team}/{season}")
@@ -574,26 +605,50 @@ def run(season: int = NHL_SEASON):
     print(f"  OK game_log: {total_rows} rows upserted across all teams")
 
     # ── team_scored_first + PP/PK — incremental PBP fetch ────────
-    # Fetch PBP only for rows where team_scored_first or pp_goals is null.
-    # Each unique game_id only needs one PBP call regardless of how many
-    # teams are stored for that game — we update all team rows from one fetch.
     print("  Fetching team_scored_first + PP/PK stats for new games...")
-    try:
-        null_rows = (
-            client.table("game_log")
-            .select("game_id,team,home_team")
-            .eq("season", season)
-            .or_("team_scored_first.is.null,pp_goals.is.null")
-            .execute()
-            .data
-            or []
-        )
-    except Exception:
-        null_rows = []
+    enrich_game_log(client, season)
 
-    # Group by game_id so we fetch PBP once per game
+    print("\nOK NHL stats pipeline complete")
+
+
+def enrich_game_log(client, season: int, force_all: bool = False) -> int:
+    """Fills team_scored_first + PP/PK (pp_goals/pp_opps/pk_goals_against/
+    pk_opps) on game_log rows for `season`.
+
+    By default (force_all=False) only rows where team_scored_first or
+    pp_goals is still null are touched — the nightly-cron incremental path.
+    force_all=True re-derives every row regardless of current value, for
+    backfilling a season whose data was populated by the old, buggy
+    situationCode reconstruction (see fetch_pp_stats' docstring) rather than
+    left null.
+
+    Each unique game_id only needs one PBP call (for team_scored_first) and
+    one right-rail call (for PP/PK) regardless of how many teams are stored
+    for that game — both are fetched once and applied to every team row.
+    Returns the number of team-game rows updated.
+    """
+    # Paginated — a single .execute() silently caps at PostgREST's 1000-row
+    # default and would miss rows past that (a full season's game_log is
+    # ~2600-3000 rows).
+    target_rows = []
+    offset = 0
+    page_size = 1000
+    try:
+        while True:
+            query = client.table("game_log").select("game_id,team,home_team").eq("season", season)
+            if not force_all:
+                query = query.or_("team_scored_first.is.null,pp_goals.is.null")
+            page = query.range(offset, offset + page_size - 1).execute().data or []
+            target_rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    except Exception:
+        pass
+
+    # Group by game_id so we fetch PBP/right-rail once per game
     games_to_fetch = defaultdict(list)  # game_id -> [team_row, ...]
-    for row in null_rows:
+    for row in target_rows:
         games_to_fetch[row["game_id"]].append(row)
 
     updated = 0
@@ -620,39 +675,10 @@ def run(season: int = NHL_SEASON):
             first_goal.get("details", {}).get("eventOwnerTeamId") if first_goal else None
         )
 
-        # ── PP/PK — computed once from home/away perspective ──────
-        # We'll derive each team's numbers from the raw counts below.
-        # away_pp_goals, home_pp_goals etc. let us serve any team row.
-        home_pp_goals = home_pp_opps = away_pp_goals = away_pp_opps = 0
-        home_pk_ga = away_pk_ga = 0
-
-        for p in plays:
-            key = p.get("typeDescKey", "")
-            details = p.get("details", {})
-            sc = p.get("situationCode", "")
-
-            if key == "penalty" and details.get("duration", 0) == 2:
-                penalized_id = details.get("eventOwnerTeamId")
-                if penalized_id == away_team_id:
-                    home_pp_opps += 1  # home gets PP
-                elif penalized_id == home_team_id:
-                    away_pp_opps += 1  # away gets PP
-
-            if key == "goal" and len(sc) == 4:
-                scorer_id = details.get("eventOwnerTeamId")
-                away_sk = int(sc[1])
-                home_sk = int(sc[3])
-                home_on_pp = home_sk > away_sk
-                away_on_pp = away_sk > home_sk
-
-                if scorer_id == home_team_id and home_on_pp:
-                    home_pp_goals += 1
-                elif scorer_id == away_team_id and away_on_pp:
-                    away_pp_goals += 1
-                elif scorer_id == home_team_id and away_on_pp:
-                    home_pk_ga += 1  # home allowed PP goal (was on PK)
-                elif scorer_id == away_team_id and home_on_pp:
-                    away_pk_ga += 1  # away allowed PP goal (was on PK)
+        # ── PP/PK — official per-game box score (see fetch_pp_stats) ──
+        pp_stats = fetch_pp_stats(game_id)
+        if pp_stats is None:
+            print(f"  WARN: no PP/PK data available for game {game_id}")
 
         # ── Update each team row for this game ────────────────────
         for row in team_rows:
@@ -664,37 +690,38 @@ def run(season: int = NHL_SEASON):
             if first_goal_team_id is not None and team_id is not None:
                 scored_first = first_goal_team_id == team_id
 
-            if is_home:
-                pp_goals_val = home_pp_goals
-                pp_opps_val = home_pp_opps
-                pk_ga_val = home_pk_ga
-                pk_opps_val = away_pp_opps  # away PPs = home PKs
-            else:
-                pp_goals_val = away_pp_goals
-                pp_opps_val = away_pp_opps
-                pk_ga_val = away_pk_ga
-                pk_opps_val = home_pp_opps  # home PPs = away PKs
-
-            update_data = {
-                "pp_goals": pp_goals_val,
-                "pp_opps": pp_opps_val,
-                "pk_goals_against": pk_ga_val,
-                "pk_opps": pk_opps_val,
-            }
+            update_data = {}
+            if pp_stats:
+                home_pp_goals, home_pp_opps = pp_stats["home"]
+                away_pp_goals, away_pp_opps = pp_stats["away"]
+                if is_home:
+                    pp_goals_val, pp_opps_val = home_pp_goals, home_pp_opps
+                    pk_ga_val, pk_opps_val = away_pp_goals, away_pp_opps
+                else:
+                    pp_goals_val, pp_opps_val = away_pp_goals, away_pp_opps
+                    pk_ga_val, pk_opps_val = home_pp_goals, home_pp_opps
+                update_data.update(
+                    {
+                        "pp_goals": pp_goals_val,
+                        "pp_opps": pp_opps_val,
+                        "pk_goals_against": pk_ga_val,
+                        "pk_opps": pk_opps_val,
+                    }
+                )
             if scored_first is not None:
                 update_data["team_scored_first"] = scored_first
 
-            client.table("game_log").update(update_data).eq("game_id", game_id).eq(
-                "team", t
-            ).execute()
-            updated += 1
+            if update_data:
+                client.table("game_log").update(update_data).eq("game_id", game_id).eq(
+                    "team", t
+                ).execute()
+                updated += 1
 
         time.sleep(0.2)
 
     if updated:
         print(f"  OK team_scored_first + PP/PK updated for {updated} team-game rows")
-
-    print("\nOK NHL stats pipeline complete")
+    return updated
 
 
 if __name__ == "__main__":
