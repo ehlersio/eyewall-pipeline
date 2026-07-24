@@ -67,9 +67,20 @@ def nhl_get(url, params=None):
         raise FetchError(f"NHL GET failed: {url} — {e}") from e
 
 
-def fetch_pp_stats(game_id: int) -> dict | None:
+def fetch_right_rail(game_id: int) -> dict | None:
+    """Raw gamecenter/{id}/right-rail payload, or None on fetch failure.
+    Shared by parse_pp_stats/parse_team_hits below so a caller that wants
+    both (see enrich_game_log) fetches this endpoint once, not once per
+    stat."""
+    try:
+        return nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/right-rail")
+    except FetchError:
+        return None
+
+
+def parse_pp_stats(right_rail: dict | None) -> dict | None:
     """Official per-game PP conversion from the NHL's own box score
-    (gamecenter/{id}/right-rail's teamGameStats), not reconstructed from
+    (right-rail's teamGameStats), not reconstructed from
     situationCode/penalty-duration parsing -- a prior in-house
     reconstruction misindexed situationCode (sc[3] is the home goalie-in-net
     flag, not the home skater count) and silently miscounted PP goals/opps
@@ -79,12 +90,11 @@ def fetch_pp_stats(game_id: int) -> dict | None:
     Returns {"home": (goals, opps), "away": (goals, opps)}, or None if the
     field is missing/malformed for this game.
     """
-    try:
-        rr = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/right-rail")
-    except FetchError:
+    if not right_rail:
         return None
-
-    pp = next((c for c in rr.get("teamGameStats", []) if c.get("category") == "powerPlay"), None)
+    pp = next(
+        (c for c in right_rail.get("teamGameStats", []) if c.get("category") == "powerPlay"), None
+    )
     if not pp:
         return None
 
@@ -96,6 +106,36 @@ def fetch_pp_stats(game_id: int) -> dict | None:
         return {"home": parse(pp["homeValue"]), "away": parse(pp["awayValue"])}
     except (KeyError, ValueError):
         return None
+
+
+def parse_team_hits(right_rail: dict | None) -> dict | None:
+    """Official per-game team hit counts from the same right-rail box
+    score parse_pp_stats reads -- confirmed live (Session 81) that
+    teamGameStats always carries a "hits" category alongside "powerPlay",
+    same payload, no extra fetch needed.
+
+    Returns {"home": int, "away": int}, or None if the field is
+    missing/malformed for this game.
+    """
+    if not right_rail:
+        return None
+    hits = next(
+        (c for c in right_rail.get("teamGameStats", []) if c.get("category") == "hits"), None
+    )
+    if not hits:
+        return None
+    try:
+        return {"home": int(hits["homeValue"]), "away": int(hits["awayValue"])}
+    except (KeyError, ValueError):
+        return None
+
+
+def fetch_pp_stats(game_id: int) -> dict | None:
+    """Thin wrapper kept for direct callers/tests -- fetches right-rail
+    itself. enrich_game_log below calls fetch_right_rail once and reuses
+    parse_pp_stats/parse_team_hits directly instead, to avoid double-
+    fetching the same endpoint."""
+    return parse_pp_stats(fetch_right_rail(game_id))
 
 
 def fetch_roster(team: str, season: int) -> list:
@@ -606,28 +646,35 @@ def run(season: int = NHL_SEASON):
 
     print(f"  OK game_log: {total_rows} rows upserted across all teams")
 
-    # ── team_scored_first + PP/PK — incremental PBP fetch ────────
-    print("  Fetching team_scored_first + PP/PK stats for new games...")
+    # ── team_scored_first + PP/PK + Hits/Penalties — incremental PBP fetch
+    print("  Fetching team_scored_first + PP/PK + Hits/Penalties stats for new games...")
     enrich_game_log(client, season)
+
+    # ── Season-total Hits/Penalties rollup (game_log → team_seasons) ──
+    # Needed for the Shot Map "All N" summary cards (season aggregate) --
+    # per-game Hits/Penalties on their own only cover the single-game view.
+    for game_type in [2, 3]:
+        run_team_hits_penalties_rollup(client, season, game_type)
 
     print("\nOK NHL stats pipeline complete")
 
 
 def enrich_game_log(client, season: int, force_all: bool = False) -> int:
     """Fills team_scored_first + PP/PK (pp_goals/pp_opps/pk_goals_against/
-    pk_opps) on game_log rows for `season`.
+    pk_opps) + Hits + Penalties on game_log rows for `season`.
 
-    By default (force_all=False) only rows where team_scored_first or
-    pp_goals is still null are touched — the nightly-cron incremental path.
+    By default (force_all=False) only rows where team_scored_first, pp_goals,
+    or hits is still null are touched — the nightly-cron incremental path.
     force_all=True re-derives every row regardless of current value, for
     backfilling a season whose data was populated by the old, buggy
     situationCode reconstruction (see fetch_pp_stats' docstring) rather than
-    left null.
+    left null, or for backfilling hits/penalties onto a season ingested
+    before Session 81 added them.
 
-    Each unique game_id only needs one PBP call (for team_scored_first) and
-    one right-rail call (for PP/PK) regardless of how many teams are stored
-    for that game — both are fetched once and applied to every team row.
-    Returns the number of team-game rows updated.
+    Each unique game_id only needs one PBP call (for team_scored_first +
+    penalty count) and one right-rail call (for PP/PK + Hits) regardless of
+    how many teams are stored for that game — both are fetched once and
+    applied to every team row. Returns the number of team-game rows updated.
     """
     # Paginated — a single .execute() silently caps at PostgREST's 1000-row
     # default and would miss rows past that (a full season's game_log is
@@ -639,7 +686,7 @@ def enrich_game_log(client, season: int, force_all: bool = False) -> int:
         while True:
             query = client.table("game_log").select("game_id,team,home_team").eq("season", season)
             if not force_all:
-                query = query.or_("team_scored_first.is.null,pp_goals.is.null")
+                query = query.or_("team_scored_first.is.null,pp_goals.is.null,hits.is.null")
             page = query.range(offset, offset + page_size - 1).execute().data or []
             target_rows.extend(page)
             if len(page) < page_size:
@@ -677,10 +724,27 @@ def enrich_game_log(client, season: int, force_all: bool = False) -> int:
             first_goal.get("details", {}).get("eventOwnerTeamId") if first_goal else None
         )
 
-        # ── PP/PK — official per-game box score (see fetch_pp_stats) ──
-        pp_stats = fetch_pp_stats(game_id)
+        # ── PP/PK + Hits — one right-rail fetch, two categories parsed
+        # from the same response (see parse_pp_stats/parse_team_hits) ──
+        right_rail = fetch_right_rail(game_id)
+        pp_stats = parse_pp_stats(right_rail)
+        hits_stats = parse_team_hits(right_rail)
         if pp_stats is None:
             print(f"  WARN: no PP/PK data available for game {game_id}")
+        if hits_stats is None:
+            print(f"  WARN: no team hits data available for game {game_id}")
+
+        # ── Penalties — count of typeDescKey=="penalty" PBP events by
+        # eventOwnerTeamId (the team that took the penalty), already
+        # fetched above for first-goal detection. Unlike pp_stats/
+        # hits_stats this never comes back None -- zero penalty events in
+        # a game's plays is a real, countable value, not missing data.
+        penalty_events = [p for p in plays if p.get("typeDescKey") == "penalty"]
+        penalties_by_team_id = defaultdict(int)
+        for p in penalty_events:
+            owner = p.get("details", {}).get("eventOwnerTeamId")
+            if owner is not None:
+                penalties_by_team_id[owner] += 1
 
         # ── Update each team row for this game ────────────────────
         for row in team_rows:
@@ -710,6 +774,10 @@ def enrich_game_log(client, season: int, force_all: bool = False) -> int:
                         "pk_opps": pk_opps_val,
                     }
                 )
+            if hits_stats:
+                update_data["hits"] = hits_stats["home"] if is_home else hits_stats["away"]
+            if team_id is not None:
+                update_data["penalties"] = penalties_by_team_id.get(team_id, 0)
             if scored_first is not None:
                 update_data["team_scored_first"] = scored_first
 
@@ -722,8 +790,72 @@ def enrich_game_log(client, season: int, force_all: bool = False) -> int:
         time.sleep(0.2)
 
     if updated:
-        print(f"  OK team_scored_first + PP/PK updated for {updated} team-game rows")
+        print(
+            f"  OK team_scored_first + PP/PK + Hits/Penalties updated for {updated} team-game rows"
+        )
     return updated
+
+
+def run_team_hits_penalties_rollup(client, season: int, game_type: int = 2) -> int:
+    """Sums game_log.hits/penalties per team into team_seasons.hits/
+    team_seasons.penalties -- the season-aggregate data the Shot Map
+    "All N" summary cards need. (The single-game Shot Map view doesn't
+    depend on this at all -- it already reads live right-rail data
+    directly for the selected game.)
+
+    Games with a null hits or penalties value (e.g. a right-rail fetch
+    failure for that one game) are simply skipped from that team's sum --
+    same graceful-degradation shape as the rest of this module. A team
+    missing data for a handful of games gets a slightly undercounted
+    season total rather than a blocked/null one; there's no per-team
+    signal here for "how many games are missing," so this is a known,
+    accepted tradeoff, not a guarantee of a fully-accurate total.
+
+    Paginated the same way as the rest of this module (PostgREST's
+    1000-row cap). Returns the number of team_seasons rows updated.
+    """
+    rows = []
+    offset = 0
+    page_size = 1000
+    while True:
+        page = (
+            client.table("game_log")
+            .select("team,hits,penalties")
+            .eq("season", season)
+            .eq("game_type", game_type)
+            .range(offset, offset + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    totals = defaultdict(lambda: {"hits": 0, "penalties": 0, "games": 0})
+    for r in rows:
+        t = totals[r["team"]]
+        if r.get("hits") is not None:
+            t["hits"] += r["hits"]
+        if r.get("penalties") is not None:
+            t["penalties"] += r["penalties"]
+        t["games"] += 1
+
+    updates = [
+        {
+            "team": team,
+            "season": season,
+            "game_type": game_type,
+            "hits": v["hits"],
+            "penalties": v["penalties"],
+        }
+        for team, v in totals.items()
+        if v["games"] > 0
+    ]
+    if updates:
+        upsert(client, "team_seasons", updates, "team,season,game_type")
+    return len(updates)
 
 
 if __name__ == "__main__":
