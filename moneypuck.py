@@ -139,6 +139,110 @@ def build_sorted_pool(players: list, fn) -> list:
     return sorted(vals)
 
 
+def resolve_scoping_team(team_field: str | None) -> str | None:
+    """A traded player's `team` field is comma-joined (e.g. "STL,DET") --
+    confirmed the NHL API's teamAbbrevs list is in chronological order by
+    checking 4 real 2025-26 in-season trades against player/{id}/landing's
+    currentTeamAbbrev; the LAST token matched all 4. Conference/division
+    scoping needs exactly one team per player -- their current team is the
+    only sensible choice for "who they play for now"."""
+    if not team_field:
+        return None
+    return team_field.split(",")[-1].strip() or None
+
+
+def load_team_scoping(client, season: int, game_type: int = 2) -> dict:
+    """team abbrev -> {"conference": ..., "division": ...}, sourced from
+    team_seasons.conference_abbrev/division_abbrev -- added Sessions 57-59
+    for the magic-number/playoff-race work and confirmed still populated
+    and directly reusable here, no new lookup data needed."""
+    rows = (
+        client.table("team_seasons")
+        .select("team,conference_abbrev,division_abbrev")
+        .eq("season", season)
+        .eq("game_type", game_type)
+        .execute()
+        .data
+    )
+    return {
+        r["team"]: {"conference": r.get("conference_abbrev"), "division": r.get("division_abbrev")}
+        for r in rows
+    }
+
+
+def group_by_scope(players: list, team_scoping: dict, scope: str) -> dict:
+    """scope value -> [MoneyPuck row, ...], for players whose resolved
+    current team maps to a known conference/division. Players whose team
+    doesn't resolve (no team_seasons data yet, e.g. before a season's games
+    exist -- see MoneyPuck's own 404-skip a few lines up) are silently
+    dropped from every scoped pool, same graceful-degradation shape as the
+    rest of this module; they still count in the league-wide pools above."""
+    groups: dict = {}
+    for p in players:
+        info = team_scoping.get(resolve_scoping_team(p.get("team")))
+        val = info.get(scope) if info else None
+        if val:
+            groups.setdefault(val, []).append(p)
+    return groups
+
+
+def build_scoped_pools(groups: dict, metric_fns: dict) -> dict:
+    """scope value -> {metric name -> sorted pool}, one build_sorted_pool
+    call per metric per scope value."""
+    return {
+        scope_val: {name: build_sorted_pool(rows, fn) for name, fn in metric_fns.items()}
+        for scope_val, rows in groups.items()
+    }
+
+
+# player_seasons columns backing the 11 percentile categories that have no
+# MoneyPuck equivalent -- these are plain NHL box-score totals/rates, not
+# per-60 advanced stats, so (unlike ev_off/pp/pk/etc. above) they're ranked
+# on their raw season value directly, with no rate normalization.
+NHL_BOX_STAT_COLUMNS = [
+    "games_played",
+    "plus_minus",
+    "sh_goals",
+    "gw_goals",
+    "shots",
+    "toi_per_game",
+    "faceoff_win_pct",
+    "hits",
+    "blocked_shots",
+    "takeaways",
+    "giveaways",
+]
+
+
+def load_player_box_stats(client, season: int, game_type: int = 2) -> dict:
+    """player_id -> NHL_BOX_STAT_COLUMNS dict, sourced from player_seasons
+    (written by nhl_stats.py, which runs before this stage -- see run.py's
+    ordering). MoneyPuck's CSV doesn't carry plus_minus, gw_goals, or NHL's
+    own faceoff_win_pct/toi_per_game at all, so these can't come from the
+    same `all_map` rows the other 10 percentile categories read from --
+    a second per-player map, same OFFSET-pagination shape as the rapm_map
+    load below (bounded by league roster size, ~800-900 players/season)."""
+    cols = "player_id," + ",".join(NHL_BOX_STAT_COLUMNS)
+    result = {}
+    offset = 0
+    while True:
+        rows = (
+            client.table("player_seasons")
+            .select(cols)
+            .eq("season", season)
+            .eq("game_type", game_type)
+            .range(offset, offset + 999)
+            .execute()
+            .data
+        )
+        if not rows:
+            break
+        for r in rows:
+            result[int(r["player_id"])] = r
+        offset += 1000
+    return result
+
+
 def fetch_team_games_csv(season: int) -> list[dict]:
     print("  Fetching MoneyPuck all-teams game-by-game CSV...")
     r = requests.get(MP_TEAM_GAMES_URL, headers=HEADERS, timeout=120)
@@ -825,32 +929,74 @@ def run(season: int = NHL_SEASON) -> list[str]:
         ev = ev_map.get(row["playerId"])
         return compute_on_ice_gf_pct(ev)
 
+    # ── NHL box-score stats (GP, +/-, SHG, GWG, Shots, TOI/G, FO%, Hits,
+    # Blocks, Takeaways, Giveaways) -- these live on player_seasons via
+    # nhl_stats.py, not on the MoneyPuck row, so each closure reads box_map
+    # (loaded below) instead of `row`. Ranked on the raw season value
+    # directly -- no per-60 normalization, unlike the metrics above.
+    print("  Loading NHL box-score stats from Supabase for 11 new percentile categories...")
+    box_map = load_player_box_stats(client, season)
+
+    def box_stat(name: str, invert: bool = False):
+        """invert=True for giveaways -- every other pct_* column in this
+        module follows the same "higher percentile = better" convention
+        (see pk_def's 1/xga60 and penalties60's negated PIM above); fewer
+        giveaways is the better outcome, so it's the one raw box stat here
+        that needs flipping to match."""
+
+        def fn(row):
+            b = box_map.get(int(row["playerId"]))
+            if not b or b.get(name) is None:
+                return None
+            v = n(b[name])
+            return -v if invert else v
+
+        return fn
+
+    box_fns = {stat: box_stat(stat, invert=(stat == "giveaways")) for stat in NHL_BOX_STAT_COLUMNS}
+
+    # All 21 percentile categories (10 MoneyPuck-derived + 11 NHL box-score)
+    # share one metric-name -> value-fn map, reused below for both the
+    # league-wide pools and the conference/division-scoped pools.
+    all_metric_fns = {
+        "ev_off": ev_off,
+        "ev_def": ev_def,
+        "pp": pp_off,
+        "pk": pk_def,
+        "finishing": finishing,
+        "goals": goals60,
+        "a1": a1_60,
+        "penalties": penalties60,
+        "competition": competition,
+        "teammates": teammates,
+        **box_fns,
+    }
+
     # ── Build sorted pools once ────────────────────────────────────
     print("  Building percentile pools...")
-    fwd_pools = {
-        "ev_off": build_sorted_pool(fwds, ev_off),
-        "ev_def": build_sorted_pool(fwds, ev_def),
-        "pp": build_sorted_pool(fwds, pp_off),
-        "pk": build_sorted_pool(fwds, pk_def),
-        "finishing": build_sorted_pool(fwds, finishing),
-        "goals": build_sorted_pool(fwds, goals60),
-        "a1": build_sorted_pool(fwds, a1_60),
-        "penalties": build_sorted_pool(fwds, penalties60),
-        "competition": build_sorted_pool(fwds, competition),
-        "teammates": build_sorted_pool(fwds, teammates),
-    }
-    def_pools = {
-        "ev_off": build_sorted_pool(defs, ev_off),
-        "ev_def": build_sorted_pool(defs, ev_def),
-        "pp": build_sorted_pool(defs, pp_off),
-        "pk": build_sorted_pool(defs, pk_def),
-        "finishing": build_sorted_pool(defs, finishing),
-        "goals": build_sorted_pool(defs, goals60),
-        "a1": build_sorted_pool(defs, a1_60),
-        "penalties": build_sorted_pool(defs, penalties60),
-        "competition": build_sorted_pool(defs, competition),
-        "teammates": build_sorted_pool(defs, teammates),
-    }
+    fwd_pools = {name: build_sorted_pool(fwds, fn) for name, fn in all_metric_fns.items()}
+    def_pools = {name: build_sorted_pool(defs, fn) for name, fn in all_metric_fns.items()}
+
+    # ── Conference/division-scoped pools ──────────────────────────────
+    # team_seasons.conference_abbrev/division_abbrev already exist (Sessions
+    # 57-59) -- reused directly, no new lookup data. Scoped pools are built
+    # from the same already-qualified fwds/defs lists, just re-grouped, so
+    # they inherit the same MIN_GP/icetime pool-membership gate as the
+    # league-wide pools above.
+    print("  Loading team conference/division data for scoped percentile pools...")
+    team_scoping = load_team_scoping(client, season)
+    fwd_conf_pools = build_scoped_pools(
+        group_by_scope(fwds, team_scoping, "conference"), all_metric_fns
+    )
+    fwd_div_pools = build_scoped_pools(
+        group_by_scope(fwds, team_scoping, "division"), all_metric_fns
+    )
+    def_conf_pools = build_scoped_pools(
+        group_by_scope(defs, team_scoping, "conference"), all_metric_fns
+    )
+    def_div_pools = build_scoped_pools(
+        group_by_scope(defs, team_scoping, "division"), all_metric_fns
+    )
 
     # ── Load RAPM values written by rapm.py ──────────────────────────
     # rapm.py runs before moneypuck.py in the pipeline so values are fresh.
@@ -987,6 +1133,34 @@ def run(season: int = NHL_SEASON) -> list[str]:
         )
         toi_ok = meets_toi_floor(is_fwd, row.get("icetime", 0))
 
+        box_vals = {stat: fn(row) for stat, fn in box_fns.items()}
+        metric_vals = {
+            "ev_off": ev_off_val,
+            "ev_def": ev_def_val,
+            "pp": pp_val,
+            "pk": pk_val,
+            "finishing": fin_val,
+            "goals": goals_val,
+            "a1": a1_val,
+            "penalties": pen_val,
+            "competition": comp_val,
+            "teammates": tm_val,
+            **box_vals,
+        }
+
+        # Conference/division scoping -- resolve once per player, reused
+        # for all 21 pct_*_conf/pct_*_div columns below. A player whose
+        # team doesn't resolve to a known conference/division (see
+        # group_by_scope's docstring) just gets None for every scoped
+        # percentile; league-wide pct_* above is unaffected.
+        scope_info = team_scoping.get(resolve_scoping_team(row.get("team")))
+        conf_pool_set = (fwd_conf_pools if is_fwd else def_conf_pools).get(
+            scope_info.get("conference") if scope_info else None, {}
+        )
+        div_pool_set = (fwd_div_pools if is_fwd else def_div_pools).get(
+            scope_info.get("division") if scope_info else None, {}
+        )
+
         team = row.get("team", "")
         updates.append(
             {
@@ -1040,6 +1214,34 @@ def run(season: int = NHL_SEASON) -> list[str]:
                 if toi_ok
                 else None,
                 "pct_teammates": percentile_rank(tm_val, pools["teammates"]) if toi_ok else None,
+                # 11 box-score categories with no MoneyPuck equivalent -- see
+                # box_stat()/box_fns above. Same toi_ok display gate as every
+                # other pct_* column; giveaways' pool/value are pre-negated
+                # by box_stat(invert=True) so 100 still means "best" here.
+                **{
+                    f"pct_{stat}": percentile_rank(box_vals[stat], pools[stat]) if toi_ok else None
+                    for stat in NHL_BOX_STAT_COLUMNS
+                },
+                # Conference/division-scoped percentiles -- all 21
+                # categories (10 MoneyPuck-derived + 11 box-score), scoped
+                # pools built above via group_by_scope/build_scoped_pools.
+                # Missing scope (unresolved team, or no team_seasons data
+                # yet for this season) -> conf_pool_set/div_pool_set is {},
+                # .get(name, []) falls back to an empty pool, and
+                # percentile_rank already returns None for an empty pool --
+                # no separate None-check needed here.
+                **{
+                    f"pct_{name}_conf": percentile_rank(val, conf_pool_set.get(name, []))
+                    if toi_ok
+                    else None
+                    for name, val in metric_vals.items()
+                },
+                **{
+                    f"pct_{name}_div": percentile_rank(val, div_pool_set.get(name, []))
+                    if toi_ok
+                    else None
+                    for name, val in metric_vals.items()
+                },
             }
         )
 
