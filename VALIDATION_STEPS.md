@@ -142,16 +142,26 @@ limit 5;
 
 ---
 
+## Isotonic calibration check (same cadence as the EH comparison)
+
+Per `ISOTONIC_RECALIBRATION_CADENCE.md`. This is a validated check, not an automatic refit — do this at each of the three EH-comparison dates below, not on a fixed calendar schedule otherwise.
+
+1. Pull accumulated real-season (predicted score, actual outcome) pairs since the last review.
+2. Evaluate the **currently deployed** `scorecard_calibration.json` curve's Brier score / log loss against this new real data — reuse `backtest_predictions.py`'s scoring functions (`brier`/`log_loss`/`calibration`), don't write new evaluation code.
+3. **No material degradation vs. its original holdout performance** → no change, note it and move on.
+4. **Real drift** → fit a candidate replacement using the same train/holdout discipline as the original fit (split the accumulated data, fit on one portion, validate on the other via `fit_scorecard_calibration.py`'s pattern), and only deploy it if it's a clear, validated improvement over both the old curve and the raw uncalibrated scorecard on the same held-out data.
+5. Do not refit on a thin early-season sample — high overfitting risk, the same failure mode the original train/holdout split was built to avoid.
+
 ## Validation schedule
 
 | Frequency | Action |
 |-----------|--------|
 | After every `rapm.py` run | `python run.py validate` (internal checks) |
-| End of October | First EH comparison of new season |
-| January | Mid-season EH comparison |
-| End of regular season | Full-season EH comparison (most important) |
+| End of October | First EH comparison of new season + isotonic calibration check |
+| January | Mid-season EH comparison + isotonic calibration check |
+| End of regular season | Full-season EH comparison (most important) + isotonic calibration check |
 | After any pipeline changes | Internal checks + EH comparison if available |
 
 ---
 
-*Last updated: May 2026*
+*Last updated: July 2026*
