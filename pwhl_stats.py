@@ -281,9 +281,33 @@ def _fetch_player_height_inches(player_id) -> int | None:
     return _parse_height_inches(info.get("height"))
 
 
+def _existing_heights(sb) -> dict[int, int]:
+    """player_id -> height_inches for every player who already has one on
+    file. A player's height is essentially static (unlike the rest of
+    fetch_roster()'s per-night fields -- team/bio changes on trades,
+    stats every game), so re-fetching it from HockeyTech's per-player
+    endpoint for all ~150-300 PWHL players every single night is pure
+    waste once it's been captured once. This lets the roster loop below
+    only pay the extra API call for players who don't have one yet
+    (new signings/draftees/expansion adds, or a previous fetch that
+    failed) rather than every player, every night. Well under
+    PostgREST's 1000-row default cap (see eyewall_postgrest_1000_row_cap
+    memory) for this table's size -- no pagination needed.
+    """
+    res = (
+        sb.table("pwhl_players")
+        .select("player_id,height_inches")
+        .not_.is_("height_inches", "null")
+        .execute()
+    )
+    return {row["player_id"]: row["height_inches"] for row in (res.data or [])}
+
+
 def fetch_roster(sb, season_id: str) -> None:
     """Fetch all team rosters and upsert to pwhl_players."""
     log.info("Fetching rosters...")
+
+    known_heights = _existing_heights(sb)
 
     for team_id, team_code in TEAM_ID_MAP.items():
         try:
@@ -323,8 +347,10 @@ def fetch_roster(sb, season_id: str) -> None:
                 # Goalies use 'catches' instead of 'shoots'
                 shoots = row.get("shoots") or row.get("catches") or ""
 
-                height_inches = _fetch_player_height_inches(pid)
-                time.sleep(0.15)
+                height_inches = known_heights.get(int(pid))
+                if height_inches is None:
+                    height_inches = _fetch_player_height_inches(pid)
+                    time.sleep(0.15)
 
                 players_to_upsert.append(
                     {
