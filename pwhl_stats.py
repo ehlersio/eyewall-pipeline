@@ -243,14 +243,14 @@ _HEIGHT_RE = re.compile(r"(\d+)'\s*(\d+)")
 
 
 def _parse_height_inches(height_str) -> int | None:
-    """Parse HockeyTech's roster 'height' field (e.g. "5'11") into total
-    inches, matching the stored shape of NHL's heightInInches (nhl_stats.py
-    stores height_cm instead, but eyewall-poller's bio response converts to
-    inches for PlayerPopup's fmtHeight — this stores inches directly since
+    """Parse HockeyTech's 'height' field (e.g. "5'11") into total inches,
+    matching the stored shape of NHL's heightInInches (nhl_stats.py stores
+    height_cm instead, but eyewall-poller's bio response converts to inches
+    for PlayerPopup's fmtHeight — this stores inches directly since
     HockeyTech already hands us feet/inches, not centimeters).
-    'weight' is deliberately not ingested here -- HockeyTech's PWHL roster
-    feed always returns "0" for it, not real data (confirmed via
-    hockeytech_mapping_results/raw/modulekit_roster_feed.json).
+    'weight' is deliberately not ingested here -- HockeyTech has no real
+    weight data for PWHL, confirmed on both the bulk roster view and the
+    per-player view below (always "0").
     """
     if not height_str:
         return None
@@ -261,9 +261,53 @@ def _parse_height_inches(height_str) -> int | None:
     return feet * 12 + inches
 
 
+def _fetch_player_height_inches(player_id) -> int | None:
+    """Height is NOT on the bulk `view=roster` response fetch_roster()
+    already fetches per team -- confirmed via a live pull (Session 85,
+    correcting an earlier assumption based on a `feed=modulekit` sample,
+    which CLAUDE.md already documents as invalid/fake). Only HockeyTech's
+    per-player `view=player` endpoint carries it (info.height, e.g.
+    "5'10"), so this is a second, per-player call -- one extra HockeyTech
+    request per roster player, not per team. A single player's fetch
+    failing shouldn't abort the whole team's roster upsert, so this
+    swallows FetchError itself rather than propagating.
+    """
+    try:
+        data = ht_get({"view": "player", "player_id": player_id})
+    except FetchError as e:
+        log.warning(f"  No height data for player {player_id}: {e}")
+        return None
+    info = data.get("info", {}) if isinstance(data, dict) else {}
+    return _parse_height_inches(info.get("height"))
+
+
+def _existing_heights(sb) -> dict[int, int]:
+    """player_id -> height_inches for every player who already has one on
+    file. A player's height is essentially static (unlike the rest of
+    fetch_roster()'s per-night fields -- team/bio changes on trades,
+    stats every game), so re-fetching it from HockeyTech's per-player
+    endpoint for all ~150-300 PWHL players every single night is pure
+    waste once it's been captured once. This lets the roster loop below
+    only pay the extra API call for players who don't have one yet
+    (new signings/draftees/expansion adds, or a previous fetch that
+    failed) rather than every player, every night. Well under
+    PostgREST's 1000-row default cap (see eyewall_postgrest_1000_row_cap
+    memory) for this table's size -- no pagination needed.
+    """
+    res = (
+        sb.table("pwhl_players")
+        .select("player_id,height_inches")
+        .not_.is_("height_inches", "null")
+        .execute()
+    )
+    return {row["player_id"]: row["height_inches"] for row in (res.data or [])}
+
+
 def fetch_roster(sb, season_id: str) -> None:
     """Fetch all team rosters and upsert to pwhl_players."""
     log.info("Fetching rosters...")
+
+    known_heights = _existing_heights(sb)
 
     for team_id, team_code in TEAM_ID_MAP.items():
         try:
@@ -303,6 +347,11 @@ def fetch_roster(sb, season_id: str) -> None:
                 # Goalies use 'catches' instead of 'shoots'
                 shoots = row.get("shoots") or row.get("catches") or ""
 
+                height_inches = known_heights.get(int(pid))
+                if height_inches is None:
+                    height_inches = _fetch_player_height_inches(pid)
+                    time.sleep(0.15)
+
                 players_to_upsert.append(
                     {
                         "player_id": int(pid),
@@ -310,7 +359,7 @@ def fetch_roster(sb, season_id: str) -> None:
                         "last_name": last_name,
                         "position": position,
                         "shoots": shoots,
-                        "height_inches": _parse_height_inches(row.get("height")),
+                        "height_inches": height_inches,
                         "birth_date": row.get("birthdate") or None,
                         "birth_city": row.get("hometown", ""),
                         "jersey_number": int(row["tp_jersey_number"])
