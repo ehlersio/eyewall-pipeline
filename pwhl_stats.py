@@ -243,14 +243,14 @@ _HEIGHT_RE = re.compile(r"(\d+)'\s*(\d+)")
 
 
 def _parse_height_inches(height_str) -> int | None:
-    """Parse HockeyTech's roster 'height' field (e.g. "5'11") into total
-    inches, matching the stored shape of NHL's heightInInches (nhl_stats.py
-    stores height_cm instead, but eyewall-poller's bio response converts to
-    inches for PlayerPopup's fmtHeight — this stores inches directly since
+    """Parse HockeyTech's 'height' field (e.g. "5'11") into total inches,
+    matching the stored shape of NHL's heightInInches (nhl_stats.py stores
+    height_cm instead, but eyewall-poller's bio response converts to inches
+    for PlayerPopup's fmtHeight — this stores inches directly since
     HockeyTech already hands us feet/inches, not centimeters).
-    'weight' is deliberately not ingested here -- HockeyTech's PWHL roster
-    feed always returns "0" for it, not real data (confirmed via
-    hockeytech_mapping_results/raw/modulekit_roster_feed.json).
+    'weight' is deliberately not ingested here -- HockeyTech has no real
+    weight data for PWHL, confirmed on both the bulk roster view and the
+    per-player view below (always "0").
     """
     if not height_str:
         return None
@@ -259,6 +259,26 @@ def _parse_height_inches(height_str) -> int | None:
         return None
     feet, inches = int(m.group(1)), int(m.group(2))
     return feet * 12 + inches
+
+
+def _fetch_player_height_inches(player_id) -> int | None:
+    """Height is NOT on the bulk `view=roster` response fetch_roster()
+    already fetches per team -- confirmed via a live pull (Session 85,
+    correcting an earlier assumption based on a `feed=modulekit` sample,
+    which CLAUDE.md already documents as invalid/fake). Only HockeyTech's
+    per-player `view=player` endpoint carries it (info.height, e.g.
+    "5'10"), so this is a second, per-player call -- one extra HockeyTech
+    request per roster player, not per team. A single player's fetch
+    failing shouldn't abort the whole team's roster upsert, so this
+    swallows FetchError itself rather than propagating.
+    """
+    try:
+        data = ht_get({"view": "player", "player_id": player_id})
+    except FetchError as e:
+        log.warning(f"  No height data for player {player_id}: {e}")
+        return None
+    info = data.get("info", {}) if isinstance(data, dict) else {}
+    return _parse_height_inches(info.get("height"))
 
 
 def fetch_roster(sb, season_id: str) -> None:
@@ -303,6 +323,9 @@ def fetch_roster(sb, season_id: str) -> None:
                 # Goalies use 'catches' instead of 'shoots'
                 shoots = row.get("shoots") or row.get("catches") or ""
 
+                height_inches = _fetch_player_height_inches(pid)
+                time.sleep(0.15)
+
                 players_to_upsert.append(
                     {
                         "player_id": int(pid),
@@ -310,7 +333,7 @@ def fetch_roster(sb, season_id: str) -> None:
                         "last_name": last_name,
                         "position": position,
                         "shoots": shoots,
-                        "height_inches": _parse_height_inches(row.get("height")),
+                        "height_inches": height_inches,
                         "birth_date": row.get("birthdate") or None,
                         "birth_city": row.get("hometown", ""),
                         "jersey_number": int(row["tp_jersey_number"])
