@@ -58,6 +58,7 @@ Response structure note:
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import UTC, datetime
@@ -238,6 +239,28 @@ def upsert_chunk(sb, table: str, rows: list[dict], conflict: str) -> int:
 # ── Roster + Players ──────────────────────────────────────────────────────────
 
 
+_HEIGHT_RE = re.compile(r"(\d+)'\s*(\d+)")
+
+
+def _parse_height_inches(height_str) -> int | None:
+    """Parse HockeyTech's roster 'height' field (e.g. "5'11") into total
+    inches, matching the stored shape of NHL's heightInInches (nhl_stats.py
+    stores height_cm instead, but eyewall-poller's bio response converts to
+    inches for PlayerPopup's fmtHeight — this stores inches directly since
+    HockeyTech already hands us feet/inches, not centimeters).
+    'weight' is deliberately not ingested here -- HockeyTech's PWHL roster
+    feed always returns "0" for it, not real data (confirmed via
+    hockeytech_mapping_results/raw/modulekit_roster_feed.json).
+    """
+    if not height_str:
+        return None
+    m = _HEIGHT_RE.match(str(height_str))
+    if not m:
+        return None
+    feet, inches = int(m.group(1)), int(m.group(2))
+    return feet * 12 + inches
+
+
 def fetch_roster(sb, season_id: str) -> None:
     """Fetch all team rosters and upsert to pwhl_players."""
     log.info("Fetching rosters...")
@@ -287,6 +310,7 @@ def fetch_roster(sb, season_id: str) -> None:
                         "last_name": last_name,
                         "position": position,
                         "shoots": shoots,
+                        "height_inches": _parse_height_inches(row.get("height")),
                         "birth_date": row.get("birthdate") or None,
                         "birth_city": row.get("hometown", ""),
                         "jersey_number": int(row["tp_jersey_number"])
