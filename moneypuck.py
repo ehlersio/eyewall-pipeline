@@ -431,25 +431,16 @@ def run_goalie_qs(client, season: int):
         if is_qs:
             goalie_totals[goalie_id]["qs"] += 1
 
-    # Look up teams for CAR goalies so the conflict key matches nhl_stats.py
-    # (goalie_seasons uses player_id,season,team,game_type as conflict key).
-    # Deliberately not swallowed: `team` is part of the upsert's on_conflict
-    # key below, so a failed/partial lookup here doesn't just mean a missing
-    # cosmetic field -- it risks upserting under the wrong key and creating
-    # a duplicate row instead of updating the existing one.
-    team_map = {}
-    team_rows = (
-        client.table("goalie_seasons")
-        .select("player_id,team")
-        .eq("season", season)
-        .eq("game_type", 2)
-        .execute()
-        .data
-        or []
-    )
-    for r in team_rows:
-        team_map[r["player_id"]] = r["team"]
-
+    # Conflict key deliberately excludes `team` (Session 81 fix). It used
+    # to be part of this key, which meant this function had to look up
+    # nhl_stats.py's own team string first just to avoid a mismatch --
+    # MoneyPuck-sourced writers elsewhere in this module (run_goalies,
+    # the main skater percentile block) didn't do that lookup and forked
+    # every traded player into two rows as a result (338 found across
+    # player_seasons, 2 across goalie_seasons, merged in production before
+    # this fix landed). Dropping `team` from the key removes the need for
+    # the lookup entirely -- and from the payload, since `team` is
+    # nhl_stats.py's column to own, not this module's.
     upserts = []
     for goalie_id, g in goalie_totals.items():
         if g["starts"] == 0:
@@ -458,7 +449,6 @@ def run_goalie_qs(client, season: int):
             {
                 "player_id": int(goalie_id),
                 "season": season,
-                "team": team_map.get(int(goalie_id), ""),
                 "game_type": 2,
                 "qs": g["qs"],
                 "qs_pct": round(g["qs"] / g["starts"], 4),
@@ -468,7 +458,7 @@ def run_goalie_qs(client, season: int):
     print(f"  Upserting QS% for {len(upserts)} goalies...")
     for i in range(0, len(upserts), 500):
         client.table("goalie_seasons").upsert(
-            upserts[i : i + 500], on_conflict="player_id,season,team,game_type"
+            upserts[i : i + 500], on_conflict="player_id,season,game_type"
         ).execute()
     print(f"  OK goalie_seasons: QS% updated for {len(upserts)} goalies")
 
@@ -479,8 +469,8 @@ def run_goalies(client, season: int = NHL_SEASON):
     Above Expected, from MoneyPuck's flurry-adjusted xGoals model) -- distinct
     from run_goalie_qs() above, which derives Quality Start % from our own
     shot_events data. Both write to goalie_seasons on the same conflict key
-    (player_id,season,team,game_type) so they merge without clobbering each
-    other's columns.
+    (player_id,season,game_type -- team excluded, Session 81) so they merge
+    without clobbering each other's columns.
 
     Originally implemented in commit c9f7c054 ("goalie stats update"), this
     ran once successfully, then was accidentally deleted two days later in
@@ -586,7 +576,6 @@ def run_goalies(client, season: int = NHL_SEASON):
             {
                 "player_id": int(pid),
                 "season": season,
-                "team": row.get("team", ""),
                 "game_type": 2,
                 # Analytics
                 "gsax": round(gsax_val, 2),
@@ -613,7 +602,7 @@ def run_goalies(client, season: int = NHL_SEASON):
     for i in range(0, len(updates), 500):
         batch = updates[i : i + 500]
         client.table("goalie_seasons").upsert(
-            batch, on_conflict="player_id,season,team,game_type"
+            batch, on_conflict="player_id,season,game_type"
         ).execute()
     print(f"  OK goalie_seasons: {len(updates)} GSAX/save% rows upserted")
 
@@ -1161,12 +1150,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
             scope_info.get("division") if scope_info else None, {}
         )
 
-        team = row.get("team", "")
         updates.append(
             {
                 "player_id": int(pid),
                 "season": season,
-                "team": team,
                 "game_type": 2,  # MoneyPuck = regular season
                 # Analytics
                 "war": war_val,
@@ -1246,11 +1233,16 @@ def run(season: int = NHL_SEASON) -> list[str]:
         )
 
     print(f"  Upserting {len(updates)} player analytics records...")
-    # Use merge upsert — only update analytics columns, don't overwrite NHL stats
+    # Use merge upsert — only update analytics columns, don't overwrite NHL
+    # stats. Conflict key deliberately excludes `team` (Session 81 fix) --
+    # see NHL_BOX_STAT_COLUMNS' sibling note in nhl_stats.py for why: this
+    # payload never included `team` correctly matching nhl_stats.py's own
+    # (possibly comma-joined trade-history) value, so upserting on a key
+    # that included it silently forked every traded player into two rows.
     for i in range(0, len(updates), 500):
         batch = updates[i : i + 500]
         client.table("player_seasons").upsert(
-            batch, on_conflict="player_id,season,team,game_type"
+            batch, on_conflict="player_id,season,game_type"
         ).execute()
     print(f"  OK player_seasons: {len(updates)} analytics rows upserted")
 

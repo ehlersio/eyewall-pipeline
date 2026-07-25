@@ -424,7 +424,17 @@ def run(season: int = NHL_SEASON):
             if missing_players:
                 upsert(client, "players", missing_players, "id")
 
-        upsert(client, "player_seasons", rows, "player_id,season,team,game_type")
+        # Conflict key deliberately excludes `team` (Session 81 fix) -- it
+        # used to be part of this key, but `team` here (a possibly
+        # comma-joined trade-history string, e.g. "VAN,SJS") doesn't
+        # reliably match what moneypuck.py's own upsert writes for the
+        # same player (MoneyPuck's CSV only ever has their current team).
+        # That mismatch silently forked a traded player into two rows --
+        # one with real box-score stats, one with WAR/percentiles -- 338
+        # such pairs found and merged in production before this fix
+        # landed. See docs/session81_new_columns.sql for the matching
+        # unique-constraint migration this requires.
+        upsert(client, "player_seasons", rows, "player_id,season,game_type")
     print("\n[3/5] Fetching goalie stats...")
     for game_type in [2, 3]:
         label = "Regular Season" if game_type == 2 else "Playoffs"
@@ -452,7 +462,10 @@ def run(season: int = NHL_SEASON):
                     "toi": int(g.get("timeOnIce", 0)),
                 }
             )
-        upsert(client, "goalie_seasons", rows, "player_id,season,team,game_type")
+        # Same team-mismatch fork as player_seasons above (Session 81) --
+        # goalies get traded too, just less often (2 duplicate pairs found
+        # vs. 338 for skaters).
+        upsert(client, "goalie_seasons", rows, "player_id,season,game_type")
 
     # ── 4. Team stats ─────────────────────────────────────────────
     print("\n[4/5] Fetching team stats...")
