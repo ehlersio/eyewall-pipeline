@@ -306,7 +306,7 @@ def run_team_xgf_rollup(client, season: int):
     Writes only the xgf_pct column — other team_seasons columns are
     owned by nhl_stats.py and are not touched here.
     """
-    print("\n--- Team XGF% rollup (game_xg → team_seasons) ---")
+    print("\n--- Team XGF% rollup (game_xg -> team_seasons) ---")
     # Supabase project cap is 999 rows — paginate with .range()
     # OFFSET pagination accepted as-is (Session 47 audit #10 pass):
     # ~2,624 rows/season (32 teams x 82 games), well under the cap --
