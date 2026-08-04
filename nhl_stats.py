@@ -485,7 +485,17 @@ def run(season: int = NHL_SEASON):
     print(f"  Standings data: {len(standings_map)} teams")
 
     # Build teamId → abbreviation map from standings endpoint
-    # NHL team IDs are stable — hardcode the mapping
+    # NHL team IDs are stable, with one confirmed exception: Utah's
+    # franchise rebrand (Utah Hockey Club -> Utah Mammoth) got a new
+    # teamId in this specific endpoint (team/summary) starting 2025-26 --
+    # 59 ("Utah Hockey Club") still resolves correctly for 2024-25 data,
+    # but the endpoint returns 68 ("Utah Mammoth") for 2025-26 onward. The
+    # unmapped id silently dropped Utah from summary_by_abbr below (2026-08
+    # investigation: team_seasons' 2025-26 UTA row had goals_for/pp_pct/
+    # pk_pct/shots_for_pg/shots_ag_pg/faceoff_win_pct all null despite a
+    # complete 82-game season -- see backfill_uta_2025_team_stats.py).
+    # Keep both ids mapped rather than swapping, since 59 is still correct
+    # for any future re-run against 2024-25 data.
     TEAM_ID_TO_ABBR = {
         1: "NJD",
         2: "NYI",
@@ -519,7 +529,8 @@ def run(season: int = NHL_SEASON):
         53: "ARI",
         54: "VGK",
         55: "SEA",
-        59: "UTA",
+        59: "UTA",  # Utah Hockey Club (2024-25)
+        68: "UTA",  # Utah Mammoth (2025-26 rebrand, new id in this endpoint)
     }
 
     for game_type in [2, 3]:
