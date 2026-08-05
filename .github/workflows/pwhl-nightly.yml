@@ -184,6 +184,27 @@ jobs:
         # does NOT depend on pwhl_pbp_events.py, v1 doesn't read that table.
         # Placed last regardless since it doesn't hurt to wait.
 
+      - name: Generate daily PWHL trivia (easy + medium)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+        run: python trivia_questions.py --sport pwhl
+        # First AI-generation step ever added to this workflow (NHL's
+        # equivalent already runs a much larger nightly AI batch via
+        # run.py's run_ai_pipeline() -- see Phase 2 scoping notes). Placed
+        # last since it only depends on pwhl_player_seasons, populated by
+        # the "Run pwhl_stats.py" step near the top of this file -- doesn't
+        # hurt to wait, same reasoning as pwhl_milestones.py's placement
+        # above. NHL_SEASON is set here even though this step only
+        # generates PWHL rows -- trivia_questions.py imports db.py at
+        # module load regardless of --sport, and db.py's live NHL season
+        # resolution has an env-var fallback path that needs this set if
+        # the live Worker call is ever unreachable during this job.
+
       - name: Notify on failure
         if: failure()
         run: echo "PWHL pipeline failed — check logs above"

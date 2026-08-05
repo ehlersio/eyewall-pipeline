@@ -120,6 +120,10 @@ def run_ai_pipeline():
             "ai_line_chemistry — missing line-chemistry blurbs",
             ["ai_line_chemistry.py", "--missing"],
         ),
+        (
+            "trivia_questions — daily NHL trivia (easy + medium)",
+            ["trivia_questions.py", "--sport", "nhl"],
+        ),
     ):
         if run_stage(label, run_subprocess, label, cmd) is STAGE_FAILED:
             # Runs as a subprocess -- the exception seen here is always
