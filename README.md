@@ -1,6 +1,6 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL news, and milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds).
+Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL news, milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds), and daily trivia questions (easy/medium tiers, guardrailed AI generation — see [Daily Trivia](#daily-trivia)).
 
 ## Setup
 
@@ -59,6 +59,10 @@ python ai_results_vs_process.py --team CAR --dry-run  # Preview prompts for one 
 python ai_line_chemistry.py --missing            # Missing line-chemistry blurbs (all 32 teams)
 python ai_line_chemistry.py --team CAR --dry-run # Preview prompts for one team
 python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
+python trivia_questions.py                       # Today, both tiers, both sports (manual/dry-run convenience)
+python trivia_questions.py --sport nhl            # NHL only (what nightly.yml actually calls)
+python trivia_questions.py --sport pwhl           # PWHL only (what pwhl-nightly.yml actually calls)
+python trivia_questions.py --tier easy --dry-run --date 2026-08-10  # Preview without writing
 
 # PWHL — run individually (no orchestrator yet)
 python pwhl_stats.py 8         # 2025-26 regular season stats
@@ -187,6 +191,30 @@ Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (S
 `get_line_chemistry_context()`'s league-wide average is `None` until `line_combinations` has rows from at least 2 teams for that unit type — a "league average" of one team isn't a real comparison, which matters early in the 32-team backfill.
 
 **`build_line_chemistry_prompt()` precomputes the unit's xGF% rank** among its same-team, same-type siblings rather than handing the model a raw list and trusting it to infer relative position — an 8B model reliably got this wrong in testing (claimed a unit with the *lowest* xGF% of its group "ranks second, just behind the top line"). Doing the comparison in Python and stating the rank as a given fact in the prompt, with an explicit instruction not to recompute it, eliminated the hallucination in spot-checks across CAR's 7 units. The prompt also deliberately avoids inviting claims about zone starts, quality of competition, or matchups — no per-line data source for any of those exists yet.
+
+---
+
+## Daily Trivia
+
+**`trivia_questions.py`** (Session 92) generates daily trivia questions for the frontend's Trivia tab — **easy** (league-wide) and **medium** (per-team, all 32 NHL + 12 PWHL teams) tiers. **Hard** tier is hand-curated directly in the Supabase SQL editor (no admin UI in v1) — this module never writes `tier='hard'` rows.
+
+**Guardrail (non-negotiable — mirrors `eyewall-poller`'s H2H narrative pattern, `shared.js`'s `buildHeadToHeadPayload` + `/team-seasons/head-to-head/narrative`):** the correct answer and all three distractors are real values queried from `player_seasons`/`pwhl_player_seasons` and shuffled in Python **before** the LLM is ever called. The model is never asked to supply, verify, or rank a fact — its only job is to phrase one question sentence around a stat category name. It never sees which of the four names is correct, so it cannot get that part wrong.
+
+**Two real bugs found generating live, both about the question *sentence*, not the answer (options/`correct_index` were never touched):**
+1. A bare team abbreviation (`"SEA"`) got read by the model as "Southeast Asia."
+2. Even given the *correct* full team name ("Seattle Torrent"), the model substituted the wrong-but-more-famous NHL team sharing that city ("Seattle Kraken") instead.
+
+Fixed by removing team names from the prompt entirely for medium tier — the frontend conveys team identity via a logo (the row's own real `team` column), never via anything the model says. Full detail in the module's own docstring.
+
+**Real-value sourcing:** one stat category (`goals`/`assists`/`points`/`pp_goals`) applies globally per day, rotating by `question_date.toordinal() % 4` — simpler than per-scope rotation and thematically fine ("today everyone's answering a goals question, at different scopes"). A scope with fewer than 4 qualified players, or where the top 3 distractors can't be made value-distinct from the leader, fails closed (skipped, not guessed) rather than shipping an ambiguous question.
+
+```bash
+python trivia_questions.py --sport nhl    # what nightly.yml calls — NHL only
+python trivia_questions.py --sport pwhl   # what pwhl-nightly.yml calls — PWHL only, first-ever AI step in that workflow
+python trivia_questions.py --dry-run      # preview without writing, both sports
+```
+
+Writes to `trivia_questions` (public-read, no owner — same RLS posture as `player_narratives`) via `on_conflict=question_date,tier,sport,team`. Schema + RLS: `docs/session92_trivia_tables.sql`.
 
 ---
 
@@ -475,14 +503,22 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; WAR blocked until Oct 2026) |
 | `pwhl_skipped_games` | Games skipped per PWHL pipeline module |
 
+### Shared Tables (both leagues, one table)
+
+| Table | Description |
+|-------|-------------|
+| `trivia_questions` | (Session 92) Daily trivia — one row per `(question_date, tier, sport, team)`, `team` defaults to `'ALL'` for easy/hard so the unique constraint enforces one question per exact scope per day. Public-read, no owner (same RLS posture as `player_narratives`) — see [Daily Trivia](#daily-trivia). `tier='easy'`/`'medium'` written nightly by `trivia_questions.py`; `tier='hard'` is hand-inserted directly in the Supabase SQL editor. |
+| `trivia_answers` | (Session 92) Signed-in users' trivia answers — `auth.uid()`-scoped RLS, same posture as `user_preferences` below. **Not written by this pipeline** — the frontend writes directly via the Supabase JS client (the one deliberate exception to "the frontend never talks to Supabase directly," same as `user_preferences`). Documented here because its DDL lives in this repo's `docs/` folder alongside every other schema reference. |
+| `user_preferences` | (Session 90-91) One row per signed-in user — `favorite_team`/`favorite_sport`, synced from the frontend's Settings. **Not written by this pipeline** — same Supabase-Auth-direct exception as `trivia_answers` above. DDL: `docs/session90_user_preferences_table.sql` + `docs/session91_favorite_sport_column.sql`. |
+
 ---
 
 ## GitHub Actions Workflows
 
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
-| `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) |
-| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news — 20 min offset to avoid Supabase contention |
+| `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
+| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news, daily trivia — 20 min offset to avoid Supabase contention. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `sbnation-ingest.yml` | Every 4 hours | SBNation atom feeds → Worker (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence, since blog posts don't need 30-min freshness) |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
