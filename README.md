@@ -575,3 +575,14 @@ True RAPM via ridge regression (alpha=2500):
 - **Cache-busting order matters (learned 2026-07):** busting the Worker's KV cache *before* confirming the underlying data fix has actually landed just repopulates the same stale/empty entry on the next request. Always confirm the data is correct first (direct Supabase query, or hit the Worker endpoint with a fresh/never-cached key), then bust. This bit us twice during the expansion-team rollout — once for the season-resolution fix, once for the roster backfill.
 - **HockeyTech `bootstrap` feed type:** it's `feed=statviewfeed`, not `feed=modulekit` — the latter returns a 200 OK with no real payload (`{"SiteKit":{"Undefined":"Undefined Tab bootstrap"}}`), which silently masqueraded as a fallback-triggering failure for a while before being caught. If a URL for this endpoint looks like it's built from a written description rather than a captured real request, verify it against actual DevTools traffic before trusting it.
 - **One-off scripts in this repo:** `seed_expansion_teams.py` and `diagnose_roster_fetch.py` were one-time tools for the 2026-07 expansion backfill — safe to delete once no longer needed, not part of the regular pipeline. `test_season_lookup.py` is a real, permanent pytest suite — keep it. `backfill_pp_stats.py` (thin driver around `nhl_stats.enrich_game_log(..., force_all=True)`, kept as the reusable pattern for re-running the PP/PK enrichment against an arbitrary past season) and `diagnose_narrative_impact.py`/`regenerate_affected_narratives.py` (one-time tools for the 2026-07 PP-goals-bug narrative regeneration — the latter reads `narrative_impact_result.json`, a scratch data file from the former, not checked in) were built for that same session — safe to delete once no longer needed.
+
+---
+
+## Disclaimer
+
+EyeWall Analytics is an independent, fan-built analytics project and is not
+affiliated with, endorsed by, or sponsored by the National Hockey League
+(NHL), the Professional Women's Hockey League (PWHL), or any of their
+member teams. All team names, logos, and related marks are the property of
+their respective owners and are used here for informational and editorial
+purposes only.
