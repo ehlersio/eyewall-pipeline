@@ -4,6 +4,9 @@ __pycache__/
 gcp_*.json
 .venv/
 
+# Claude Code agent worktrees -- local scratch copies, not source
+.claude/worktrees/
+
 # backtest run output -- regeneratable from backtest_predictions.py /
 # backtest_preseason.py in ~18 min / ~8 min; not source, not committed
 backtest_results.json
