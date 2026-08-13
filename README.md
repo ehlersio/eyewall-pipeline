@@ -172,6 +172,15 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 ### `tankathon_ingest.py`
 Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
+### `milestones.py`
+Nightly (yesterday's completed games only). Detects hat tricks, natural hat tricks (3 *consecutive* goals by one skater, no other scorer of either team between them), shorthanded goals (from real `situation_code`, shootout-period goals excluded), shutouts (goalie played the whole game, 0 goals against), and threshold crossings — season goals (50), season points (100), career points (500/1000/1500, via a live NHL `/player/{id}/landing` call, only for players who crossed a season threshold tonight), career wins (200/300/400, goalie must have earned a credited win tonight). Writes into the shared `milestones` table (see [Shared Tables](#shared-tables-both-leagues-one-table)) with `is_pwhl=false`. Mirrored by PWHL's `pwhl_milestones.py` below — every `milestone_type` string is intentionally identical between the two pipelines except the numeric thresholds themselves, which are tuned per league (see that module's docstring for why PWHL's are much lower).
+
+```bash
+python milestones.py                    # yesterday's games
+python milestones.py --date 2026-06-15  # specific date
+python milestones.py --since 2026-06-01 # date range through yesterday
+```
+
 ### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_persona.py`, `ai_context.py`)
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
@@ -394,7 +403,21 @@ python pwhl_news.py    # Fetch and POST to Worker
 
 **Sources:** Women's Hockey Life (`womenshockeylife.com/feed`) and OurSports Central (`oursportscentral.com/feeds/l277.xml`) — added after TSN (404) and The Score (0 items) were removed. WHL requires PWHL keyword filtering; OSC is PWHL-only press releases (no filter needed). Result: 1 → 22 articles per run.
 
-**Worker endpoint:** `POST /pwhl/news/ingest` — merges new articles with existing cached articles, deduplicates by ID, keeps top 60, stores in `pwhl:news` KV with 30-min TTL.
+**Worker endpoint:** `POST /pwhl/news/ingest` — merges new articles with existing cached articles, deduplicates by ID, keeps top 60, stores in `pwhl:news` KV with a 25hr TTL (fixed from 30min during the news-ingestion investigation — the short TTL meant `pwhl:news` sat empty most of the day between this script's own infrequent runs).
+
+### `pwhl_milestones.py`
+Mirrors `milestones.py` (NHL) in structure — see that module's entry above for the shared detection categories. Same shared `milestones` table, `is_pwhl=true`. Key differences from the NHL version:
+- Thresholds are tuned to real PWHL scoring volume (30 GP/season, not NHL's 82) rather than scaled proportionally — season goals 15/20, season points 20/30, career points 50/100, career wins 25/50 (the last one flagged in the code as an unverified estimate).
+- Career point/win totals need no external API call — the PWHL launched Jan 2024, so summing every historical `season_type='regular'` row already covers full career history.
+- Shorthanded-goal detection uses HockeyTech's ground-truth `is_short_handed` flag where available (merged from `gameSummary`), falling back to a penalty-window heuristic for older/un-merged rows.
+- `milestone_type` values are identical to `milestones.py`'s across every category, including `"sh_goal"` — this diverged as `"shorthanded_goal"` for a period (until 2026-08-13), which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal (both keyed only on the literal string `"sh_goal"`). If you ever add a new milestone type to either pipeline, keep the string identical on both sides unless there's a real reason not to.
+
+```bash
+python pwhl_milestones.py                    # yesterday's games
+python pwhl_milestones.py --date 2026-03-15   # specific date
+python pwhl_milestones.py --since 2026-01-01  # date range through yesterday
+python pwhl_milestones.py --game 261          # single game_id (debugging/spot-checks)
+```
 
 ---
 
@@ -571,7 +594,7 @@ True RAPM via ridge regression (alpha=2500):
 - **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Re-confirmed live (Session: news ingestion investigation) with a real GH Actions runner — still a 403 bot-block page. The per-team `TEAM_NEWS_SOURCES` reddit-* entries and the now-permanently-no-op `/reddit/ingest` route (both in `eyewall-poller`) were removed in the same session; 25 teams had reddit as their *only* team-specific source, and 21 of those 25 got a real replacement blog instead (see `sbnation-ingest.yml`'s comment for the list). MIN/STL/SEA/UTA still have no team-specific blog source at all (28 of 32 teams now do). Revisit Reddit only if a workaround surfaces; not planned for October 2026.
 - **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
 - **HockeyTech boolean fields:** gameSummary's `properties` booleans arrive as strings (`"true"`/`"false"`), not JSON booleans — confirmed Session 34 via `pwhl_shot_events.py`'s gameSummary merge (a naive `bool(val)` marked every goal `true` for every flag). `gameCenterPlayByPlay`'s `isPowerPlay`/`isBench` on penalty events appear to be real JSON booleans by contrast (real `False` values already observed in production, pre-Session-34). Check any new HockeyTech boolean field against real data before trusting a bare `bool()` call on it.
-- **`pwhl_milestones.py` undocumented:** This README has no section for the milestones pipeline (NHL `milestones.py` or PWHL `pwhl_milestones.py`) — pre-existing gap, not from Session 34. Worth a dedicated write-up at some point.
+- ~~`pwhl_milestones.py` undocumented~~ — resolved 2026-08-13: both `milestones.py` (NHL) and `pwhl_milestones.py` (PWHL) now have their own README sections. Same session found and fixed a real bug this gap likely helped hide: PWHL wrote shorthanded goals as `milestone_type: "shorthanded_goal"` while NHL wrote `"sh_goal"` — the one unintentional divergence out of every shared milestone type — which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal. Also added current-season filtering to the Worker's `/milestones` and `/milestones/latest` routes (see `eyewall-poller`'s README) after a stale prior-season milestone sat as the *only* NHL row in the table for over a month with nothing newer to push it off.
 - **Cache-busting order matters (learned 2026-07):** busting the Worker's KV cache *before* confirming the underlying data fix has actually landed just repopulates the same stale/empty entry on the next request. Always confirm the data is correct first (direct Supabase query, or hit the Worker endpoint with a fresh/never-cached key), then bust. This bit us twice during the expansion-team rollout — once for the season-resolution fix, once for the roster backfill.
 - **HockeyTech `bootstrap` feed type:** it's `feed=statviewfeed`, not `feed=modulekit` — the latter returns a 200 OK with no real payload (`{"SiteKit":{"Undefined":"Undefined Tab bootstrap"}}`), which silently masqueraded as a fallback-triggering failure for a while before being caught. If a URL for this endpoint looks like it's built from a written description rather than a captured real request, verify it against actual DevTools traffic before trusting it.
 - **One-off scripts in this repo:** `seed_expansion_teams.py` and `diagnose_roster_fetch.py` were one-time tools for the 2026-07 expansion backfill — safe to delete once no longer needed, not part of the regular pipeline. `test_season_lookup.py` is a real, permanent pytest suite — keep it. `backfill_pp_stats.py` (thin driver around `nhl_stats.enrich_game_log(..., force_all=True)`, kept as the reusable pattern for re-running the PP/PK enrichment against an arbitrary past season) and `diagnose_narrative_impact.py`/`regenerate_affected_narratives.py` (one-time tools for the 2026-07 PP-goals-bug narrative regeneration — the latter reads `narrative_impact_result.json`, a scratch data file from the former, not checked in) were built for that same session — safe to delete once no longer needed.
