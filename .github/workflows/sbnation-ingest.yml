@@ -9,6 +9,8 @@ on:
     # dropped here along with the frequency.
     - cron: '0 */4 * * *'
   workflow_dispatch: # allow manual trigger
+  push:
+    branches: [session-news-ingestion-fixes] # TEMP: verify new feeds live before PR
 
 jobs:
   ingest:
@@ -19,12 +21,43 @@ jobs:
           # All SBNation/Vox Media blogs block Cloudflare datacenter IPs.
           # GH-hosted runners are not blocked — fetch here and POST to worker.
           declare -A FEEDS=(
-            # Only feeds confirmed reachable from GH-hosted runners
+            # Only feeds confirmed reachable from GH-hosted runners.
+            # These five are on the older Vox platform (true Atom XML at
+            # the legacy /rss/current.xml path).
             [canescountry]="https://www.canescountry.com/rss/current.xml"
             [lighthousehockey]="https://www.lighthousehockey.com/rss/current.xml"
             [milehighhockey]="https://www.milehighhockey.com/rss/current.xml"
             [pensburgh]="https://www.pensburgh.com/rss/current.xml"
             [allaboutthejersey]="https://www.allaboutthejersey.com/rss/current.xml"
+            # Added Session: news ingestion investigation -- 19 more
+            # SBNation/Vox team blogs, closing the gap left by Reddit
+            # ingestion being removed entirely (blocked from both
+            # Cloudflare Workers and GH Actions runner IPs, confirmed
+            # live). Most of these are on the newer Vox platform, serving
+            # plain RSS 2.0 at /feed/ rather than true Atom -- the
+            # Worker's /atom/ingest route auto-detects format per source,
+            # no config needed here beyond a working URL. ids must match
+            # eyewall-poller's TEAM_NEWS_SOURCES exactly (that's the join
+            # key /atom/ingest uses to route each feed to its team).
+            [anaheimcalling]="https://www.anaheimcalling.com/feed/"
+            [stanleycupofchowder]="https://www.stanleycupofchowder.com/rss/index.xml"
+            [diebytheblade]="https://www.diebytheblade.com/feed/"
+            [secondcityhockey]="https://www.secondcityhockey.com/feed/"
+            [jacketscannon]="https://www.jacketscannon.com/feed/"
+            [defendingbigd]="https://www.defendingbigd.com/feed/"
+            [wingingitinmotown]="https://www.wingingitinmotown.com/feed/"
+            [litterboxcats]="https://www.litterboxcats.com/feed/"
+            [jewelsfromthecrown]="https://www.jewelsfromthecrown.com/feed/"
+            [eyesontheprize]="https://www.eyesontheprize.com/rss/current.xml"
+            [ontheforecheck]="https://www.ontheforecheck.com/feed/"
+            [blueshirtbanter]="https://www.blueshirtbanter.com/rss/"
+            [silversevensens]="https://www.silversevensens.com/rss/"
+            [broadstreethockey]="https://www.broadstreethockey.com/feed/"
+            [fearthefin]="https://www.fearthefin.com/feed/"
+            [stlouisgametime]="https://www.stlouisgametime.com/rss/current.xml"
+            [rawcharge]="https://www.rawcharge.com/feed/"
+            [knightsonice]="https://www.knightsonice.com/feed/"
+            [japersrink]="https://www.japersrink.com/feed/"
           )
 
           TMPDIR=$(mktemp -d)
