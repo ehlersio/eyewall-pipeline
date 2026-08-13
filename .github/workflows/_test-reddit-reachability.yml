@@ -2,6 +2,8 @@ name: TEMP Reddit Reachability Test
 
 on:
   workflow_dispatch:
+  push:
+    branches: [session-news-ingestion-fixes]
 
 jobs:
   test:
