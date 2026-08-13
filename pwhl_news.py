@@ -88,10 +88,15 @@ PWHL_KEYWORDS = [
 
 SOURCES = [
     {
-        "id": "espn-pwhl",
-        "name": "ESPN",
-        "bg": "#cc0000",
-        "url": "https://www.espn.com/espn/rss/hockey/news",
+        # ESPN has no working hockey/PWHL RSS category at all -- every
+        # candidate path (hockey/news, womenshockey/news, pwhl/news) 503s,
+        # confirmed by directly probing each (Session: news ingestion
+        # investigation). Replaced with The Athletic's dedicated women's
+        # hockey feed, confirmed live with 100 PWHL-dense items.
+        "id": "athletic-pwhl",
+        "name": "The Athletic",
+        "bg": "#222222",
+        "url": "https://www.nytimes.com/athletic/rss/womens-hockey/",
         "type": "rss",
         "filter": True,
     },
