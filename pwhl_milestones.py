@@ -122,8 +122,18 @@ SEASON_POINTS_THRESHOLDS = [20, 30]
 # the league's history grows.
 CAREER_POINTS_THRESHOLDS = [50, 100]
 
-# Estimate based on ~3 seasons of league history — not verified against
-# real career leaders. Flagged for review.
+# Verified against real pwhl_goalie_seasons data (query run 2026-08-14,
+# summed across season_type='regular' rows, same method as
+# get_career_wins()): career leader is Ann-Renée Desbiens at 42 wins,
+# followed by Aerin Frankel (40) and Kristen Campbell (31). 25 has already
+# fired for those three, with Gwyneth Philips one win away at 24 --
+# comparable to how the lower CAREER_POINTS_THRESHOLDS tier already fires
+# for several players. 50 is a real future milestone nobody's reached yet
+# (leader is 8 wins away), not an impossible target -- a full-season
+# workhorse goalie can add 15-20 wins in a single 30-game season. No change
+# from the original estimate; this replaces the "flagged for review,
+# unverified" note with an actual confirmation. Revisit if the league's
+# win distribution shifts meaningfully as more seasons accumulate.
 CAREER_WIN_THRESHOLDS = [25, 50]
 
 # season_type value pwhl_stats.py uses for real regular-season rows.

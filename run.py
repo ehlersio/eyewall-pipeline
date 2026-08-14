@@ -98,14 +98,16 @@ def run_stage(label, fn, *args, **kwargs):
 
 def run_ai_pipeline():
     """AI pipeline — game_scoring, summaries, scouting, results-vs-process,
-    line-chemistry. Runs after moneypuck (results-vs-process needs its fresh
-    on_ice_gf_pct/results_vs_process_diff columns) and after line_combinations
-    (line-chemistry needs fresh line_combinations rows to narrate).
+    line-chemistry, daily trivia. Runs after moneypuck (results-vs-process
+    needs its fresh on_ice_gf_pct/results_vs_process_diff columns) and after
+    line_combinations (line-chemistry needs fresh line_combinations rows to
+    narrate).
 
-    Each sub-stage is isolated: none of the five depend on each other's
+    Each sub-stage is isolated: none of the six depend on each other's
     output (confirmed — neither ai_summaries.py, ai_scouting.py,
-    ai_results_vs_process.py, nor ai_line_chemistry.py reference game_scoring
-    or each other), so one crashing must not prevent the others from running.
+    ai_results_vs_process.py, ai_line_chemistry.py, nor trivia_questions.py
+    reference game_scoring or each other), so one crashing must not prevent
+    the others from running.
     """
     failures = []
     for label, cmd in (

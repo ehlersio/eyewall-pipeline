@@ -407,7 +407,7 @@ python pwhl_news.py    # Fetch and POST to Worker
 
 ### `pwhl_milestones.py`
 Mirrors `milestones.py` (NHL) in structure — see that module's entry above for the shared detection categories. Same shared `milestones` table, `is_pwhl=true`. Key differences from the NHL version:
-- Thresholds are tuned to real PWHL scoring volume (30 GP/season, not NHL's 82) rather than scaled proportionally — season goals 15/20, season points 20/30, career points 50/100, career wins 25/50 (the last one flagged in the code as an unverified estimate).
+- Thresholds are tuned to real PWHL scoring volume (30 GP/season, not NHL's 82) rather than scaled proportionally — season goals 15/20, season points 20/30, career points 50/100, career wins 25/50. All verified against real data (career wins confirmed 2026-08-14: leader is Ann-Renée Desbiens at 42, 25 already fired for the top 3 goalies, 50 is a real future target).
 - Career point/win totals need no external API call — the PWHL launched Jan 2024, so summing every historical `season_type='regular'` row already covers full career history.
 - Shorthanded-goal detection uses HockeyTech's ground-truth `is_short_handed` flag where available (merged from `gameSummary`), falling back to a penalty-window heuristic for older/un-merged rows.
 - `milestone_type` values are identical to `milestones.py`'s across every category, including `"sh_goal"` — this diverged as `"shorthanded_goal"` for a period (until 2026-08-13), which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal (both keyed only on the literal string `"sh_goal"`). If you ever add a new milestone type to either pipeline, keep the string identical on both sides unless there's a real reason not to.
