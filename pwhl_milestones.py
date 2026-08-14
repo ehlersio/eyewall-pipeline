@@ -76,9 +76,18 @@ Usage:
 event_key convention (added 2026-07-04, shared with milestones.py — see
 that module's docstring for full rationale): "" for once-per-game types
 (hat_trick, natural_hat_trick, shutout, career_wins_N, season_goals_N);
-a real f"{period_id}_{time_seconds}" value for shorthanded_goal, since a
-player can score more than one SH goal in a game and each needs its own
-row rather than overwriting the last.
+a real f"{period_id}_{time_seconds}" value for sh_goal, since a player
+can score more than one SH goal in a game and each needs its own row
+rather than overwriting the last.
+
+milestone_type is "sh_goal" (NOT "shorthanded_goal", despite this
+module's own function/variable names using the longer spelling) —
+aligned to match milestones.py's NHL convention 2026-08-13, after the
+mismatch was found to silently break the frontend's icon/label lookup
+and detail-line rendering for every PWHL shorthanded goal (both keyed
+only on the literal string "sh_goal"). Every other milestone_type is
+already identical between the two pipelines; this was the one
+unintentional outlier.
 """
 
 import argparse
@@ -222,7 +231,7 @@ def build_shorthanded_goal_milestones(sb, game: dict, ordered_goals: list[dict])
                 "player_id": sid,
                 "team": _team_abbr(team_id),
                 "opponent": _team_abbr(opponent_of(team_id)),
-                "milestone_type": "shorthanded_goal",
+                "milestone_type": "sh_goal",
                 "description": f"Shorthanded goal — player #{sid} ({_team_abbr(team_id)})",
                 "detail": {
                     "period_id": goal.get("period_id"),
@@ -746,7 +755,7 @@ def build_description(milestone_type: str, name: str, team: str | None) -> str:
         return f"Natural hat trick — {name}{team_str}"
     if milestone_type == "shutout":
         return f"Shutout — {name}{team_str}"
-    if milestone_type == "shorthanded_goal":
+    if milestone_type == "sh_goal":
         return f"Shorthanded goal — {name}{team_str}"
     if milestone_type.startswith("season_goals_"):
         n = milestone_type.rsplit("_", 1)[-1]
