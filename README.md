@@ -419,6 +419,24 @@ python pwhl_milestones.py --since 2026-01-01  # date range through yesterday
 python pwhl_milestones.py --game 261          # single game_id (debugging/spot-checks)
 ```
 
+### `pwhl_goalie_percentiles.py` (added 2026-08)
+Goalie-side analogue of `pwhl_percentiles.py` (skaters) — a category NHL's own `moneypuck.py`/`goalie_seasons` already had (GSAX, GSAX/60, 5v5/HD/MD/PK SV%) but PWHL never built, since `pwhl_percentiles.py` explicitly excludes goalies. Computes:
+- **GSAX-proxy**: same 3-bucket danger-zone xG proxy `pwhl_shot_xg.py` uses for shooters (independent copy, this codebase's usual convention for feed-derived math), applied to shots *against* a goalie. `gsax = xg_against - actual_goals_against`.
+- **GSAX/60**: rate-adjusted using `pwhl_goalie_seasons.toi` (an `"MM:SS"` string from HockeyTech, reliably populated).
+- **5v5 SV% / PK SV%**: reuses `pwhl_strength_state.py`'s penalty-window logic (same machinery `pwhl_milestones.py`'s SH-goal detection and `pwhl_stats.py`'s 5v5 Corsi already use), applied per-shot. "PK for the goalie" = the *other* team in that shot's game (not the shooter's own) has an active penalty window — this sidesteps needing the goalie's own `team_id` via `game_log` home/away.
+- **HD/MD SV%**: same distance buckets as the xG proxy.
+
+`MIN_GP = 10`, matching the skater convention — 11 of 20 current-season-8 goalies qualify.
+
+**Known limitation, not fixed here**: absolute GSAX magnitude runs high relative to NHL norms (+22 to +66 for current-season starters, vs NHL's typical -15 to +25) — the danger-zone bucket values are ported verbatim from NHL's own calibration, unvalidated against PWHL's actual shot-danger distribution (confirmed ~23% of shots bucket "high" vs NHL's typical ~10-15%). Same already-shipped limitation `pwhl_shot_xg.py`'s skater-side `finishing` metric carries. Percentile *ranking* should still be meaningful even where the absolute number reads large.
+
+**Bug caught building this**: a first version wrongly counted `blocked_shot` events as shots the goalie faced — a blocked shot never reaches the goalie at all (stopped by a teammate defender in front of them). This inflated both shots-faced and xG-against by ~20% (blocked_shot's share of the feed), silently boosting every goalie's GSAX. Fixed by scoping goalie-faced shots to `("goal", "shot")` only — see `GOALIE_FACED_TYPES` in the module.
+
+```bash
+python pwhl_goalie_percentiles.py             # current season (PWHL_SEASON)
+python pwhl_goalie_percentiles.py 8           # specific season_id
+```
+
 ---
 
 ## PWHL Season ID Map
@@ -541,7 +559,7 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
 | `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
-| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, milestones, news, daily trivia — 20 min offset to avoid Supabase contention. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow |
+| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia — 20 min offset to avoid Supabase contention. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
