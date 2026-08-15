@@ -173,6 +173,24 @@ jobs:
         # module docstring for the position-split/MIN_GP/TOI-floor
         # decisions and the same season-9-playoffs data gap.
 
+      - name: Compute PWHL goalie percentiles
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+        run: python pwhl_goalie_percentiles.py
+        # Goalie-side analogue of the skater percentile parity pieces
+        # above -- GSAX-proxy (reusing the same danger-zone xG bucket
+        # values as piece 2) plus 5v5/HD/MD/PK SV%, ranked into
+        # percentiles. Needs pwhl_goalie_seasons (top of this file),
+        # pwhl_shot_events ("Ingest PWHL shot events" above), and
+        # pwhl_pbp_events ("Ingest PWHL PBP events" above, for penalty
+        # windows) all already populated this run -- placed after the
+        # skater percentiles step for readability, not a real ordering
+        # dependency on it. See pwhl_goalie_percentiles.py's module
+        # docstring for the known GSAX-magnitude limitation (same
+        # NHL-calibrated bucket values as piece 2, unvalidated for PWHL).
+
       - name: Run pwhl_milestones.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
