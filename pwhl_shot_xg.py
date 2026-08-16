@@ -90,11 +90,23 @@ def _resolve_season_type(season_id: str) -> str | None:
     return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
 
 
-# Same 3-bucket danger-zone xG proxy rapm.py uses for NHL (its shot_xg()) —
-# independent copy, see module docstring for why.
+# 3-bucket danger-zone xG proxy — same distance-from-goal bucket BOUNDARIES
+# rapm.py uses for NHL (<=15/<=30/>30), but PWHL-native bucket VALUES.
+# Recalibrated (2026-08) from real PWHL shot/goal outcomes: 24,885 shot
+# attempts (goal/shot/blocked_shot) across every season/season_type with
+# shot-event coverage as of this date (season_ids 1, 3, 5, 6, 8, 9).
+# Observed goal-conversion rate per bucket: high 592/4211=0.1406, medium
+# 503/6186=0.0813, low 390/14488=0.0269 — rounded to the values below.
+# Previously ported verbatim from NHL's own calibration (rapm.py's
+# shot_xg(), itself based on league-average MoneyPuck danger-zone xG),
+# unvalidated against PWHL's actual shot-danger distribution. That NHL
+# high-danger rate (0.20) overstated PWHL's real rate by ~42%; medium
+# (0.07) understated it by ~16%; low (0.03) was already close. This is
+# what caused pwhl_goalie_percentiles.py's previously-documented "GSAX
+# runs high vs NHL norms" limitation — see that module's docstring.
 DANGER_XG = {
-    "high": 0.20,
-    "medium": 0.07,
+    "high": 0.14,
+    "medium": 0.08,
     "low": 0.03,
 }
 
