@@ -24,22 +24,21 @@ writing this:
     module's own shot count against pwhl_goalie_seasons.sv_pct's implied
     shot count -- was off by ~20%, exactly blocked_shot's share of the
     feed).
-    KNOWN LIMITATION, not fixed here: absolute GSAX magnitude runs high
-    relative to what an NHL reader would expect (e.g. +40 to +75 for
-    strong current-season-8 starters, vs NHL's typical -15 to +25 range)
-    -- the DANGER_XG bucket values (0.20/0.07/0.03) are ported verbatim
-    from NHL's own calibration (rapm.py), not independently validated
-    against PWHL's actual shot-danger distribution, which skews notably
-    higher-danger by this proxy's straight-line-distance classification
-    (confirmed live: ~23% of shots bucket "high" vs NHL's typical
-    ~10-15%). This is the same already-shipped limitation
-    pwhl_shot_xg.py's skater-side `finishing` metric carries (also
-    NHL-calibrated buckets, also unvalidated for PWHL) -- staying
-    consistent with that precedent rather than attempting a new,
-    unvalidated PWHL-specific recalibration here. The RELATIVE ranking
-    (percentiles) should still be meaningful even if the absolute number
-    reads large, since every goalie is scored against the same bucket
-    values.
+    RECALIBRATED (2026-08, was a known limitation): absolute GSAX magnitude
+    used to run high relative to what an NHL reader would expect (+40 to
+    +75 for strong current-season-8 starters, vs NHL's typical -15 to +25
+    range) because the DANGER_XG bucket values (0.20/0.07/0.03) were
+    ported verbatim from NHL's own calibration (rapm.py), unvalidated
+    against PWHL's actual shot-danger distribution. Fixed by computing
+    real PWHL goal-conversion rates per bucket from 24,885 historical
+    shot attempts (see pwhl_shot_xg.py's DANGER_XG comment for the exact
+    counts) and using those instead: high 0.14 (was 0.20), medium 0.08
+    (was 0.07), low 0.03 (unchanged, was already close). This is the same
+    fix applied to pwhl_shot_xg.py's skater-side `finishing` metric, which
+    shares this constant's derivation — see that module for the full
+    methodology. GSAX magnitude should now read closer to NHL norms;
+    relative ranking (percentiles) was already meaningful before this fix
+    and is unaffected in shape, just rescaled.
   - GSAX/60: pwhl_goalie_seasons.toi (season-total, an "MM:SS" string from
     HockeyTech's own minutes_played field — see pwhl_stats.py's
     fetch_goalie_stats) is reliably populated for every goalie with a
@@ -122,10 +121,12 @@ MIN_GP = 10  # see module docstring
 
 # Same 3-bucket danger-zone xG proxy pwhl_shot_xg.py uses — independent
 # copy, see that module's docstring for why this codebase doesn't
-# cross-import feed-derived math between pipeline modules.
+# cross-import feed-derived math between pipeline modules. Values are
+# PWHL-native, recalibrated from real conversion rates — see
+# pwhl_shot_xg.py's DANGER_XG comment and this module's docstring.
 DANGER_XG = {
-    "high": 0.20,
-    "medium": 0.07,
+    "high": 0.14,
+    "medium": 0.08,
     "low": 0.03,
 }
 
