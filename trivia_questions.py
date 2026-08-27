@@ -34,12 +34,10 @@ Usage:
 """
 
 import argparse
-import os
 import random
 from datetime import UTC, date, datetime
 
-import requests
-
+from ai_client import generate
 from ai_scouting import LOCALES
 from db import NHL_SEASON, get_client
 from pwhl_stats import PWHL_SEASON, TEAM_ID_MAP
@@ -84,15 +82,12 @@ def pick_category(question_date: date) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Model call — same Cloudflare Workers AI REST pattern as ai_scouting.py
+# Model call — thin wrapper over ai_client.generate(), see that module for
+# the shared model/endpoint/auth all AI-generation scripts share.
 # ---------------------------------------------------------------------------
 
 
 def generate_question_text(category_label: str, scope_label: str, locale: str = "en") -> str | None:
-    account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-    api_key = os.environ["CLOUDFLARE_API_KEY"]
-    model = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
-
     # No Sticks persona here on purpose -- this is a one-sentence phrasing
     # task with a hard guardrail (the LLM never sees or picks the answer,
     # see module docstring), not a narrative blurb. get_system_prompt()'s
@@ -121,28 +116,14 @@ def generate_question_text(category_label: str, scope_label: str, locale: str = 
             f"sentence, ending in a question mark."
         )
 
-    try:
-        r = requests.post(
-            f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"messages": [{"role": "user", "content": prompt}], "max_tokens": 100},
-            timeout=60,
-        )
-        r.raise_for_status()
-        text = r.json()["result"]["response"].strip()
-        # Fail closed on anything that doesn't look like a clean question —
-        # this is a phrasing sanity check, not fact verification (the model
-        # never touched any fact), but a malformed/multi-line response
-        # still isn't fit to show a user.
-        if not text or "?" not in text or len(text) > 300:
-            return None
-        return text
-    except Exception as e:
-        print(f"  Workers AI error: {e}")
+    text = generate(prompt, max_tokens=100)
+    # Fail closed on anything that doesn't look like a clean question —
+    # this is a phrasing sanity check, not fact verification (the model
+    # never touched any fact), but a malformed/multi-line response
+    # still isn't fit to show a user.
+    if not text or "?" not in text or len(text) > 300:
         return None
+    return text
 
 
 # ---------------------------------------------------------------------------

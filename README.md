@@ -23,8 +23,7 @@ SUPABASE_SERVICE_KEY=your_service_role_key_here
 NHL_SEASON=20252026
 PWHL_SEASON=8
 PRIMARY_TEAM_ABBR=CAR
-CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
-CLOUDFLARE_API_KEY=your_cloudflare_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key
 WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
 POLL_SECRET=your_worker_poll_secret
 ```
@@ -151,7 +150,7 @@ Forward lines and D pairs inferred from shift + shot events, for all 32 teams (l
 **32-team expansion (2026-07):** previously CAR-only. Shot events are now fetched by looking up the target team's own `game_id`s from `game_log`, then filtering `shot_events` by that game_id list + `situation_code='1551'` — not `shot_events.car_game`, which only ever flags games CAR played in and can't be reused as a generic per-team filter. Verified against CAR's previously-stored 20252026 rows: identical shift/shot counts, unit composition, TOI, and xGF% before and after the refactor.
 
 ### `power_rankings.py`
-32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via Workers AI ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
+32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
 **Formula:**
 
@@ -184,11 +183,21 @@ python milestones.py --date 2026-06-15  # specific date
 python milestones.py --since 2026-06-01 # date range through yesterday
 ```
 
-### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_persona.py`, `ai_context.py`)
+### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
+
+#### Model provider: OpenRouter
+
+**`ai_client.py`** (2026-08) — shared `generate(prompt, system=None, max_tokens=1024)` used by all 6 AI-generation scripts (`ai_scouting.py`, `ai_summaries.py`, `ai_predictions.py`, `power_rankings.py`, `trivia_questions.py`, and — via `ai_scouting.py`'s re-export — `ai_results_vs_process.py`/`ai_line_chemistry.py`), replacing 5 near-identical copies of the same HTTP call. Calls OpenRouter's `google/gemma-4-26b-a4b-it`, switched from Cloudflare Workers AI's `llama-3.1-8b-instruct-fp8-fast`.
+
+Why the switch: side-by-side testing against this pipeline's actual persona prompts (both English and French) found real accuracy problems with the old model that generic benchmarks alone wouldn't have caught — a fabricated power-play goal stat not present in the input data, and wrong-sport vocabulary in French output ("balle"/ball instead of "rondelle"/puck, "coups de poing"/punches instead of "mises en échec"/hits). The new model didn't reproduce either failure in the same test. Cost impact at this pipeline's real volume is negligible either way (well under $1/month).
+
+Why OpenRouter and not Cloudflare's own `@cf/google/gemma-4-26b-a4b-it` (which exists and is cheaper input-side): as tested, it defaults to a hidden "thinking" mode that consumes the entire completion budget on internal reasoning and returns empty `content`, even at 3x the normal `max_tokens`. Neither `reasoning: {enabled: false}` nor other param shapes disabled it via Cloudflare's endpoint. OpenRouter's own `reasoning: {enabled: false}` param works correctly against the same underlying model — that's the param `ai_client.py` sends on every call.
+
+Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY`, which this repo no longer uses for anything.
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
 
-**French/English localization (Track B Phase B1, complete)** — `player_scouting`, `player_narratives`, `game_summaries`, and `trivia_questions` rows all carry a `locale` column (`en`/`fr`), part of each table's upsert conflict key (`docs/session_locale_trackb_b0_schema.sql`, applied to prod). `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, and `ai_summaries.py` default to generating both locales per run (an outer `for locale in LOCALES` loop, `LOCALES` defined in `ai_scouting.py`); pass `--locale en`/`--locale fr` to generate just one, e.g. for a targeted backfill. French output uses `ai_persona.py`'s `get_system_prompt('fr')`, which appends a Québécois hockey-terminology instruction to the existing English persona rather than replacing it — the persona's accuracy/formatting rules apply the same regardless of output language. `trivia_questions.py` is wired differently since it has no persona voice (a one-sentence phrasing task with a hard guardrail — see its module docstring): `generate_question_text()` takes its own inline French instruction rather than `get_system_prompt()`, and `STAT_CATEGORIES` carries a `label_fr` for each category since the deterministic `explanation` field (not just the AI prompt) is directly user-facing. Live spot-checks produced fluent, grammatically sound French that correctly left `RAPM`/`WAR` untranslated and used correct gender agreement (PWHL "patineuses" vs. NHL "patineurs"), but wasn't perfect glossary compliance in the narrative scripts — one blurb used "power play" in English despite the glossary specifying "avantage numérique," and produced one garbled/invented word ("événance"). Consistent with this being a small 8B model — don't assume French parity with the English output without further spot-checks before enabling broadly. Track B Phase B2 (`eyewall-poller` serving + frontend locale param) is still pending.
+**French/English localization (Track B Phase B1, complete)** — `player_scouting`, `player_narratives`, `game_summaries`, and `trivia_questions` rows all carry a `locale` column (`en`/`fr`), part of each table's upsert conflict key (`docs/session_locale_trackb_b0_schema.sql`, applied to prod). `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, and `ai_summaries.py` default to generating both locales per run (an outer `for locale in LOCALES` loop, `LOCALES` defined in `ai_scouting.py`); pass `--locale en`/`--locale fr` to generate just one, e.g. for a targeted backfill. French output uses `ai_persona.py`'s `get_system_prompt('fr')`, which appends a Québécois hockey-terminology instruction to the existing English persona rather than replacing it — the persona's accuracy/formatting rules apply the same regardless of output language. `trivia_questions.py` is wired differently since it has no persona voice (a one-sentence phrasing task with a hard guardrail — see its module docstring): `generate_question_text()` takes its own inline French instruction rather than `get_system_prompt()`, and `STAT_CATEGORIES` carries a `label_fr` for each category since the deterministic `explanation` field (not just the AI prompt) is directly user-facing. Live spot-checks against the original model (llama-3.1-8b-instruct-fp8-fast) produced fluent, grammatically sound French that correctly left `RAPM`/`WAR` untranslated and used correct gender agreement (PWHL "patineuses" vs. NHL "patineurs"), but wasn't perfect glossary compliance — one blurb used "power play" in English despite the glossary specifying "avantage numérique," and produced one garbled/invented word ("événance"). Track B Phase B2 (`eyewall-poller` serving + `eyewallanalytics` frontend locale param) shipped in a follow-up session — the whole localization plan (Track A + Track B) is complete. See [Model provider](#model-provider-openrouter) below — the model backing all of this (French and English both) changed again shortly after, superseding the quality notes above.
 
 **`ai_context.py`** — Added `get_goalie_context(team, season, min_gp=5)` that pulls from `goalie_seasons` with key metrics: SV%, GAA, GSAX, GSAX/60, QS%, EV/HD/MD/PK SV%, and percentile ranks.
 
