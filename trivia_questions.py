@@ -40,6 +40,7 @@ from datetime import UTC, date, datetime
 
 import requests
 
+from ai_scouting import LOCALES
 from db import NHL_SEASON, get_client
 from pwhl_stats import PWHL_SEASON, TEAM_ID_MAP
 
@@ -58,11 +59,20 @@ NHL_TEAMS = [
 # One category applies league-wide (and to every team) on a given day —
 # simpler and more testable than per-scope rotation, and thematically fine
 # ("today everyone's answering a goals question, at different scopes").
+#
+# label_fr is used both in the AI prompt (category_label) and in the
+# deterministic `explanation` template (build_question_row) -- the latter is
+# directly user-facing, not just prompt scaffolding, so it needs a real
+# French phrase, not just a translated word.
 STAT_CATEGORIES = [
-    {"key": "goals", "label": "goals scored this season"},
-    {"key": "assists", "label": "assists this season"},
-    {"key": "points", "label": "points this season"},
-    {"key": "pp_goals", "label": "power-play goals this season"},
+    {"key": "goals", "label": "goals scored this season", "label_fr": "buts marqués cette saison"},
+    {"key": "assists", "label": "assists this season", "label_fr": "aides cette saison"},
+    {"key": "points", "label": "points this season", "label_fr": "points cette saison"},
+    {
+        "key": "pp_goals",
+        "label": "power-play goals this season",
+        "label_fr": "buts en avantage numérique cette saison",
+    },
 ]
 
 NHL_MIN_GP = 10
@@ -78,20 +88,38 @@ def pick_category(question_date: date) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def generate_question_text(category_label: str, scope_label: str) -> str | None:
+def generate_question_text(category_label: str, scope_label: str, locale: str = "en") -> str | None:
     account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
     api_key = os.environ["CLOUDFLARE_API_KEY"]
     model = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 
-    prompt = (
-        f"Write ONE short trivia question sentence asking which of four "
-        f"{scope_label} leads in {category_label}. "
-        f"Do not name any player, team, or city. Do not state or hint at "
-        f"the answer. Do not include options, numbers, or a colon — just "
-        f'the question sentence itself, e.g. "Which of these four players '
-        f'has scored the most goals this season?" Plain text only, one '
-        f"sentence, ending in a question mark."
-    )
+    # No Sticks persona here on purpose -- this is a one-sentence phrasing
+    # task with a hard guardrail (the LLM never sees or picks the answer,
+    # see module docstring), not a narrative blurb. get_system_prompt()'s
+    # full persona (slang glossary, word counts, etc.) doesn't apply and
+    # would just be noise in a task this narrow, so the French instruction
+    # is written directly here instead of reusing ai_persona.py's helper.
+    if locale == "fr":
+        prompt = (
+            f"Écris UNE seule phrase de question de trivia, en français canadien, "
+            f"demandant lequel de ces quatre {scope_label} est en tête pour "
+            f"{category_label}. Ne nomme aucun joueur, équipe ou ville. Ne révèle "
+            f"pas la réponse et ne la laisse pas deviner. N'inclus pas de choix de "
+            f"réponse, de chiffres ou de deux-points — seulement la phrase-question "
+            f"elle-même, par exemple « Lequel de ces quatre joueurs a marqué le plus "
+            f"de buts cette saison? » Texte brut seulement, une seule phrase, se "
+            f"terminant par un point d'interrogation."
+        )
+    else:
+        prompt = (
+            f"Write ONE short trivia question sentence asking which of four "
+            f"{scope_label} leads in {category_label}. "
+            f"Do not name any player, team, or city. Do not state or hint at "
+            f"the answer. Do not include options, numbers, or a colon — just "
+            f'the question sentence itself, e.g. "Which of these four players '
+            f'has scored the most goals this season?" Plain text only, one '
+            f"sentence, ending in a question mark."
+        )
 
     try:
         r = requests.post(
@@ -226,13 +254,15 @@ def build_question_row(
     category: dict,
     qualified: list[dict],
     scope_label: str,
+    locale: str = "en",
 ) -> dict | None:
     built = build_options(qualified)
     if not built:
         return None
     names, correct_index = built
 
-    question_text = generate_question_text(category["label"], scope_label)
+    category_label = category["label_fr"] if locale == "fr" else category["label"]
+    question_text = generate_question_text(category_label, scope_label, locale)
     if not question_text:
         return None
 
@@ -241,13 +271,17 @@ def build_question_row(
     # Deterministic, not another AI call — the guardrail only needs the
     # LLM for the question sentence itself; the reveal explanation is a
     # plain template over already-verified numbers.
-    explanation = f"{leader_name} led with {leader_value} {category['label']}."
+    if locale == "fr":
+        explanation = f"{leader_name} a mené avec {leader_value} {category_label}."
+    else:
+        explanation = f"{leader_name} led with {leader_value} {category_label}."
 
     return {
         "question_date": question_date.isoformat(),
         "tier": tier,
         "sport": sport,
         "team": team,
+        "locale": locale,
         "question_text": question_text,
         "options": names,
         "correct_index": correct_index,
@@ -258,13 +292,16 @@ def build_question_row(
 
 def upsert_question(row: dict, dry_run: bool) -> bool:
     if dry_run:
-        print(f"  DRY RUN [{row['sport']}/{row['tier']}/{row['team']}] {row['question_text']}")
+        print(
+            f"  DRY RUN [{row['sport']}/{row['tier']}/{row['team']}/{row['locale']}] "
+            f"{row['question_text']}"
+        )
         print(f"    options={row['options']} correct={row['correct_index']}")
         print(f"    explanation={row['explanation']}")
         return True
     try:
         supabase.table("trivia_questions").upsert(
-            row, on_conflict="question_date,tier,sport,team"
+            row, on_conflict="question_date,tier,sport,team,locale"
         ).execute()
         return True
     except Exception as e:
@@ -277,36 +314,47 @@ def upsert_question(row: dict, dry_run: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def run_easy(question_date: date, sport: str, dry_run: bool) -> tuple[int, int]:
+def run_easy(question_date: date, sport: str, dry_run: bool, locale: str = "en") -> tuple[int, int]:
     category = pick_category(question_date)
     ok = fail = 0
 
     if sport in ("nhl", "both"):
         nhl_players = get_qualified_nhl_players(category["key"], team=None)
+        scope_label = "patineurs de la LNH" if locale == "fr" else "NHL skaters"
         row = build_question_row(
-            question_date, "easy", "nhl", "ALL", category, nhl_players, "NHL skaters"
+            question_date, "easy", "nhl", "ALL", category, nhl_players, scope_label, locale
         )
         if row and upsert_question(row, dry_run):
             ok += 1
         else:
-            print("  [easy/nhl] skipped — insufficient qualified players or generation failed")
+            print(
+                f"  [easy/nhl/{locale}] skipped — insufficient qualified players or generation failed"
+            )
             fail += 1
 
     if sport in ("pwhl", "both"):
         pwhl_players = get_qualified_pwhl_players(category["key"], team=None)
+        # PWHL is a women's league -- feminine agreement in French
+        # ("patineuses"), same convention as the rest of this app's
+        # French output for PWHL content vs. NHL's masculine default.
+        scope_label = "patineuses de la LPHF" if locale == "fr" else "PWHL skaters"
         row = build_question_row(
-            question_date, "easy", "pwhl", "ALL", category, pwhl_players, "PWHL skaters"
+            question_date, "easy", "pwhl", "ALL", category, pwhl_players, scope_label, locale
         )
         if row and upsert_question(row, dry_run):
             ok += 1
         else:
-            print("  [easy/pwhl] skipped — insufficient qualified players or generation failed")
+            print(
+                f"  [easy/pwhl/{locale}] skipped — insufficient qualified players or generation failed"
+            )
             fail += 1
 
     return ok, fail
 
 
-def run_medium(question_date: date, sport: str, dry_run: bool) -> tuple[int, int]:
+def run_medium(
+    question_date: date, sport: str, dry_run: bool, locale: str = "en"
+) -> tuple[int, int]:
     category = pick_category(question_date)
     ok = fail = 0
 
@@ -320,47 +368,51 @@ def run_medium(question_date: date, sport: str, dry_run: bool) -> tuple[int, int
     # real data) instead of asking the LLM to reproduce a proper noun it
     # might not get right.
     if sport in ("nhl", "both"):
+        scope_label = "patineurs de cette équipe" if locale == "fr" else "skaters on this team"
         for abbr in NHL_TEAMS:
             players = get_qualified_nhl_players(category["key"], team=abbr)
             row = build_question_row(
-                question_date, "medium", "nhl", abbr, category, players, "skaters on this team"
+                question_date, "medium", "nhl", abbr, category, players, scope_label, locale
             )
             if row and upsert_question(row, dry_run):
                 ok += 1
             else:
-                print(f"  [medium/nhl/{abbr}] skipped")
+                print(f"  [medium/nhl/{abbr}/{locale}] skipped")
                 fail += 1
 
     if sport in ("pwhl", "both"):
+        scope_label = "patineuses de cette équipe" if locale == "fr" else "skaters on this team"
         for abbr in TEAM_ID_MAP.values():
             players = get_qualified_pwhl_players(category["key"], team=abbr)
             row = build_question_row(
-                question_date, "medium", "pwhl", abbr, category, players, "skaters on this team"
+                question_date, "medium", "pwhl", abbr, category, players, scope_label, locale
             )
             if row and upsert_question(row, dry_run):
                 ok += 1
             else:
-                print(f"  [medium/pwhl/{abbr}] skipped")
+                print(f"  [medium/pwhl/{abbr}/{locale}] skipped")
                 fail += 1
 
     return ok, fail
 
 
-def run(question_date: date, tier: str, sport: str, dry_run: bool) -> None:
+def run(question_date: date, tier: str, sport: str, dry_run: bool, locale: str = None) -> None:
+    locales = [locale] if locale else list(LOCALES)
     print(f"Trivia generation — {question_date.isoformat()} (tier={tier}, sport={sport})")
     total_ok = total_fail = 0
 
-    if tier in ("easy", "both"):
-        print("\n--- easy ---")
-        ok, fail = run_easy(question_date, sport, dry_run)
-        total_ok += ok
-        total_fail += fail
+    for loc in locales:
+        if tier in ("easy", "both"):
+            print(f"\n--- easy ({loc}) ---")
+            ok, fail = run_easy(question_date, sport, dry_run, loc)
+            total_ok += ok
+            total_fail += fail
 
-    if tier in ("medium", "both"):
-        print("\n--- medium ---")
-        ok, fail = run_medium(question_date, sport, dry_run)
-        total_ok += ok
-        total_fail += fail
+        if tier in ("medium", "both"):
+            print(f"\n--- medium ({loc}) ---")
+            ok, fail = run_medium(question_date, sport, dry_run, loc)
+            total_ok += ok
+            total_fail += fail
 
     print(f"\nDone — {total_ok} generated, {total_fail} skipped/failed")
 
@@ -375,7 +427,13 @@ if __name__ == "__main__":
     parser.add_argument("--sport", choices=["nhl", "pwhl", "both"], default="both")
     parser.add_argument("--date", default=None, help="YYYY-MM-DD, defaults to today (UTC)")
     parser.add_argument("--dry-run", action="store_true", help="Print questions, skip DB writes")
+    parser.add_argument(
+        "--locale",
+        choices=["en", "fr"],
+        default=None,
+        help="Generate only this locale (default: both en and fr)",
+    )
     args = parser.parse_args()
 
     q_date = date.fromisoformat(args.date) if args.date else datetime.now(UTC).date()
-    run(q_date, args.tier, args.sport, args.dry_run)
+    run(q_date, args.tier, args.sport, args.dry_run, args.locale)
