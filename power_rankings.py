@@ -7,7 +7,7 @@ For each of the 32 NHL teams:
   2. Writes roster_war_score to team_seasons.
   3. Computes the blended 32-team power ranking (same formula as the frontend,
      run server-side so prior_rank is available for movement arrows).
-  4. Generates a personalised AI narrative per team via Cloudflare Workers AI.
+  4. Generates a personalised AI narrative per team (see ai_client.py).
   5. Writes rank + prior_rank + narrative to power_rankings_narratives.
 
 Run order in run.py: after moneypuck.run() (needs fresh WAR + xGF%).
@@ -26,7 +26,6 @@ import time
 from datetime import date
 
 import httpx
-import requests
 from dotenv import load_dotenv
 
 # ClientOptions must come from the package root, not supabase.lib.client_options
@@ -34,15 +33,13 @@ from dotenv import load_dotenv
 # of 2.31.0). Don't "clean up" this import back to the submodule path.
 from supabase import ClientOptions, create_client
 
+from ai_client import generate
+
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
-
-CF_ACCOUNT_ID = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-CF_API_KEY = os.environ["CLOUDFLARE_API_KEY"]
-CF_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 
 ALL_TEAMS = [
     "ANA",
@@ -84,31 +81,6 @@ ALL_TEAMS = list(dict.fromkeys(ALL_TEAMS))
 supabase = create_client(
     SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client(timeout=30))
 )
-
-
-# ── Cloudflare Workers AI ─────────────────────────────────────────────────────
-
-
-def generate(prompt: str, system: str = None) -> str | None:
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    try:
-        r = requests.post(
-            f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/run/{CF_MODEL}",
-            headers={
-                "Authorization": f"Bearer {CF_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"messages": messages, "max_tokens": 300},
-            timeout=120,
-        )
-        r.raise_for_status()
-        return r.json()["result"]["response"].strip() or None
-    except Exception as e:
-        print(f"  Workers AI error: {e}")
-        return None
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -666,7 +638,7 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
             continue
 
         print(f"  {t} (rank {rank}, prior {prior_rank}) ...", end=" ", flush=True)
-        narrative = generate(prompt, system=system)
+        narrative = generate(prompt, system=system, max_tokens=300)
         if not narrative:
             print("FAILED")
             upsert_narrative(t, season, today, rank, prior_rank, None)

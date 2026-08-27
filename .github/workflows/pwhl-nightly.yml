@@ -208,8 +208,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
           NHL_SEASON: ${{ secrets.NHL_SEASON }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python trivia_questions.py --sport pwhl
         # First AI-generation step ever added to this workflow (NHL's
         # equivalent already runs a much larger nightly AI batch via

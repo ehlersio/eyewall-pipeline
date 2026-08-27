@@ -20,8 +20,7 @@ import sys
 import time
 from datetime import UTC, datetime
 
-import requests
-
+from ai_client import generate
 from ai_context import _fmt_toi, get_goalie_context, get_player_context
 from ai_persona import build_player_scouting_prompt, get_system_prompt
 from db import get_client
@@ -79,38 +78,6 @@ ALL_TEAMS = [
     "WPG",
     "WSH",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Model call
-# ---------------------------------------------------------------------------
-
-
-def generate(prompt: str, system: str = None) -> str | None:
-    account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-    api_key = os.environ["CLOUDFLARE_API_KEY"]
-    model = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
-
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    try:
-        r = requests.post(
-            f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"messages": messages, "max_tokens": 1024},
-            timeout=120,
-        )
-        r.raise_for_status()
-        return r.json()["result"]["response"].strip() or None
-    except Exception as e:
-        print(f"  Workers AI error: {e}")
-        return None
 
 
 # ---------------------------------------------------------------------------
