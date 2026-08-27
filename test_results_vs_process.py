@@ -195,7 +195,7 @@ class TestNarratePlayerSkipLogic:
         monkeypatch.setattr(
             ai_results_vs_process,
             "upsert_narrative",
-            lambda pid, season, team, text: upserted.update(pid=pid, text=text),
+            lambda pid, season, team, text, *a, **k: upserted.update(pid=pid, text=text),
         )
         result = ai_results_vs_process.narrate_player(
             {"name": "X", "results_vs_process_diff": 0.1},
