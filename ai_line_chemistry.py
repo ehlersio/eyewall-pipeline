@@ -32,8 +32,8 @@ import time
 from datetime import UTC, datetime
 
 from ai_context import get_line_chemistry_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_line_chemistry_prompt
-from ai_scouting import generate
+from ai_persona import build_line_chemistry_prompt, get_system_prompt
+from ai_scouting import LOCALES, generate
 from db import get_client
 from line_combinations import ALL_TEAMS
 
@@ -52,7 +52,7 @@ supabase = get_client()
 # ---------------------------------------------------------------------------
 
 
-def already_narrated(player_id: int, season: str, team: str) -> bool:
+def already_narrated(player_id: int, season: str, team: str, locale: str = "en") -> bool:
     resp = (
         supabase.table("player_narratives")
         .select("player_id")
@@ -60,6 +60,7 @@ def already_narrated(player_id: int, season: str, team: str) -> bool:
         .eq("season", season)
         .eq("team", team)
         .eq("narrative_type", NARRATIVE_TYPE)
+        .eq("locale", locale)
         .limit(1)
         .execute()
     )
@@ -67,7 +68,12 @@ def already_narrated(player_id: int, season: str, team: str) -> bool:
 
 
 def upsert_unit_narrative(
-    player_ids: list[int], season: str, team: str, text: str, retries: int = 3
+    player_ids: list[int],
+    season: str,
+    team: str,
+    text: str,
+    locale: str = "en",
+    retries: int = 3,
 ) -> None:
     """Writes the same narrative_text to every member of the unit, one row
     per player_id (see module docstring for why)."""
@@ -77,6 +83,7 @@ def upsert_unit_narrative(
             "season": season,
             "team": team,
             "narrative_type": NARRATIVE_TYPE,
+            "locale": locale,
             "narrative_text": text,
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -85,7 +92,7 @@ def upsert_unit_narrative(
     for attempt in range(1, retries + 1):
         try:
             supabase.table("player_narratives").upsert(
-                rows, on_conflict="player_id,season,team,narrative_type"
+                rows, on_conflict="player_id,season,team,narrative_type,locale"
             ).execute()
             return
         except Exception as e:
@@ -96,7 +103,7 @@ def upsert_unit_narrative(
             print(f"  upsert attempt {attempt} failed, retrying in {wait}s...")
             time.sleep(wait)
     supabase.table("player_narratives").upsert(
-        rows, on_conflict="player_id,season,team,narrative_type"
+        rows, on_conflict="player_id,season,team,narrative_type,locale"
     ).execute()
 
 
@@ -114,6 +121,7 @@ def narrate_unit(
     season: str,
     force: bool,
     dry_run: bool,
+    locale: str = "en",
 ) -> str:
     """
     Generate and store a line-chemistry blurb for one unit.
@@ -128,26 +136,26 @@ def narrate_unit(
 
     # A unit's members are always written together -- checking the first
     # member is enough to know whether this unit already has a blurb.
-    if not force and already_narrated(player_ids[0], season, team):
-        print(f"  skip  {label} ({names}) — narrative exists")
+    if not force and already_narrated(player_ids[0], season, team, locale):
+        print(f"  skip  {label} ({names}, {locale}) — narrative exists")
         return "skip"
 
     prompt = build_line_chemistry_prompt(unit_type, unit, siblings, league_avg_xgf_pct, team)
 
     if dry_run:
         print(f"\n{'=' * 60}")
-        print(f"DRY RUN — {team} {label} ({names}), season {season}")
+        print(f"DRY RUN — {team} {label} ({names}), season {season}, {locale}")
         print(f"{'=' * 60}")
         print(prompt)
         return "ok"
 
-    print(f"  gen   {label} ({names}) ...", end=" ", flush=True)
-    text = generate(prompt, system=STICKS_SYSTEM_PROMPT)
+    print(f"  gen   {label} ({names}, {locale}) ...", end=" ", flush=True)
+    text = generate(prompt, system=get_system_prompt(locale))
     if not text:
         print("FAILED")
         return "fail"
 
-    upsert_unit_narrative(player_ids, season, team, text)
+    upsert_unit_narrative(player_ids, season, team, text, locale)
     print("ok")
     return "ok"
 
@@ -158,7 +166,12 @@ def narrate_unit(
 
 
 def run_team(
-    team: str, season: str, force: bool, dry_run: bool, missing_only: bool = False
+    team: str,
+    season: str,
+    force: bool,
+    dry_run: bool,
+    missing_only: bool = False,
+    locale: str = "en",
 ) -> tuple[int, int, int]:
     ctx = get_line_chemistry_context(team=team, season=int(season))
     units = [("F", u) for u in ctx["lines"]] + [("D", u) for u in ctx["pairs"]]
@@ -171,7 +184,7 @@ def run_team(
         if (
             missing_only
             and unit["player_ids"]
-            and already_narrated(unit["player_ids"][0], season, team)
+            and already_narrated(unit["player_ids"][0], season, team, locale)
         ):
             skipped += 1
             continue
@@ -180,7 +193,9 @@ def run_team(
         siblings = [u for u in same_type if u["rank"] != unit["rank"]]
         league_avg = ctx["league_avg_xgf_pct"].get(unit_type)
 
-        result = narrate_unit(unit_type, unit, siblings, league_avg, team, season, force, dry_run)
+        result = narrate_unit(
+            unit_type, unit, siblings, league_avg, team, season, force, dry_run, locale
+        )
         if result == "ok":
             ok += 1
         elif result == "skip":
@@ -191,16 +206,20 @@ def run_team(
     return ok, skipped, failed
 
 
-def run(season, team=None, force=False, dry_run=False, missing_only=False):
+def run(season, team=None, force=False, dry_run=False, missing_only=False, locale=None):
+    locales = [locale] if locale else list(LOCALES)
     teams = [team] if team else ALL_TEAMS
     total_ok = total_skip = total_fail = 0
 
-    for t in teams:
-        print(f"\n--- {t} ---")
-        ok, skip, fail = run_team(t, season, force, dry_run, missing_only=missing_only)
-        total_ok += ok
-        total_skip += skip
-        total_fail += fail
+    for loc in locales:
+        for t in teams:
+            print(f"\n--- {t} ({loc}) ---")
+            ok, skip, fail = run_team(
+                t, season, force, dry_run, missing_only=missing_only, locale=loc
+            )
+            total_ok += ok
+            total_skip += skip
+            total_fail += fail
 
     print(f"\nDone — {total_ok} generated, {total_skip} skipped, {total_fail} failed")
 
@@ -218,6 +237,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--missing", action="store_true", help="Only generate blurbs that don't exist yet"
     )
+    parser.add_argument(
+        "--locale",
+        choices=["en", "fr"],
+        default=None,
+        help="Generate only this locale (default: both en and fr)",
+    )
     args = parser.parse_args()
 
     run(
@@ -226,4 +251,5 @@ if __name__ == "__main__":
         force=args.force,
         dry_run=args.dry_run,
         missing_only=args.missing,
+        locale=args.locale,
     )
