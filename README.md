@@ -52,8 +52,9 @@ python run.py validate         # RAPM sanity checks
 python ai_summaries.py                           # Post-game summaries
 python ai_summaries.py --game 2025030414 --force # Single game, force regenerate
 python ai_predictions.py                         # Pre-game predictions
-python ai_scouting.py --missing                  # Missing scouting blurbs only (skaters + goalies)
+python ai_scouting.py --missing                  # Missing scouting blurbs only (skaters + goalies), en + fr
 python ai_scouting.py --team CAR --dry-run       # Preview prompts for one team
+python ai_scouting.py --team CAR --locale fr --dry-run  # Preview French-only prompts for one team
 python ai_results_vs_process.py --missing        # Missing results-vs-process blurbs (NHL skaters only)
 python ai_results_vs_process.py --team CAR --dry-run  # Preview prompts for one team
 python ai_line_chemistry.py --missing            # Missing line-chemistry blurbs (all 32 teams)
@@ -184,6 +185,8 @@ python milestones.py --since 2026-06-01 # date range through yesterday
 ### AI modules (`ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_persona.py`, `ai_context.py`)
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
+
+**French/English localization (Track B Phase B1, in progress)** — `player_scouting` rows now carry a `locale` column (`en`/`fr`), part of the upsert conflict key alongside `player_id,season,team`. `ai_scouting.py` defaults to generating both locales per run (`run()`'s outer `for locale in LOCALES` loop); pass `--locale en`/`--locale fr` to generate just one, e.g. for a targeted backfill. French output uses `ai_persona.py`'s `get_system_prompt('fr')`, which appends a Québécois hockey-terminology instruction to the existing English persona rather than replacing it — the persona's accuracy/formatting rules apply the same regardless of output language. Requires the schema in `docs/session_locale_trackb_b0_schema.sql` to be applied first (adds the `locale` column + widens the conflict key on all 4 AI-narrative tables); until then, any run against a live Supabase instance without that migration will fail on the `.eq("locale", ...)` filter. `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_summaries.py`, and `trivia_questions.py` are not yet wired for locale — that's still pending in this same track.
 
 **`ai_context.py`** — Added `get_goalie_context(team, season, min_gp=5)` that pulls from `goalie_seasons` with key metrics: SV%, GAA, GSAX, GSAX/60, QS%, EV/HD/MD/PK SV%, and percentile ranks.
 

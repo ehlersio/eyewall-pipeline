@@ -23,8 +23,16 @@ from datetime import UTC, datetime
 import requests
 
 from ai_context import _fmt_toi, get_goalie_context, get_player_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_player_scouting_prompt
+from ai_persona import build_player_scouting_prompt, get_system_prompt
 from db import get_client
+
+# French/English localization, Track B Phase B1. Every DB read/write below
+# takes a locale so an 'en' and 'fr' blurb can coexist for the same
+# player/season/team under the widened conflict key (see
+# docs/session_locale_trackb_b0_schema.sql) instead of overwriting each
+# other. Default stays 'en' so any caller not yet updated behaves exactly
+# as before.
+LOCALES = ("en", "fr")
 
 # NOTE: kept as a local string constant rather than importing db.NHL_SEASON
 # (which is int-typed) — this is used as the argparse --season default
@@ -110,13 +118,14 @@ def generate(prompt: str, system: str = None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def already_scouted(player_id: int, season: str, team: str) -> bool:
+def already_scouted(player_id: int, season: str, team: str, locale: str = "en") -> bool:
     resp = (
         supabase.table("player_scouting")
         .select("player_id")
         .eq("player_id", player_id)
         .eq("season", season)
         .eq("team", team)
+        .eq("locale", locale)
         .limit(1)
         .execute()
     )
@@ -124,19 +133,20 @@ def already_scouted(player_id: int, season: str, team: str) -> bool:
 
 
 def upsert_scouting_blurb(
-    player_id: int, season: str, team: str, text: str, retries: int = 3
+    player_id: int, season: str, team: str, text: str, locale: str = "en", retries: int = 3
 ) -> None:
     row = {
         "player_id": player_id,
         "season": season,
         "team": team,
+        "locale": locale,
         "scouting_text": text,
         "generated_at": datetime.now(UTC).isoformat(),
     }
     for attempt in range(1, retries + 1):
         try:
             supabase.table("player_scouting").upsert(
-                row, on_conflict="player_id,season,team"
+                row, on_conflict="player_id,season,team,locale"
             ).execute()
             return
         except Exception as e:
@@ -146,7 +156,9 @@ def upsert_scouting_blurb(
             wait = 2**attempt  # 2s, 4s
             print(f"  upsert attempt {attempt} failed, retrying in {wait}s...")
             time.sleep(wait)
-    supabase.table("player_scouting").upsert(row, on_conflict="player_id,season,team").execute()
+    supabase.table("player_scouting").upsert(
+        row, on_conflict="player_id,season,team,locale"
+    ).execute()
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +246,7 @@ def scout_player(
     player_id: int,
     force: bool,
     dry_run: bool,
+    locale: str = "en",
 ) -> str:
     """
     Generate and store a scouting blurb for one player.
@@ -241,26 +254,26 @@ def scout_player(
     """
     name = player.get("name", f"Player {player_id}")
 
-    if not force and already_scouted(player_id, season, team):
-        print(f"  skip  {name} ({team}) — blurb exists")
+    if not force and already_scouted(player_id, season, team, locale):
+        print(f"  skip  {name} ({team}, {locale}) — blurb exists")
         return "skip"
 
     prompt = build_player_scouting_prompt(player, team)
 
     if dry_run:
         print(f"\n{'=' * 60}")
-        print(f"DRY RUN — {name} ({team}, {season})")
+        print(f"DRY RUN — {name} ({team}, {season}, {locale})")
         print(f"{'=' * 60}")
         print(prompt)
         return "ok"
 
-    print(f"  gen   {name} ({team}) ...", end=" ", flush=True)
-    text = generate(prompt, system=STICKS_SYSTEM_PROMPT)
+    print(f"  gen   {name} ({team}, {locale}) ...", end=" ", flush=True)
+    text = generate(prompt, system=get_system_prompt(locale))
     if not text:
         print("FAILED")
         return "fail"
 
-    upsert_scouting_blurb(player_id, season, team, text)
+    upsert_scouting_blurb(player_id, season, team, text, locale)
     print("ok")
     return "ok"
 
@@ -270,20 +283,27 @@ def scout_player(
 # ---------------------------------------------------------------------------
 
 
-def run_single_player(player_id: int, season: str, force: bool, dry_run: bool) -> None:
+def run_single_player(
+    player_id: int, season: str, force: bool, dry_run: bool, locale: str = "en"
+) -> None:
     player, team = get_single_player_context(player_id, season)
     if not player:
         print(f"No player_seasons row found for player_id={player_id}, season={season}")
         sys.exit(1)
 
-    result = scout_player(player, team, season, player_id, force, dry_run)
+    result = scout_player(player, team, season, player_id, force, dry_run, locale)
     print(
         f"\nDone — {'1 generated' if result == 'ok' else ('1 skipped' if result == 'skip' else '1 failed')}"
     )
 
 
 def run_team(
-    team: str, season: str, force: bool, dry_run: bool, missing_only: bool = False
+    team: str,
+    season: str,
+    force: bool,
+    dry_run: bool,
+    missing_only: bool = False,
+    locale: str = "en",
 ) -> tuple[int, int, int]:
     players = get_player_context(team=team, season=int(season), top_n=50)
     if not players:
@@ -295,13 +315,14 @@ def run_team(
     id_map = {r["name"]: r["id"] for r in id_rows}
 
     if missing_only:
-        # Fetch all existing blurbs for this team/season in one query
+        # Fetch all existing blurbs for this team/season/locale in one query
         pids = [pid for pid in id_map.values() if pid]
         existing = (
             supabase.table("player_scouting")
             .select("player_id")
             .eq("season", season)
             .eq("team", team)
+            .eq("locale", locale)
             .in_("player_id", pids)
             .execute()
             .data
@@ -318,7 +339,7 @@ def run_team(
             print(f"  skip  {player['name']} — player_id not found")
             skipped += 1
             continue
-        result = scout_player(player, team, season, pid, force, dry_run)
+        result = scout_player(player, team, season, pid, force, dry_run, locale)
         if result == "ok":
             ok += 1
         elif result == "skip":
@@ -342,6 +363,7 @@ def run_team(
                 .select("player_id")
                 .eq("season", season)
                 .eq("team", team)
+                .eq("locale", locale)
                 .in_("player_id", gpids)
                 .execute()
                 .data
@@ -355,7 +377,7 @@ def run_team(
                 print(f"  skip  {goalie['name']} — player_id not found")
                 skipped += 1
                 continue
-            result = scout_player(goalie, team, season, pid, force, dry_run)
+            result = scout_player(goalie, team, season, pid, force, dry_run, locale)
             if result == "ok":
                 ok += 1
             elif result == "skip":
@@ -366,20 +388,34 @@ def run_team(
     return ok, skipped, failed
 
 
-def run(season, team=None, player_id=None, force=False, dry_run=False, missing_only=False):
+def run(
+    season,
+    team=None,
+    player_id=None,
+    force=False,
+    dry_run=False,
+    missing_only=False,
+    locale=None,
+):
+    locales = [locale] if locale else list(LOCALES)
+
     if player_id:
-        run_single_player(player_id, season, force, dry_run)
+        for loc in locales:
+            run_single_player(player_id, season, force, dry_run, loc)
         return
 
     teams = [team] if team else ALL_TEAMS
     total_ok = total_skip = total_fail = 0
 
-    for t in teams:
-        print(f"\n--- {t} ---")
-        ok, skip, fail = run_team(t, season, force, dry_run, missing_only=missing_only)
-        total_ok += ok
-        total_skip += skip
-        total_fail += fail
+    for loc in locales:
+        for t in teams:
+            print(f"\n--- {t} ({loc}) ---")
+            ok, skip, fail = run_team(
+                t, season, force, dry_run, missing_only=missing_only, locale=loc
+            )
+            total_ok += ok
+            total_skip += skip
+            total_fail += fail
 
     print(f"\nDone — {total_ok} generated, {total_skip} skipped, {total_fail} failed")
 
@@ -398,6 +434,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--missing", action="store_true", help="Only generate blurbs that don't exist yet"
     )
+    parser.add_argument(
+        "--locale",
+        choices=["en", "fr"],
+        default=None,
+        help="Generate only this locale (default: both en and fr)",
+    )
     args = parser.parse_args()
 
     run(
@@ -407,4 +449,5 @@ if __name__ == "__main__":
         force=args.force,
         dry_run=args.dry_run,
         missing_only=args.missing,
+        locale=args.locale,
     )

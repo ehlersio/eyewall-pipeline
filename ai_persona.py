@@ -73,6 +73,66 @@ Formatting rules:
 """.strip()
 
 
+# French/English localization, Track B Phase B1 — appended (not substituted)
+# onto STICKS_SYSTEM_PROMPT for locale='fr' generations, via get_system_prompt()
+# below. Deliberately additive rather than a separate from-scratch French
+# persona: the accuracy rules, slang-usage restraint, and word-count targets
+# above all still apply verbatim to French output — only the *language* of
+# the output changes, not the persona's judgment or guardrails.
+#
+# Includes a hockey-terminology glossary rather than trusting the model to
+# pick correct French hockey vocabulary unprompted — this pipeline already
+# has one documented failure mode for this exact model (llama-3.1-8b
+# hallucinating a rank when handed a raw comparison list instead of being
+# told the rank as a fact, see line_chemistry's xgf_rank_note precomputation
+# above) — French fluency from an 8B model is an open question per the
+# original migration plan, not something to assume parity on. Terminology
+# is Canadian/Québécois (LNH broadcast French), matching the audience this
+# app already targets (French-Canadian NHL/PWHL fans) rather than European
+# French hockey terms, which differ for several of these (e.g. "mise en
+# échec" vs France's rarer hockey vocabulary).
+#
+# Advanced-stat abbreviations (xG, RAPM, WAR, GSAX, Corsi, Fenwick, CF%,
+# FF%) are deliberately left untranslated in the instruction below — same
+# policy the frontend migration already settled on for stat-code-style
+# abbreviations (see eyewall-analytics's established "skip" list for
+# PP/PK/SOG/GAA/etc.). Player, team, and city names must never be
+# translated or altered regardless of language.
+STICKS_SYSTEM_PROMPT_FR_ADDENDUM = """
+Réponds ENTIÈREMENT en français canadien (québécois) — le français utilisé par les
+commentateurs francophones de la LNH et de la LPHF. N'utilise aucun mot anglais, sauf
+les noms propres (joueurs, équipes, villes) et les abréviations statistiques avancées
+(xG, RAPM, WAR, GSAX, Corsi, Fenwick, CF%, FF%), qui doivent rester exactement comme
+fournies dans les données.
+
+Vocabulaire de hockey à utiliser (ne traduis pas ces termes autrement) :
+- avantage numérique = power play · désavantage numérique = penalty kill
+- échec avant = forecheck · échec arrière = backcheck
+- tir au but = shot on goal · tir raté = missed shot · tir bloqué = blocked shot
+- mise en échec = hit/check · mise au jeu = faceoff
+- prolongation = overtime · fusillade = shootout
+- gardien de but = goalie · défenseur = defenseman · attaquant = forward
+- ailier = winger · centre = center (position) · recrue = rookie
+- but = goal · aide / mention d'aide = assist · trio = forward line · paire = defense pair
+- but en avantage numérique = power-play goal · but en désavantage numérique = shorthanded goal
+- séries (éliminatoires) = playoffs · saison régulière = regular season
+
+Les noms de joueurs, d'équipes et de villes ne doivent jamais être traduits ou modifiés.
+""".strip()
+
+
+def get_system_prompt(locale: str = "en") -> str:
+    """Returns the Sticks persona system prompt for the given locale.
+    locale='en' (default) returns STICKS_SYSTEM_PROMPT unchanged -- existing
+    English-only call sites that haven't been threaded through locale yet
+    keep working identically. locale='fr' appends the French-language
+    instruction above; the English persona/accuracy/formatting rules above
+    still apply, only the output language changes."""
+    if locale == "fr":
+        return STICKS_SYSTEM_PROMPT + "\n\n" + STICKS_SYSTEM_PROMPT_FR_ADDENDUM
+    return STICKS_SYSTEM_PROMPT
+
+
 # ---------------------------------------------------------------------------
 # Context formatters — turn dicts into readable prompt input
 # ---------------------------------------------------------------------------
