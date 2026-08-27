@@ -193,7 +193,7 @@ Why the switch: side-by-side testing against this pipeline's actual persona prom
 
 Why OpenRouter and not Cloudflare's own `@cf/google/gemma-4-26b-a4b-it` (which exists and is cheaper input-side): as tested, it defaults to a hidden "thinking" mode that consumes the entire completion budget on internal reasoning and returns empty `content`, even at 3x the normal `max_tokens`. Neither `reasoning: {enabled: false}` nor other param shapes disabled it via Cloudflare's endpoint. OpenRouter's own `reasoning: {enabled: false}` param works correctly against the same underlying model — that's the param `ai_client.py` sends on every call.
 
-Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY`, which this repo no longer uses for anything.
+Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY` for AI generation. Those two secrets are still needed elsewhere in this repo though -- `draft-ingest.yml` uses them directly (curl, not Python) for Cloudflare KV storage access, an unrelated concern. Don't remove them from GitHub Actions secrets or from a local `.env` if you're working on draft ingestion; they're just no longer required for any of the AI scripts.
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
 
