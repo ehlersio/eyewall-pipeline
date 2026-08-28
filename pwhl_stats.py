@@ -1238,6 +1238,15 @@ def fetch_game_log(sb, season_id: str) -> None:
         status = g.get("game_status", "") or g.get("status", "") or ""
         is_final = "final" in status.lower()
 
+        # venue_name comes back as "Arena Name | City" -- split into the two
+        # columns pwhl_game_log already has. This extraction existed before
+        # (commit 3c4de15) and was silently dropped in a0a555e during an
+        # unrelated _parse_game_date() refactor; restoring it here.
+        venue_raw = g.get("venue_name", "") or ""
+        venue_parts = [p.strip() for p in venue_raw.split("|")]
+        venue_name = venue_parts[0] if venue_parts else None
+        venue_city = venue_parts[1] if len(venue_parts) > 1 else None
+
         rows.append(
             {
                 "game_id": int(gid),
@@ -1252,6 +1261,8 @@ def fetch_game_log(sb, season_id: str) -> None:
                 "game_state": "Final" if is_final else status,
                 "ot": bool(g.get("ot")),
                 "shootout": bool(g.get("shootout")),
+                "venue_name": venue_name or None,
+                "venue_city": venue_city or None,
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
