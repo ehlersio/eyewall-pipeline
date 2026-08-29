@@ -128,6 +128,57 @@ CODE_TO_TEAM_ID = {v: k for k, v in TEAM_ID_MAP.items()}
 # ── Season resolution ───────────────────────────────────────────────────────
 
 
+def _log_empty_body_diagnostics(view: str, params: dict, r, attempt: int) -> None:
+    """Diagnostic-only logging for the still-unexplained "HTTP 200 with a
+    completely empty body" failure mode -- confirmed live 2026-08-29 across
+    two separate production ahl-nightly.yml runs, ~24 minutes apart, with
+    the EXACT same ~23 of 32 team_ids failing both times, plus a third
+    live reproduction from a completely different (non-GitHub-Actions)
+    network path minutes later, immediately followed by 5 clean successes
+    in a tight loop from that same path -- ruling out "GitHub-Actions-only"
+    entirely.
+
+    This confirmed there's no CDN in front of this host at all -- it's a
+    bare `Server: Apache/2.4.68 () PHP/8.2.33` origin -- but it DOES have
+    its own response cache: `Cache-Control: max-age=240` plus a custom
+    `X-Cache-Status` header, observed as `STALE_UPDATE` on a normal
+    (successful) request. "Stale-while-revalidate"-style caches can
+    transiently serve an empty/short-circuited response while a cache
+    entry is mid-regeneration -- consistent with everything observed
+    (deterministic within a ~240s window, clears on its own, not tied to
+    request volume/headers/network path). Not yet PROVEN -- this function
+    exists to capture whether X-Cache-Status (and Content-Encoding, since
+    responses are gzipped and a corrupt/truncated gzip stream during a
+    cache-regen race could also decode to empty without requests raising)
+    actually differs between a success and a failure, next time this
+    recurs, rather than staying on the "confirmed cache-adjacent, exact
+    mechanism unproven" theory this docstring currently reflects. Safe to
+    remove once confirmed and either fixed or accepted as a known gap.
+    """
+    interesting_headers = {
+        k: v
+        for k, v in r.headers.items()
+        if k.lower()
+        in (
+            "x-cache-status",
+            "cache-control",
+            "content-encoding",
+            "content-length",
+            "content-type",
+            "vary",
+            "server",
+            "date",
+            "connection",
+        )
+    }
+    log.warning(
+        f"    [diagnostic] empty-body response for modulekit/{view} "
+        f"team_id={params.get('team_id')} season_id={params.get('season_id')} "
+        f"(attempt {attempt + 1}): status={r.status_code} "
+        f"body_len={len(r.content)} headers={interesting_headers}"
+    )
+
+
 def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
     """GET a feed=modulekit view and return the parsed SiteKit body. Same
     JSONP strip-and-retry pattern as ht_get() below -- kept separate
@@ -149,12 +200,21 @@ def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
             r = requests.get(HOCKEYTECH_BASE, params=p, headers=HEADERS, timeout=20)
             if r.status_code == 200:
                 text = r.text.strip()
-                if "(" in text:
-                    text = text[text.index("(") + 1 : text.rindex(")")]
-                data = json.loads(text)
-                return data.get("SiteKit", {}) if isinstance(data, dict) else {}
-            log.warning(f"HT modulekit/{view} status {r.status_code} (attempt {attempt + 1})")
-            last_err = f"status {r.status_code}"
+                if not text:
+                    # The specific mystery case, not a generic parse
+                    # failure -- see _log_empty_body_diagnostics()'s
+                    # docstring. Logged separately from the generic
+                    # json.loads failure below so it's easy to grep for.
+                    _log_empty_body_diagnostics(view, p, r, attempt)
+                    last_err = "empty body"
+                else:
+                    if "(" in text:
+                        text = text[text.index("(") + 1 : text.rindex(")")]
+                    data = json.loads(text)
+                    return data.get("SiteKit", {}) if isinstance(data, dict) else {}
+            else:
+                log.warning(f"HT modulekit/{view} status {r.status_code} (attempt {attempt + 1})")
+                last_err = f"status {r.status_code}"
         except Exception as e:
             log.warning(f"HT modulekit/{view} error: {e} (attempt {attempt + 1})")
             last_err = str(e)
