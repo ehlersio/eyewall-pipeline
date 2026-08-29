@@ -331,10 +331,40 @@ def ingest_game(sb, gid: int, home_id: int, season_id: str, season_type: str) ->
             sb.table("ahl_players").upsert(stubs, on_conflict="player_id").execute()
             log.info(f"    Inserted {len(missing)} unknown player stubs: {missing}")
 
-    for j in range(0, len(rows), 200):
+    # Deduplicate within this game before upserting -- confirmed live
+    # 2026-08-29 (production run, 5/89 games in one season hit this): two
+    # shot events can share the same (game_id, event_type, period_id,
+    # time_seconds, team_id, shooter_id) if a player has two distinct shots
+    # in the same recorded second, which crashes a single-statement upsert
+    # with Postgres error 21000 ("ON CONFLICT DO UPDATE command cannot
+    # affect row a second time") -- the same failure mode PWHL's
+    # pwhl_shot_events.py already found and fixed the same way. x_raw/y_raw
+    # are folded into the key to disambiguate: a real duplicate will have
+    # identical coordinates and still collapse correctly, while two
+    # genuinely different shots will almost always differ in location.
+    seen = set()
+    deduped = []
+    for row in rows:
+        key = (
+            row["game_id"],
+            row["event_type"],
+            row["period_id"],
+            row["time_seconds"],
+            row["team_id"],
+            row["shooter_id"],
+            row["x_raw"],
+            row["y_raw"],
+        )
+        if key not in seen:
+            seen.add(key)
+            deduped.append(row)
+    if len(deduped) < len(rows):
+        log.info(f"    Deduplicated {len(rows) - len(deduped)} duplicate events")
+
+    for j in range(0, len(deduped), 200):
         sb.table("ahl_shot_events").upsert(
-            rows[j : j + 200],
-            on_conflict="game_id,event_type,period_id,time_seconds,team_id,shooter_id",
+            deduped[j : j + 200],
+            on_conflict="game_id,event_type,period_id,time_seconds,team_id,shooter_id,x_raw,y_raw",
         ).execute()
 
     goals = sum(1 for r in rows if r["event_type"] == "goal")

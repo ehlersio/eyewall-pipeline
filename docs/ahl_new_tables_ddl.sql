@@ -186,8 +186,15 @@ create table public.ahl_shot_events (
   is_insurance_goal boolean,     -- goal rows only
   is_game_winning_goal boolean,  -- goal rows only
   created_at timestamptz not null default now(),
+  -- Includes x_raw/y_raw (not just game/event/period/time/team/shooter) --
+  -- two shots by the same shooter in the same recorded second are real and
+  -- confirmed live (2026-08-29 production run), and without the
+  -- coordinates in the key a same-batch upsert crashes with Postgres error
+  -- 21000 ("ON CONFLICT DO UPDATE command cannot affect row a second
+  -- time"). See docs/ahl_shot_events_constraint_fix.sql if this table
+  -- already exists with the narrower constraint from an earlier apply.
   constraint ahl_shot_events_natural_key
-    unique (game_id, event_type, period_id, time_seconds, team_id, shooter_id)
+    unique (game_id, event_type, period_id, time_seconds, team_id, shooter_id, x_raw, y_raw)
 );
 
 create index ahl_shot_events_game_id_idx on public.ahl_shot_events (game_id);
