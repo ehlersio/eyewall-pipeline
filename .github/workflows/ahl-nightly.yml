@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '40 7 * * *'  # 3:40 AM ET (UTC-4 during EDT) — offset 20min after PWHL pipeline
   workflow_dispatch:
+    inputs:
+      season_id:
+        description: 'HockeyTech season_id to backfill (blank = live-resolve "current" season, same as the nightly cron)'
+        required: false
+        default: ''
 
 jobs:
   run-ahl-pipeline:
@@ -29,31 +34,39 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_stats.py
+        run: python ahl_stats.py "${{ inputs.season_id }}"
         # Populates ahl_game_log (which games are Final), ahl_players,
         # ahl_player_seasons, ahl_goalie_seasons, ahl_team_seasons.
         # Everything below this step depends on ahl_game_log/ahl_players
         # being current. Season is live-resolved from HockeyTech's own
-        # seasons feed (see ahl_stats.py's module docstring for why this
+        # seasons feed when season_id is blank (the scheduled cron always
+        # passes blank -- see ahl_stats.py's module docstring for why this
         # doesn't go through season_lookup.py's Worker pattern yet) — no
-        # AHL_SEASON secret needed.
+        # AHL_SEASON secret needed. A manual workflow_dispatch run can pass
+        # a specific season_id to backfill a season the live resolver
+        # would never pick on its own (e.g. the most recently COMPLETED
+        # regular season, once resolve_current_season() has moved on to
+        # that season's playoffs or the next regular season).
 
       - name: Ingest AHL shot events (goals + shots with coordinates)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_shot_events.py
+        run: python ahl_shot_events.py "${{ inputs.season_id }}"
         # Skips games already in ahl_shot_events or ahl_skipped_games
         # (idempotent by default). Goal rows already carry assists/PP/SH/
         # EN/GWG flags straight from the PBP goal event -- no gameSummary
         # merge step needed (unlike PWHL's pipeline), so there's no
         # equivalent of pwhl_stats.py's --gw-goals-rollup-only step here.
+        # Reads completed games from ahl_game_log for this season_id, so
+        # this step only finds work once the ahl_stats.py step above has
+        # populated that season's game log.
 
       - name: Ingest AHL penalty shots
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_penalty_shots.py
+        run: python ahl_penalty_shots.py "${{ inputs.season_id }}"
         # Skips games already in ahl_penalty_shots or ahl_skipped_games
         # (idempotent by default). Independent of the shot-events step
         # above (own PBP fetch, own skip-tracking pipeline name) -- order
