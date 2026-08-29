@@ -1,0 +1,64 @@
+name: EyeWall AHL Nightly Pipeline
+
+on:
+  schedule:
+    - cron: '40 7 * * *'  # 3:40 AM ET (UTC-4 during EDT) — offset 20min after PWHL pipeline
+  workflow_dispatch:
+
+jobs:
+  run-ahl-pipeline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ahl_stats.py (rosters, player/goalie/team stats, game log)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ahl_stats.py
+        # Populates ahl_game_log (which games are Final), ahl_players,
+        # ahl_player_seasons, ahl_goalie_seasons, ahl_team_seasons.
+        # Everything below this step depends on ahl_game_log/ahl_players
+        # being current. Season is live-resolved from HockeyTech's own
+        # seasons feed (see ahl_stats.py's module docstring for why this
+        # doesn't go through season_lookup.py's Worker pattern yet) — no
+        # AHL_SEASON secret needed.
+
+      - name: Ingest AHL shot events (goals + shots with coordinates)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ahl_shot_events.py
+        # Skips games already in ahl_shot_events or ahl_skipped_games
+        # (idempotent by default). Goal rows already carry assists/PP/SH/
+        # EN/GWG flags straight from the PBP goal event -- no gameSummary
+        # merge step needed (unlike PWHL's pipeline), so there's no
+        # equivalent of pwhl_stats.py's --gw-goals-rollup-only step here.
+
+      - name: Ingest AHL penalty shots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ahl_penalty_shots.py
+        # Skips games already in ahl_penalty_shots or ahl_skipped_games
+        # (idempotent by default). Independent of the shot-events step
+        # above (own PBP fetch, own skip-tracking pipeline name) -- order
+        # relative to it doesn't matter, placed last for readability.
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "AHL pipeline failed — check logs above"
