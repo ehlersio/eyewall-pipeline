@@ -48,6 +48,17 @@ jobs:
         # regular season, once resolve_current_season() has moved on to
         # that season's playoffs or the next regular season).
 
+      - name: Run ahl_game_boxscore.py (per-game player box score)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ahl_game_boxscore.py "${{ inputs.season_id }}"
+        # Populates ahl_skater_game_box/ahl_goalie_game_box -- per-game
+        # granularity ahl_player_seasons/ahl_goalie_seasons don't have.
+        # Reads completed games from ahl_game_log, so must run after the
+        # ahl_stats.py step above. Skips games already in
+        # ahl_skater_game_box or ahl_skipped_games (idempotent by default).
+
       - name: Ingest AHL shot events (goals + shots with coordinates)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
