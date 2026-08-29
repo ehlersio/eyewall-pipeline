@@ -128,36 +128,38 @@ CODE_TO_TEAM_ID = {v: k for k, v in TEAM_ID_MAP.items()}
 # ── Season resolution ───────────────────────────────────────────────────────
 
 
-def _log_empty_payload_diagnostics(view: str, params: dict, r, raw_text: str, attempt: int) -> None:
-    """Diagnostic-only logging for the still-unexplained "empty JSONP
-    payload" failure mode -- confirmed live 2026-08-29 across two separate
-    production ahl-nightly.yml runs, ~24 minutes apart, with the EXACT same
-    ~23 of 32 team_ids failing both times, plus a third live reproduction
-    from a completely different (non-GitHub-Actions) network path minutes
-    later, immediately followed by 5 clean successes in a tight loop from
-    that same path -- ruling out "GitHub-Actions-only" entirely.
+def _log_parse_failure_diagnostics(view: str, params: dict, r, raw_text: str, attempt: int) -> None:
+    """Diagnostic-only logging for the still-unexplained roster-fetch
+    parse failure -- confirmed live 2026-08-29 across THREE separate
+    production ahl-nightly.yml runs, with the EXACT same ~23 of 32
+    team_ids failing every time, plus a live reproduction from a
+    completely different (non-GitHub-Actions) network path, immediately
+    followed by 5 clean successes in a tight loop from that same path --
+    ruling out "GitHub-Actions-only" entirely.
 
-    NOTE on this function's own history: the first version of this
-    diagnostic (merged, then run once) checked for emptiness on the RAW
-    response text before JSONP-unwrapping, which never actually fires --
-    confirmed via that live run's own logs, which still showed the old
-    generic "Expecting value: line 1 column 1 (char 0)" message. The real
-    failure is a well-formed JSONP envelope with nothing between the
-    parens (`angular.callbacks._0()`), not a truly empty HTTP body -- the
-    raw text is non-empty, only the unwrapped payload is. This version
-    checks post-unwrap instead. Left this note in so a future reader
-    doesn't wonder why an "empty body" theory got revised to "empty
-    payload" mid-investigation.
+    NOTE on this function's own history, so a future reader doesn't
+    re-litigate a theory already tried and disproven twice: two earlier
+    versions of this diagnostic each guessed a specific failure SHAPE
+    (first "truly empty HTTP body", then "well-formed JSONP envelope with
+    nothing between the parens") and checked for exactly that shape --
+    both guesses were wrong, confirmed each time by the live run still
+    logging the OLD generic "Expecting value: line 1 column 1 (char 0)"
+    message instead of the new diagnostic line, meaning the actual
+    response text was neither empty-string nor empty-after-unwrap by
+    Python's `not text` test (most likely an invisible non-whitespace
+    character like a BOM that `str.strip()` doesn't remove, but that's
+    also unconfirmed -- see, this is exactly the kind of guess that keeps
+    being wrong). This version stops guessing the shape: it wraps the
+    actual json.loads() call and logs on whatever exception it actually
+    raises, so it fires regardless of what the malformed content turns
+    out to look like.
 
-    This also confirmed there's no CDN in front of this host at all -- a
-    bare `Server: Apache/2.4.68 () PHP/8.2.33` origin -- but it DOES have
-    its own response cache: `Cache-Control: max-age=240` plus a custom
+    This also confirmed there's no CDN in front of this host -- a bare
+    `Server: Apache/2.4.68 () PHP/8.2.33` origin -- but it DOES have its
+    own response cache: `Cache-Control: max-age=240` plus a custom
     `X-Cache-Status` header, observed as `STALE_UPDATE` on a normal
-    (successful) request. A cache-regeneration race transiently serving an
-    empty payload is the working theory, not yet proven. This function
-    captures the headers needed to confirm or rule it out next time, plus
-    the raw pre-unwrap text itself so a genuinely different failure shape
-    (not just an empty-parens envelope) would also be visible.
+    (successful) request. A cache-regeneration race transiently serving a
+    malformed payload is the working theory, not yet proven.
     """
     interesting_headers = {
         k: v
@@ -176,10 +178,10 @@ def _log_empty_payload_diagnostics(view: str, params: dict, r, raw_text: str, at
         )
     }
     log.warning(
-        f"    [diagnostic] empty JSONP payload for modulekit/{view} "
+        f"    [diagnostic] parse failure for modulekit/{view} "
         f"team_id={params.get('team_id')} season_id={params.get('season_id')} "
         f"(attempt {attempt + 1}): status={r.status_code} "
-        f"raw_text={raw_text!r} headers={interesting_headers}"
+        f"raw_text={raw_text!r} raw_bytes={r.content!r} headers={interesting_headers}"
     )
 
 
@@ -204,21 +206,21 @@ def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
             r = requests.get(HOCKEYTECH_BASE, params=p, headers=HEADERS, timeout=20)
             if r.status_code == 200:
                 raw_text = r.text.strip()
-                text = raw_text
-                if "(" in text:
-                    text = text[text.index("(") + 1 : text.rindex(")")]
-                if not text:
-                    # The specific mystery case: a well-formed JSONP
-                    # envelope with nothing between the parens, not a
-                    # truly empty body -- see
-                    # _log_empty_payload_diagnostics()'s docstring. Logged
-                    # separately from a genuine json.loads failure below
-                    # (malformed-but-non-empty payload) so the two don't
-                    # get confused in the logs.
-                    _log_empty_payload_diagnostics(view, p, r, raw_text, attempt)
-                    last_err = "empty payload"
-                else:
+                try:
+                    text = raw_text
+                    if "(" in text:
+                        text = text[text.index("(") + 1 : text.rindex(")")]
                     data = json.loads(text)
+                except ValueError:
+                    # Covers both json.loads() failing on malformed/empty
+                    # content AND text.rindex(")") failing on an
+                    # unclosed envelope -- don't guess the failure shape
+                    # (see _log_parse_failure_diagnostics()'s docstring
+                    # for two prior wrong guesses), just log on whatever
+                    # actually goes wrong parsing this response.
+                    _log_parse_failure_diagnostics(view, p, r, raw_text, attempt)
+                    last_err = "unparseable response"
+                else:
                     return data.get("SiteKit", {}) if isinstance(data, dict) else {}
             else:
                 log.warning(f"HT modulekit/{view} status {r.status_code} (attempt {attempt + 1})")
