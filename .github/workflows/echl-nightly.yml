@@ -30,6 +30,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run echl_news.py (fetch RSS news, POST to Worker)
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          EYEWALL_POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+        run: python echl_news.py
+        # Independent of the rest of this workflow (no Supabase dependency,
+        # no season_id) -- placed first so a news-source outage never
+        # blocks the stats/box-score/shot-event ingestion below it, same
+        # ordering rationale as ahl-nightly.yml's own ahl_news.py step.
+
       - name: Run echl_stats.py (rosters, player/goalie/team stats, game log)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
