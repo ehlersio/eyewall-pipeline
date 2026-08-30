@@ -1,37 +1,42 @@
 """
-ahl_stats.py — AHL data pipeline module
+echl_stats.py — ECHL data pipeline module
 
 Fetches rosters, skater stats, goalie stats, team stats/standings, and the
-game log from the HockeyTech feed used by theahl.com and writes to
-Supabase. Structurally mirrors pwhl_stats.py (same vendor, same
-`sections[].data[].row` response shape for statviewfeed views), but several
-real field/param differences are called out in comments below rather than
-assumed — see docs/hockeytech-ahl-api-notes.md for the full investigation
-this was built from.
+game log from the HockeyTech feed used by echl.com and writes to Supabase.
+Structurally mirrors ahl_stats.py (same vendor, same view shapes,
+confirmed live 2026-08-30) -- see docs/hockeytech-ahl-api-notes.md and
+ECHL_BUILD_BRIEF.md for the underlying investigation this was built from.
 
 Usage:
-    python ahl_stats.py                  # current season (live-resolved)
-    python ahl_stats.py 90                # specific season_id (90 = 2025-26 Regular)
+    python echl_stats.py                  # current season (live-resolved)
+    python echl_stats.py 73               # specific season_id (73 = 2025-26 Regular)
 
-Season resolution (deliberately NOT going through season_lookup.py's
-Worker-backed pattern that pwhl_stats.py/nhl_stats.py use): this is AHL's
-first pipeline module, and eyewall-poller has no AHL season config
-endpoint yet — adding one is a fast-follow, not a blocker for this PR.
-_resolve_current_season() below queries HockeyTech's own live `seasons`
-feed directly instead, with an env var fallback. Once eyewall-poller grows
-an AHL /config/seasons entry, this should move to season_lookup.py's
-pattern for consistency with pwhl_stats.py/nhl_stats.py — not done now to
-avoid a cross-repo dependency in AHL's very first PR.
+One real operational difference from AHL/PWHL/OHL/WHL/QMJHL: this
+league's HockeyTech key is NOT exposed on echl.com's own site (it was
+rebuilt on Laravel/Livewire and renders stats server-side, so the usual
+"open the network tab" recovery path doesn't work). This key was
+recovered from sportsdataverse-py's league registry
+(sportsdataverse/hockeytech/_leagues.py) and independently re-verified
+live against the real feed. If this key ever stops working, re-check
+that registry first -- a network-tab hunt on echl.com will not work, for
+the same reason it didn't during the original investigation.
 
-Response structure note (docs/hockeytech-ahl-api-notes.md has the full
-investigation):
-    feed=statviewfeed views (players, teams) use the same
-    sections[].data[].row shape as PWHL -- extract_rows() below is an
-    unmodified copy of pwhl_stats.py's helper.
+Season resolution: same live-resolution pattern as ahl_stats.py (not
+season_lookup.py's Worker-backed pattern) -- see that module's docstring
+for the full rationale, unchanged here.
+
+Response structure note (same as ahl_stats.py):
+    feed=statviewfeed views (players, teams) use the sections[].data[].row
+    shape -- extract_rows() below is an unmodified copy.
     feed=modulekit views (roster, teamsbyseason, seasons, scorebar) nest
-    everything under a top-level "SiteKit" key instead -- a real
-    structural difference from how pwhl_stats.py calls modulekit views,
-    handled per-function below rather than through a shared helper.
+    everything under a top-level "SiteKit" key instead.
+
+One real field-shape difference from AHL, confirmed live 2026-08-30:
+ECHL's `players` (skaters) statviewfeed rows carry `team_name` (e.g.
+"Kansas City Mavericks"), NOT `team_code` the way AHL's/the goalie/team
+views do -- fetch_skater_stats() below resolves team_id via a
+NAME_TO_TEAM_ID map instead of CODE_TO_TEAM_ID for that one view only.
+Goalie and team views both carry `team_code` as normal.
 """
 
 import json
@@ -56,131 +61,105 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
-HOCKEYTECH_KEY = "ccb91f29d6744675"
-CLIENT_CODE = "ahl"
-SITE_ID = "3"
-LEAGUE_ID = "4"
+HOCKEYTECH_KEY = "2c2b89ea7345cae8"
+CLIENT_CODE = "echl"
+SITE_ID = "0"
+LEAGUE_ID = "1"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
-    "Referer": "https://theahl.com/",
+    "Referer": "https://echl.com/",
 }
 
-# Current as of season 94 (2026-27) -- confirmed live via
-# feed=modulekit&view=teamsbyseason 2026-08-29. Hardcoded rather than
-# fetched at runtime, same convention as pwhl_stats.py's TEAM_ID_MAP (no
-# ahl_teams table exists in this pipeline, same as PWHL -- team display
-# metadata lives in the frontend, not here).
+# Current as of season 77 (2026 Preseason) / 78 (2026-27 Regular) --
+# confirmed live via feed=modulekit&view=teamsbyseason 2026-08-30.
+# Hardcoded rather than fetched at runtime, same convention as
+# ahl_stats.py's TEAM_ID_MAP/pwhl_stats.py's TEAM_ID_MAP (no echl_teams
+# table exists in this pipeline -- team display metadata lives in the
+# frontend, not here).
 TEAM_ID_MAP = {
-    "307": "HFD",  # Hartford Wolf Pack
-    "309": "PRO",  # Providence Bruins
-    "313": "LV",  # Lehigh Valley Phantoms
-    "316": "WBS",  # Wilkes-Barre/Scranton Penguins
-    "319": "HER",  # Hershey Bears
-    "321": "MB",  # Manitoba Moose
-    "323": "ROC",  # Rochester Americans
-    "324": "SYR",  # Syracuse Crunch
-    "327": "MIL",  # Milwaukee Admirals
-    "328": "GR",  # Grand Rapids Griffins
-    "330": "CHI",  # Chicago Wolves
-    "335": "TOR",  # Toronto Marlies
-    "372": "RFD",  # Rockford IceHogs
-    "373": "CLE",  # Cleveland Monsters
-    "380": "TEX",  # Texas Stars
-    "384": "CLT",  # Charlotte Checkers
-    "389": "IA",  # Iowa Wild
-    "390": "UTC",  # Utica Comets
-    "402": "BAK",  # Bakersfield Condors
-    "403": "ONT",  # Ontario Reign
-    "404": "SD",  # San Diego Gulls
-    "405": "SJ",  # San Jose Barracuda
-    "411": "SPR",  # Springfield Thunderbirds
-    "412": "TUC",  # Tucson Roadrunners
-    "413": "BEL",  # Belleville Senators
-    "415": "LAV",  # Laval Rocket
-    "419": "COL",  # Colorado Eagles
-    "437": "HSK",  # Henderson Silver Knights
-    "440": "ABB",  # Abbotsford Canucks
-    "444": "CGY",  # Calgary Wranglers
-    "445": "CV",  # Coachella Valley Firebirds
-    "457": "HAM",  # Hamilton Hammers (2026-27 -- relocated from Bridgeport, CT;
-    # see "317": "BRI" below for the same franchise's identity in earlier seasons)
+    "74": "ADK",  # Adirondack Thunder
+    "66": "ALN",  # Allen Americans
+    "10": "ATL",  # Atlanta Gladiators
+    "107": "BLM",  # Bloomington Bison
+    "5": "CIN",  # Cincinnati Cyclones
+    "8": "FLA",  # Florida Everblades
+    "60": "FW",  # Fort Wayne Komets
+    "108": "GSO",  # Greensboro Gargoyles
+    "52": "GVL",  # Greenville Swamp Rabbits
+    "11": "IDH",  # Idaho Steelheads
+    "65": "IND",  # Indy Fuel
+    "79": "JAX",  # Jacksonville Icemen
+    "50": "KAL",  # Kalamazoo Wings
+    "68": "KC",  # Kansas City Mavericks
+    "82": "MNE",  # Maine Mariners
+    "114": "NM",  # New Mexico Goatheads
+    "76": "NOR",  # Norfolk Admirals
+    "61": "ORL",  # Orlando Solar Bears
+    "70": "RC",  # Rapid City Rush
+    "17": "REA",  # Reading Royals
+    "102": "SAV",  # Savannah Ghost Pirates
+    "18": "SC",  # South Carolina Stingrays
+    "106": "TAH",  # Tahoe Knight Monsters
+    "21": "TOL",  # Toledo Walleye
+    "113": "TRE",  # Trenton Ironhawks
+    "99": "TR",  # Trois-Rivières Lions
+    "71": "TUL",  # Tulsa Oilers
+    "25": "WHL",  # Wheeling Nailers
+    "72": "WIC",  # Wichita Thunder
+    "77": "WOR",  # Worcester Railers
 }
-
-# Historical franchise renames/relocations -- NOT in TEAM_ID_MAP above because
-# teamsbyseason (which TEAM_ID_MAP is built from) only ever returns each
-# franchise's CURRENT identity, even when queried with an old season_id
-# (confirmed live 2026-08-29: teamsbyseason&season=90 still returned "HAM",
-# never "BRI", despite season 90's own standings/player-stats data using
-# "BRI" throughout). Ingesting an old season needs the OLD code merged in.
-# Add entries here, not to TEAM_ID_MAP, as more renames are discovered.
-_HISTORICAL_TEAM_CODES = {
-    "317": "BRI",  # Bridgeport Islanders -- team_id for HAM (457) prior to the
-    # 2026-27 relocation. Confirmed via a live scorebar game (BRI @ ALB,
-    # season 90) -- HomeID/VisitorID are given directly by that view, no
-    # code-matching needed to find this.
-}
-TEAM_ID_MAP.update(_HISTORICAL_TEAM_CODES)
 CODE_TO_TEAM_ID = {v: k for k, v in TEAM_ID_MAP.items()}
+
+# Full team names as returned by the `players` (skaters) statviewfeed view's
+# own `team_name` field -- confirmed live 2026-08-30 these are clean (no
+# clinch-prefix, unlike team_code elsewhere) and stable. Only needed for
+# fetch_skater_stats(); every other view in this module uses team_code.
+TEAM_ID_BY_NAME = {
+    "Adirondack Thunder": "74",
+    "Allen Americans": "66",
+    "Atlanta Gladiators": "10",
+    "Bloomington Bison": "107",
+    "Cincinnati Cyclones": "5",
+    "Florida Everblades": "8",
+    "Fort Wayne Komets": "60",
+    "Greensboro Gargoyles": "108",
+    "Greenville Swamp Rabbits": "52",
+    "Idaho Steelheads": "11",
+    "Indy Fuel": "65",
+    "Jacksonville Icemen": "79",
+    "Kalamazoo Wings": "50",
+    "Kansas City Mavericks": "68",
+    "Maine Mariners": "82",
+    "New Mexico Goatheads": "114",
+    "Norfolk Admirals": "76",
+    "Orlando Solar Bears": "61",
+    "Rapid City Rush": "70",
+    "Reading Royals": "17",
+    "Savannah Ghost Pirates": "102",
+    "South Carolina Stingrays": "18",
+    "Tahoe Knight Monsters": "106",
+    "Toledo Walleye": "21",
+    "Trenton Ironhawks": "113",
+    "Trois-Rivières Lions": "99",
+    "Tulsa Oilers": "71",
+    "Wheeling Nailers": "25",
+    "Wichita Thunder": "72",
+    "Worcester Railers": "77",
+}
 
 
 # ── Season resolution ───────────────────────────────────────────────────────
 
 
 def _log_parse_failure_diagnostics(view: str, params: dict, r, raw_text: str, attempt: int) -> None:
-    """Diagnostic-only logging for the still-unexplained roster-fetch
-    parse failure -- confirmed live 2026-08-29 across THREE separate
-    production ahl-nightly.yml runs, with the EXACT same ~23 of 32
-    team_ids failing every time, plus a live reproduction from a
-    completely different (non-GitHub-Actions) network path, immediately
-    followed by 5 clean successes in a tight loop from that same path --
-    ruling out "GitHub-Actions-only" entirely.
-
-    NOTE on this function's own history, so a future reader doesn't
-    re-litigate a theory already tried and disproven twice: two earlier
-    versions of this diagnostic each guessed a specific failure SHAPE
-    (first "truly empty HTTP body", then "well-formed JSONP envelope with
-    nothing between the parens") and checked for exactly that shape --
-    both guesses were wrong, confirmed each time by the live run still
-    logging the OLD generic "Expecting value: line 1 column 1 (char 0)"
-    message instead of the new diagnostic line, meaning the actual
-    response text was neither empty-string nor empty-after-unwrap by
-    Python's `not text` test (most likely an invisible non-whitespace
-    character like a BOM that `str.strip()` doesn't remove, but that's
-    also unconfirmed -- see, this is exactly the kind of guess that keeps
-    being wrong). This version stops guessing the shape: it wraps the
-    actual json.loads() call and logs on whatever exception it actually
-    raises, so it fires regardless of what the malformed content turns
-    out to look like.
-
-    This also confirmed there's no CDN in front of this host -- a bare
-    `Server: Apache/2.4.68 () PHP/8.2.33` origin -- but it DOES have its
-    own response cache: `Cache-Control: max-age=240` plus a custom
-    `X-Cache-Status` header, observed as `STALE_UPDATE` on a normal
-    (successful) request. A cache-regeneration race transiently serving a
-    malformed payload is the working theory, not yet proven.
-
-    RESOLVED 2026-08-30, while building echl_stats.py: the actual bug was
-    in _modulekit_get()'s own JSONP-unwrap logic, not the HTTP layer.
-    modulekit/roster responses are plain JSON, never JSONP-wrapped, but
-    routinely contain literal parentheses inside real field values
-    (draft_status strings like "Prince George Cougars (WHL) (College)
-    2019"). The old `if "(" in text: text = text[text.index("(")+1:
-    text.rindex(")")]` treated the FIRST '(' anywhere in the payload as a
-    JSONP open-paren and the LAST ')' anywhere as its close, corrupting
-    otherwise-valid JSON. Reproduced directly: 32 of 33 AHL teams' season-
-    90 rosters failed under the old logic, 0 failed after fixing the
-    unwrap to only fire when the response actually starts-with/ends-with
-    parens -- matches this docstring's own "~23 of 32 team_ids failing
-    every time" observation closely enough (exact count depends on how
-    deep into the season, i.e. how many players have an affiliation
-    string on record) to treat this as the real root cause, not another
-    guess. The cache-regeneration theory above was never it. This
-    function and its diagnostic logging are kept as-is (harmless,
-    possibly still useful if something else ever goes wrong here) rather
-    than deleted now that the immediate mystery is solved.
-    """
+    """Diagnostic-only logging, ported from ahl_stats.py's identical
+    helper -- that module hit an unexplained intermittent parse failure
+    on modulekit/roster in production (same vendor/infra), so this is
+    kept here defensively in case the same thing happens for ECHL. See
+    ahl_stats.py's version of this function for the full history of what
+    was already tried and ruled out there."""
     interesting_headers = {
         k: v
         for k, v in r.headers.items()
@@ -206,10 +185,8 @@ def _log_parse_failure_diagnostics(view: str, params: dict, r, raw_text: str, at
 
 
 def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
-    """GET a feed=modulekit view and return the parsed SiteKit body. Same
-    JSONP strip-and-retry pattern as ht_get() below -- kept separate
-    because modulekit's response nests under "SiteKit" while statviewfeed
-    does not (see module docstring)."""
+    """GET a feed=modulekit view and return the parsed SiteKit body.
+    Unmodified copy of ahl_stats.py's helper except for auth params."""
     p = {
         "feed": "modulekit",
         "view": view,
@@ -230,35 +207,24 @@ def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
                     text = raw_text
                     # Only strip a JSONP wrapper if the response actually
                     # IS one (starts with '(' and ends with ')') -- found
-                    # live 2026-08-30 while building echl_stats.py that
-                    # modulekit/roster responses are plain JSON, never
-                    # JSONP-wrapped, but routinely contain literal
-                    # parentheses inside real field values (draft_status
-                    # strings like "Prince George Cougars (WHL) (College)
-                    # 2019"). The old unconditional `if "(" in text` check
-                    # treated the FIRST '(' anywhere in the payload as a
-                    # JSONP open-paren and the LAST ')' anywhere as its
-                    # close, slicing straight through the middle of
-                    # otherwise-valid JSON and corrupting it -- reproduced
-                    # directly against a real AHL roster response and
-                    # confirmed to fail json.loads() the same way. This
-                    # very likely IS the root cause of this function's own
-                    # long-unexplained "roster-fetch mystery" documented in
-                    # _log_parse_failure_diagnostics()'s docstring below
-                    # (~23 of 32 teams failing every run, non-
-                    # deterministically by team -- exactly what "does this
-                    # team's roster happen to include a parenthesized
-                    # draft/college affiliation string" would produce).
+                    # live 2026-08-30 that modulekit/roster responses are
+                    # plain JSON, never JSONP-wrapped, but routinely
+                    # contain literal parentheses inside real field values
+                    # (draft_status strings like "Prince George Cougars
+                    # (WHL) (College) 2019"). The old unconditional
+                    # `if "(" in text` check treated the FIRST '(' anywhere
+                    # in the payload as a JSONP open-paren and the LAST ')'
+                    # anywhere as its close, slicing straight through the
+                    # middle of otherwise-valid JSON and corrupting it.
+                    # This very likely explains ahl_stats.py's own
+                    # long-unexplained "roster-fetch mystery" (~23 of 32
+                    # AHL teams failing every run, non-deterministically
+                    # by team) -- see that module's matching fix and this
+                    # function's sibling docstring for the full history.
                     if text.startswith("(") and text.endswith(")"):
                         text = text[1:-1]
                     data = json.loads(text)
                 except ValueError:
-                    # Covers both json.loads() failing on malformed/empty
-                    # content AND text.rindex(")") failing on an
-                    # unclosed envelope -- don't guess the failure shape
-                    # (see _log_parse_failure_diagnostics()'s docstring
-                    # for two prior wrong guesses), just log on whatever
-                    # actually goes wrong parsing this response.
                     _log_parse_failure_diagnostics(view, p, r, raw_text, attempt)
                     last_err = "unparseable response"
                 else:
@@ -275,11 +241,8 @@ def _modulekit_get(view: str, params: dict, retries: int = 3) -> dict:
 
 
 def _season_type_from_name(season_name: str, playoff: str, career: str) -> str:
-    """AHL's `seasons` feed doesn't have a single flag that cleanly
-    separates preseason/all-star/showcase the way PWHL's hardcoded
-    SEASON_TYPE_MAP does -- derive from the season's own name string
-    instead, falling back to the career/playoff flags. See
-    docs/hockeytech-ahl-api-notes.md."""
+    """Same derivation as ahl_stats.py -- ECHL's seasons feed has the
+    identical career/playoff-flag shape, no single clean type flag."""
     name_lower = (season_name or "").lower()
     if playoff == "1" or "playoffs" in name_lower:
         return "playoffs"
@@ -299,27 +262,18 @@ def _fetch_seasons() -> list[dict]:
 
 def resolve_current_season() -> dict:
     """Returns {"season_id": int, "season_type": str}, live-resolved from
-    HockeyTech's own seasons feed (see module docstring for why this
-    doesn't go through season_lookup.py's Worker pattern yet). Falls back
-    to the AHL_SEASON env var (default 90 = 2025-26 Regular Season, the
-    most recent season with real data as of this module's introduction)
-    if the live feed is unreachable.
-
-    Picks the most recent career="1" season whose start_date has already
-    passed -- NOT simply the max season_id. Confirmed live 2026-08-29: the
-    seasons feed's highest career=1 season_id (94, "2026-27 Regular
-    Season") has a start_date of 2026-10-02, still in the future -- taking
-    it naively returns a season with zero games, the exact mistake
-    docs/hockeytech-api-notes.md's "Season discrepancy" section already
-    documents PWHL's own site widgets deliberately avoid ("each falls back
-    to whichever season actually has data"). This function's fix is the
-    AHL/statviewfeed equivalent of that same lesson.
-    """
-    fallback = {"season_id": int(os.environ.get("AHL_SEASON") or "90"), "season_type": "regular"}
+    HockeyTech's own seasons feed. Falls back to the ECHL_SEASON env var
+    (default 73 = 2025-26 Regular Season, the most recent completed
+    season as of this module's introduction) if the live feed is
+    unreachable. Same "most recent started career=1 season, not simply
+    max season_id" logic as ahl_stats.py -- see that function's docstring
+    for why a naive max() is wrong (a future/not-yet-started season with
+    zero games would otherwise be picked)."""
+    fallback = {"season_id": int(os.environ.get("ECHL_SEASON") or "73"), "season_type": "regular"}
     try:
         seasons = _fetch_seasons()
     except FetchError as e:
-        log.warning(f"  Could not resolve live AHL season, using fallback: {e}")
+        log.warning(f"  Could not resolve live ECHL season, using fallback: {e}")
         return fallback
 
     today = datetime.now(UTC).date().isoformat()
@@ -338,10 +292,8 @@ def resolve_current_season() -> dict:
 
 
 def resolve_season_type(season_id: str) -> str:
-    """Look up season_type for an arbitrary (not necessarily current)
-    season_id, for CLI-provided season_ids. Falls back to "regular" only
-    if the season genuinely can't be found -- logs a warning rather than
-    silently guessing, same spirit as PWHL's get_season_type() docstring."""
+    """Look up season_type for an arbitrary season_id. Unmodified copy of
+    ahl_stats.py's helper."""
     try:
         seasons = _fetch_seasons()
     except FetchError as e:
@@ -360,9 +312,9 @@ def resolve_season_type(season_id: str) -> str:
 
 
 def ht_get(params: dict, retries: int = 3) -> list | dict:
-    """Hit the HockeyTech statviewfeed endpoint and return parsed response.
-    Raises FetchError after exhausting `retries` attempts. Unmodified copy
-    of pwhl_stats.py's helper except for the league-specific auth params."""
+    """Hit the HockeyTech statviewfeed endpoint and return parsed
+    response. Unmodified copy of ahl_stats.py's helper except for the
+    league-specific auth params."""
     p = {
         "feed": "statviewfeed",
         "key": HOCKEYTECH_KEY,
@@ -394,7 +346,7 @@ def ht_get(params: dict, retries: int = 3) -> list | dict:
 
 def extract_rows(data: list | dict) -> list[dict]:
     """Flatten HockeyTech sections response into a list of row dicts.
-    Unmodified copy of pwhl_stats.py's helper -- same statviewfeed shape."""
+    Unmodified copy of ahl_stats.py's helper."""
     rows = []
     sections = []
 
@@ -427,9 +379,9 @@ def upsert_chunk(sb, table: str, rows: list[dict], conflict: str) -> int:
 
 
 def _parse_height_inches(height_str) -> int | None:
-    """AHL's roster feed uses hyphenated feet-inches ("6-3"), NOT PWHL's
-    apostrophe format ("5'11") -- confirmed live 2026-08-29, needs its own
-    parse, not pwhl_stats.py's _HEIGHT_RE."""
+    """ECHL's roster feed uses the same hyphenated feet-inches format as
+    AHL's ("6-3"), confirmed live 2026-08-30 -- unmodified copy of
+    ahl_stats.py's parser."""
     if not height_str:
         return None
     parts = str(height_str).split("-")
@@ -443,14 +395,9 @@ def _parse_height_inches(height_str) -> int | None:
 
 
 def fetch_roster(sb, season_id: str) -> None:
-    """Fetch all team rosters and upsert to ahl_players.
-
-    Unlike pwhl_stats.py's fetch_roster(), this is a single flat list per
-    team (no Forwards/Defenders/Goalies sections -- position comes
-    straight off each row), and the season param for this specific view is
-    `season_id`, not `season` (see docs/hockeytech-ahl-api-notes.md --
-    sending `season` here silently returns an empty roster, not an error).
-    """
+    """Fetch all team rosters and upsert to echl_players. Same view/param
+    shape as ahl_stats.py's fetch_roster() -- season_id (not season) is
+    the correct param name here too, confirmed live 2026-08-30."""
     log.info("Fetching rosters...")
 
     for team_id, team_code in TEAM_ID_MAP.items():
@@ -498,7 +445,7 @@ def fetch_roster(sb, season_id: str) -> None:
                 }
             )
 
-        n = upsert_chunk(sb, "ahl_players", players_to_upsert, "player_id")
+        n = upsert_chunk(sb, "echl_players", players_to_upsert, "player_id")
         log.info(f"  {team_code}: {n} players upserted")
         time.sleep(0.3)
 
@@ -507,12 +454,14 @@ def fetch_roster(sb, season_id: str) -> None:
 
 
 def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
-    """Fetch league-wide skater stats and upsert to ahl_player_seasons.
+    """Fetch league-wide skater stats and upsert to echl_player_seasons.
 
-    AHL's `players` view lacks shooting_percentage/power_play_assists/
-    short_handed_assists entirely (present in PWHL's, confirmed absent
-    here, not just occasionally null -- see reference doc), so those
-    columns are left out rather than populated with a fabricated value.
+    Real difference from ahl_stats.py, confirmed live 2026-08-30: this
+    view's rows carry `team_name` (e.g. "Kansas City Mavericks"), not
+    `team_code` -- resolved via TEAM_ID_BY_NAME instead of
+    CODE_TO_TEAM_ID. Also confirmed absent from ECHL's players view,
+    same as AHL: shooting_percentage/power_play_assists/
+    short_handed_assists -- left out rather than fabricated.
     """
     log.info(f"Fetching skater stats (season {season_id})...")
 
@@ -539,7 +488,7 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
         pid = p.get("player_id")
         if not pid:
             continue
-        team_id = CODE_TO_TEAM_ID.get(p.get("team_code", ""))
+        team_id = TEAM_ID_BY_NAME.get(p.get("team_name", ""))
         full_name = p.get("name", "")
         name_parts = full_name.rsplit(" ", 1)
         player_stubs.append(
@@ -552,12 +501,12 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
-    upsert_chunk(sb, "ahl_players", player_stubs, "player_id")
+    upsert_chunk(sb, "echl_players", player_stubs, "player_id")
 
     rows = []
     for p in rows_raw:
         pid = p.get("player_id")
-        team_id = CODE_TO_TEAM_ID.get(p.get("team_code", ""))
+        team_id = TEAM_ID_BY_NAME.get(p.get("team_name", ""))
         if not pid:
             continue
 
@@ -580,7 +529,7 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
             }
         )
 
-    n = upsert_chunk(sb, "ahl_player_seasons", rows, "player_id,team_id,season_id,season_type")
+    n = upsert_chunk(sb, "echl_player_seasons", rows, "player_id,team_id,season_id,season_type")
     log.info(f"  {n} skater season rows upserted")
 
 
@@ -588,9 +537,9 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
 
 
 def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
-    """Fetch league-wide goalie stats and upsert to ahl_goalie_seasons.
-    Field shape matches PWHL's closely (see reference doc) -- unlike
-    fetch_skater_stats() above, no fields need to be dropped here."""
+    """Fetch league-wide goalie stats and upsert to echl_goalie_seasons.
+    Unlike the skater view, this one DOES carry team_code (confirmed live
+    2026-08-30) -- resolves via CODE_TO_TEAM_ID same as ahl_stats.py."""
     log.info(f"Fetching goalie stats (season {season_id})...")
 
     try:
@@ -629,7 +578,7 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
-    upsert_chunk(sb, "ahl_players", goalie_stubs, "player_id")
+    upsert_chunk(sb, "echl_players", goalie_stubs, "player_id")
 
     rows = []
     for g in rows_raw:
@@ -661,7 +610,7 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
             }
         )
 
-    n = upsert_chunk(sb, "ahl_goalie_seasons", rows, "player_id,team_id,season_id,season_type")
+    n = upsert_chunk(sb, "echl_goalie_seasons", rows, "player_id,team_id,season_id,season_type")
     log.info(f"  {n} goalie season rows upserted")
 
 
@@ -680,10 +629,10 @@ def _parse_pct(s) -> float | None:
 
 
 def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
-    """Fetch standings and upsert to ahl_team_seasons. AHL's `wins` field
-    is already the season total (regulation + OT/SO) -- unlike PWHL, no
-    regulation_wins + non_reg_wins addition is needed (see reference doc).
-    """
+    """Fetch standings and upsert to echl_team_seasons. Same shape as
+    ahl_stats.py's fetch_team_stats() -- `wins` is already the season
+    total, team_code carries a clinch-prefix ("x - MNE") split via the
+    same raw.split(" - ")[-1] pattern."""
     log.info(f"Fetching team stats (season {season_id})...")
 
     try:
@@ -763,7 +712,7 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
             }
         )
 
-    n = upsert_chunk(sb, "ahl_team_seasons", rows, "team_id,season_id,season_type")
+    n = upsert_chunk(sb, "echl_team_seasons", rows, "team_id,season_id,season_type")
     log.info(f"  {n} team season rows upserted")
 
 
@@ -772,20 +721,11 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
 
 def _season_day_window(season_id: str) -> tuple[int, int]:
     """Returns (numberofdaysback, numberofdaysahead) that safely bracket a
-    season's own start_date/end_date, padded by 3 days each side. Falls
-    back to a generous ±400-day window if the season isn't found in the
-    live feed (e.g. AHL_SEASON env var fallback path).
-
-    This is NOT optional -- confirmed live 2026-08-29: a blanket
-    numberofdaysback=10000/numberofdaysahead=10000 (the PWHL fetch_game_log
-    pattern this was originally copied from) does NOT scope results to the
-    requested season_id at all for this view. It returns games sorted
-    OLDEST-first across the league's entire 20+-year history, and `limit`
-    then truncates the response before ever reaching a recent season --
-    a 5000-game pull returned only seasons 1-69, zero season-90 games. A
-    day-window has to actually bracket the target season for its games to
-    appear in a limited-size response at all.
-    """
+    season's own start_date/end_date, padded by 3 days each side.
+    Unmodified copy of ahl_stats.py's helper -- same confirmed-live
+    finding that a blanket huge window silently returns zero games for
+    the requested season on this view (results come back oldest-first,
+    truncated by `limit` before ever reaching a recent season)."""
     try:
         seasons = _fetch_seasons()
     except FetchError:
@@ -805,17 +745,10 @@ def _season_day_window(season_id: str) -> tuple[int, int]:
 
 
 def fetch_game_log(sb, season_id: str) -> None:
-    """Fetch season schedule/results and upsert to ahl_game_log.
-
-    Uses feed=modulekit&view=scorebar, NOT PWHL's
-    feed=statviewfeed&view=schedule -- a different view entirely, found
-    via live network capture (see reference doc). Gives home/away team IDs
-    directly (HomeID/VisitorID) -- no PWHL-style city-name-to-team_id
-    mapping needed. See _season_day_window()'s docstring for why the
-    day-window must actually bracket the target season -- a blanket huge
-    window (the pattern this was originally copied from PWHL with) silently
-    returns zero games for the requested season instead of an error.
-    """
+    """Fetch season schedule/results and upsert to echl_game_log. Same
+    feed=modulekit&view=scorebar shape as ahl_stats.py -- HomeID/VisitorID
+    given directly, GameStatus numeric field confirmed present (1=
+    scheduled, 4=final), confirmed live 2026-08-30."""
     log.info(f"Fetching game log (season {season_id})...")
 
     days_back, days_ahead = _season_day_window(season_id)
@@ -845,15 +778,6 @@ def fetch_game_log(sb, season_id: str) -> None:
             continue
 
         status = g.get("GameStatusString", "") or ""
-        # Numeric companion to GameStatusString -- confirmed 2026-08-29 via
-        # live scorebar capture that a not-yet-started game's
-        # GameStatusString is literally its scheduled clock time (e.g.
-        # "7:00PM"), not a state word, so string-matching alone can't tell
-        # "scheduled" apart from an unrecognized live state. GameStatus is
-        # a small int instead: 1=scheduled, 4=final confirmed live; 2/3
-        # unconfirmed (no in-progress game observed yet this build) but
-        # ahl_live_refresh.py/the Worker treat "not 1, not 4" as live
-        # rather than guessing the exact code.
         status_code = int(g["GameStatus"]) if g.get("GameStatus") not in (None, "") else None
 
         rows.append(
@@ -873,7 +797,7 @@ def fetch_game_log(sb, season_id: str) -> None:
             }
         )
 
-    n = upsert_chunk(sb, "ahl_game_log", rows, "game_id")
+    n = upsert_chunk(sb, "echl_game_log", rows, "game_id")
     log.info(f"  {n} games upserted")
 
 
@@ -890,7 +814,7 @@ def run(season_id: str | None = None) -> None:
         season_id = str(current["season_id"])
         season_type = current["season_type"]
 
-    log.info(f"=== AHL stats run: season_id={season_id} season_type={season_type} ===")
+    log.info(f"=== ECHL stats run: season_id={season_id} season_type={season_type} ===")
 
     fetch_roster(sb, season_id)
     fetch_skater_stats(sb, season_id, season_type)
@@ -898,7 +822,7 @@ def run(season_id: str | None = None) -> None:
     fetch_team_stats(sb, season_id, season_type)
     fetch_game_log(sb, season_id)
 
-    log.info("=== AHL stats run complete ===")
+    log.info("=== ECHL stats run complete ===")
 
 
 if __name__ == "__main__":
