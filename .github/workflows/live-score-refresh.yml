@@ -1,0 +1,47 @@
+name: EyeWall Live Score Refresh
+
+# Keeps pwhl_game_log/ahl_game_log's game_state/game_status_code/scores
+# fresh intraday -- see ahl_live_refresh.py's module docstring for why
+# this exists (the full nightly pipelines only write those columns once
+# a day, so a live game would otherwise sit stale until the following
+# night). 5 minutes is GitHub Actions' practical floor for a scheduled
+# workflow, not a hard real-time guarantee -- GitHub can delay a
+# schedule trigger under load, so treat this as "much fresher than
+# nightly," not "always exactly 5 minutes old."
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  refresh-live-scores:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ahl_live_refresh.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ahl_live_refresh.py
+
+      - name: Run pwhl_live_refresh.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pwhl_live_refresh.py

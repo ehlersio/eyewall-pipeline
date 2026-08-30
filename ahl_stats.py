@@ -804,6 +804,16 @@ def fetch_game_log(sb, season_id: str) -> None:
             continue
 
         status = g.get("GameStatusString", "") or ""
+        # Numeric companion to GameStatusString -- confirmed 2026-08-29 via
+        # live scorebar capture that a not-yet-started game's
+        # GameStatusString is literally its scheduled clock time (e.g.
+        # "7:00PM"), not a state word, so string-matching alone can't tell
+        # "scheduled" apart from an unrecognized live state. GameStatus is
+        # a small int instead: 1=scheduled, 4=final confirmed live; 2/3
+        # unconfirmed (no in-progress game observed yet this build) but
+        # ahl_live_refresh.py/the Worker treat "not 1, not 4" as live
+        # rather than guessing the exact code.
+        status_code = int(g["GameStatus"]) if g.get("GameStatus") not in (None, "") else None
 
         rows.append(
             {
@@ -815,6 +825,7 @@ def fetch_game_log(sb, season_id: str) -> None:
                 "home_score": int(g.get("HomeGoals", 0) or 0),
                 "away_score": int(g.get("VisitorGoals", 0) or 0),
                 "game_state": status,
+                "game_status_code": status_code,
                 "venue_name": g.get("venue_name") or None,
                 "venue_city": g.get("venue_location") or None,
                 "updated_at": datetime.now(UTC).isoformat(),
