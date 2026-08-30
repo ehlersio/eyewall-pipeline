@@ -1,0 +1,63 @@
+name: EyeWall ECHL Nightly Pipeline
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # 4:00 AM ET (UTC-4 during EDT) — offset 20min after AHL's pipeline
+  workflow_dispatch:
+    inputs:
+      season_id:
+        description: 'HockeyTech season_id to backfill (blank = live-resolve "current" season, same as the nightly cron)'
+        required: false
+        default: ''
+
+jobs:
+  run-echl-pipeline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run echl_stats.py (rosters, player/goalie/team stats, game log)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python echl_stats.py "${{ inputs.season_id }}"
+        # Populates echl_game_log (which games are Final), echl_players,
+        # echl_player_seasons, echl_goalie_seasons, echl_team_seasons.
+        # Everything below this step depends on echl_game_log/echl_players
+        # being current.
+
+      - name: Run echl_game_boxscore.py (per-game player box score)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python echl_game_boxscore.py "${{ inputs.season_id }}"
+
+      - name: Ingest ECHL shot events (goals + shots with coordinates)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python echl_shot_events.py "${{ inputs.season_id }}"
+
+      - name: Ingest ECHL penalty shots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python echl_penalty_shots.py "${{ inputs.season_id }}"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "ECHL pipeline failed — check logs above"
