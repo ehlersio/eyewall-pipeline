@@ -1,6 +1,8 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL + PWHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL news, milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds), and daily trivia questions (easy/medium tiers, guardrailed AI generation — see [Daily Trivia](#daily-trivia)).
+Nightly data pipeline that populates Supabase with NHL + PWHL + AHL + ECHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL/AHL/ECHL news, milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds — NHL/PWHL only), and daily trivia questions (easy/medium tiers, guardrailed AI generation — see [Daily Trivia](#daily-trivia)).
+
+AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and were added as data-layer-only builds (stats, per-game box scores, shot events, penalty shots, news, intraday live-score refresh) — see [AHL Pipeline Modules](#ahl-pipeline-modules) / [ECHL Pipeline Modules](#echl-pipeline-modules) below. Neither league has shift data or attempt-level PBP events (hits/blocked shots/faceoffs) in the HockeyTech feed at all, so WAR/RAPM/Corsi are not buildable for either — see [Known Limitations](#known-limitations).
 
 ## Setup
 
@@ -80,6 +82,25 @@ python pwhl_shot_events.py --game 338          # Single game (debug -- ingest + 
 python pwhl_salaries.py        # Salary scraper (PWHLPA PDF)
 python pwhl_salaries.py --dry-run  # Parse only, don't upsert
 python pwhl_news.py            # Fetch PWHL news and POST to Worker
+
+# AHL — run individually (no orchestrator yet)
+python ahl_stats.py                        # current season (live-resolved)
+python ahl_stats.py 90                     # specific season_id (90 = 2025-26 Regular)
+python ahl_game_boxscore.py                # per-game skater/goalie box scores
+python ahl_shot_events.py                  # shot events + goals with coordinates
+python ahl_shot_events.py --game 1028362   # single game (debug)
+python ahl_penalty_shots.py                # penalty shots (makes + misses)
+python ahl_live_refresh.py                 # narrow live game_state/score refresh (5-min cron)
+python ahl_news.py                         # AHL news -> Worker
+
+# ECHL — run individually (no orchestrator yet)
+python echl_stats.py                       # current season (live-resolved)
+python echl_stats.py 73                    # specific season_id (73 = 2025-26 Regular)
+python echl_game_boxscore.py               # per-game skater/goalie box scores
+python echl_shot_events.py                 # shot events + goals with coordinates
+python echl_penalty_shots.py               # penalty shots (makes + misses)
+python echl_live_refresh.py                # narrow live game_state/score refresh (5-min cron)
+python echl_news.py                        # ECHL news -> Worker
 ```
 
 ---
@@ -505,6 +526,184 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 
 ---
 
+## AHL Pipeline Modules
+
+All AHL modules use the same HockeyTech/LeagueStat vendor API as PWHL (`lscluster.hockeytech.com`) but a different client config (`client_code=ahl`, `key=ccb91f29d6744675`, `league_id=4`, `site_id=3`) and write to `ahl_*` Supabase tables. Dedicated tables rather than a shared NHL/PWHL-shaped schema with a league discriminator column — deliberate choice (see `docs/ahl_new_tables_ddl.sql`'s header comment): AHL's real data shape has no shift/TOI/attempts-based-Corsi/faceoff/hits data at all, so forcing it into PWHL's schema would mean permanently-null columns on every row. No `ahl_teams` table exists either — same as PWHL, team display metadata lives in the frontend, and `ahl_stats.py` hardcodes `TEAM_ID_MAP` the same way `pwhl_stats.py` does. Full investigation notes and endpoint-by-endpoint findings: `docs/hockeytech-ahl-api-notes.md`.
+
+**Season resolution deliberately does NOT go through `season_lookup.py`'s Worker-backed pattern** the way `pwhl_stats.py`/`nhl_stats.py` do — AHL was this pipeline's first module, and `eyewall-poller` had no AHL season-config endpoint at the time it was built (adding one is a fast-follow, not a blocker). `ahl_stats.py`'s own `resolve_current_season()` queries HockeyTech's live `seasons` feed directly (env var `AHL_SEASON` as a fallback), picking the most recent `career="1"` season whose `start_date` has already passed — **not simply the max `season_id`**. This matters in practice: confirmed live 2026-08-29 that the feed's highest `career=1` season_id (94, "2026-27 Regular Season") has a `start_date` of 2026-10-02, still in the future — naively taking the max would return a season with zero games, the same mistake `docs/hockeytech-api-notes.md`'s PWHL section already documents avoiding. Every other AHL module imports `resolve_current_season()`/`resolve_season_type()` from `ahl_stats.py` rather than re-deriving season logic itself.
+
+### `ahl_stats.py`
+Fetches rosters, skater/goalie/team stats, and the game log. Structurally mirrors `pwhl_stats.py` (same vendor, same `sections[].data[].row` shape for `feed=statviewfeed` views — `extract_rows()` is an unmodified copy), but `feed=modulekit` views (`roster`, `teamsbyseason`, `seasons`, `scorebar`) nest everything under a top-level `"SiteKit"` key instead, handled by a separate `_modulekit_get()` helper.
+
+```bash
+python ahl_stats.py                  # current season (live-resolved)
+python ahl_stats.py 90               # specific season_id (90 = 2025-26 Regular)
+```
+
+**Real field/param differences from PWHL, confirmed live and written up in `docs/hockeytech-ahl-api-notes.md`:**
+- `feed=modulekit&view=roster` wants `season_id`, not `season` — sending `season` silently returns an empty roster rather than an error. `teamsbyseason` wants the opposite param name (`season`, not `season_id`).
+- Roster is a flat list (no Forwards/Defenders/Goalies sections the way PWHL's is), height is hyphenated feet-inches (`"6-3"`, its own `_parse_height_inches()` — not PWHL's apostrophe-format regex), and `weight` is real data (PWHL's is always `"0"`, never ingested there).
+- The skater `players` view has no `shooting_percentage`/`power_play_assists`/`short_handed_assists` fields at all — confirmed absent, not occasionally null — so `ahl_player_seasons` has no columns for them.
+- `wins` on the team-stats view is already the season total (regulation + OT/SO) — no PWHL-style `regulation_wins + non_reg_wins` addition needed. `ot_losses` and `shootout_losses` are reported as two separate columns, unlike PWHL's single combined `non_reg_losses`.
+- The game log comes from `feed=modulekit&view=scorebar` — a completely different view from PWHL's `feed=statviewfeed&view=schedule`, found via live network capture. It gives `HomeID`/`VisitorID` directly, no PWHL-style city-name-to-team_id mapping needed.
+
+**`_modulekit_get()`'s JSONP-unwrap bug — the "roster-fetch mystery," RESOLVED 2026-08-30:** for weeks this function treated the FIRST `"("` anywhere in a response as a JSONP wrapper's open-paren and the LAST `")"` as its close. `modulekit/roster` responses are plain JSON, never actually JSONP-wrapped, but routinely contain literal parentheses in real field values (e.g. a `draft_status` string like `"Prince George Cougars (WHL) (College) 2019"`) — the old logic sliced straight through the middle of otherwise-valid JSON and corrupted it. This silently broke ~23 of 32 teams' roster fetches on every nightly run, non-deterministically by team (whichever teams happened to have a parenthesized affiliation string on a player that night). Three earlier diagnostic PRs (#91, #92, #93) each guessed a specific failure *shape* ("truly empty HTTP body," then "well-formed JSONP envelope with nothing between the parens") and were each disproven by checking the diagnostic's own output against a real run — the response was never malformed on the wire, the unwrap step was mangling a well-formed one. Found while building `echl_stats.py` (hit the identical symptom via a real Florida Everblades player's `draft_status`), then reproduced directly against AHL data: 32 of 33 teams' rosters failed under the old logic, 0 failed after changing the guard to `if text.startswith("(") and text.endswith(")")`. Fixed in both `ahl_stats.py` and the new `echl_stats.py` in the same PR (#98). **Lesson, kept in the code's own comments:** a diagnostic that keeps returning "no answer" across several iterations is a sign the working theory (a cache-regeneration race, in this case) may be entirely wrong, not just under-instrumented — the real bug was in code that had shipped untouched since the original PR and was never itself a suspect. Note `ht_get()` (the `statviewfeed` fetcher) still uses the older unconditional unwrap (`if "(" in text: ...`) — left as-is because `statviewfeed` responses genuinely are JSONP-wrapped and haven't shown this failure mode; only the `modulekit` views (roster/scorebar/seasons) needed the fix.
+
+**A real historical franchise rename, not a bug:** Bridgeport Islanders (`team_id` 317, code `"BRI"`) relocated to become the Hamilton Hammers (`team_id` 457, code `"HAM"`) for 2026-27. `teamsbyseason` only ever returns each franchise's CURRENT identity, even when queried with an old `season_id` — so ingesting a historical season (e.g. 90, 2025-26) needs the OLD code merged in separately. `_HISTORICAL_TEAM_CODES` holds these (currently just `317: "BRI"`), merged into `TEAM_ID_MAP` at import time — add future renames there, not to the main map.
+
+**`_season_day_window()` — a real production bug, not a hypothetical:** the game-log fetch (`feed=modulekit&view=scorebar`) does NOT filter by `season_id` the way PWHL's `schedule` view does. A blanket `numberofdaysback=10000&numberofdaysahead=10000` (the pattern this was originally copied from PWHL with) returns games sorted OLDEST-first across the league's entire 20+-year history, and `limit` truncates the response before ever reaching a recent season — confirmed live: a 5000-game pull returned only seasons 1-69, zero season-90 games. `_season_day_window()` fixes this by computing a day-window that actually brackets the target season's own `start_date`/`end_date` (padded ±3 days), instead of a huge blanket window.
+
+**Bigger-than-a-bug finding: AHL's entire 2025-26 regular season was never ingested.** The original PR only ever ran a "current season" ingestion, and by the time it first ran, `resolve_current_season()` was already returning season 92 (2026 Calder Cup Playoffs, 24 games) — so `season_id` 90 (the actual ~72-game regular season) sat with ZERO rows anywhere in Supabase for weeks. This silently affected every AHL view already shipped in the frontend, not just a new one — every AHL page was quietly showing playoffs-only data instead of the full season. Fixed by adding a `workflow_dispatch` `season_id` input to `ahl-nightly.yml` (the scripts already accepted a `season_id` CLI arg; the workflow just never passed one through, PR #94) and triggering a manual backfill (`gh workflow run ahl-nightly.yml --ref <branch> -f season_id=90`, ~41 minutes for all 32 teams).
+
+### `ahl_game_boxscore.py`
+Per-game, per-player box score — fetches `statviewfeed/gameSummary`'s `homeTeam`/`visitingTeam.skaters[]`/`goalies[]` and writes one row per player per game to `ahl_skater_game_box`/`ahl_goalie_game_box`. Fills the per-game granularity gap `ahl_player_seasons`/`ahl_goalie_seasons` (season aggregates only) don't have. Structurally mirrors `pwhl_game_boxscore.py`.
+
+```bash
+python ahl_game_boxscore.py                  # current season
+python ahl_game_boxscore.py 90               # specific season_id
+python ahl_game_boxscore.py --game 1028992   # single game_id (debug)
+```
+
+**Confirmed real gap, not a data-entry hole:** every skater's `hits`, `faceoffAttempts`, `faceoffWins`, `blockedShots`, and `toi` field in `gameSummary` reads exactly `0`/`"0:00"` regardless of real ice time (confirmed against a real completed game, 1028992 — a skater with a recorded shot and assist still shows `toi: "0:00"`), consistent with AHL's PBP having no hit/faceoff event types at all. These fields are NOT ingested at all — no columns for them on `ahl_skater_game_box` — rather than stored as a fabricated always-zero value. Goalie fields (`timeOnIce`/`shotsAgainst`/`goalsAgainst`/`saves`) are unaffected and real (confirmed: Levi 59:49 TOI / 32 SA / 5 GA / 27 SV in the same game) and are kept.
+
+### `ahl_shot_events.py`
+Fetches play-by-play for completed games and extracts shot attempts + goals with coordinates. Structurally mirrors `pwhl_shot_events.py`, but the underlying PBP schema is simpler for AHL (and ECHL) than for PWHL.
+
+```bash
+python ahl_shot_events.py                    # current season
+python ahl_shot_events.py 90                 # specific season_id
+python ahl_shot_events.py --game 1028362     # single game_id (debug)
+```
+
+**Real, confirmed schema difference from PWHL that simplifies this module considerably:** `goal` is its own distinct PBP event type here, unlike PWHL (whose PBP only has goals embedded in `shot` events via an `isGoal` flag — no separate `goal` event exists there). AHL's `goal` event already carries `assists[]`, `properties` (`isPowerPlay`/`isShortHanded`/`isEmptyNet`/`isPenaltyShot`/`isInsuranceGoal`/`isGameWinningGoal`), and `plus_players[]`/`minus_players[]` directly — no separate `gameSummary` fetch/merge step is needed the way `pwhl_shot_events.py`'s `merge_game_summary()` requires. Confirmed across 16+ real games (both AHL and ECHL) that `shot`-with-`isGoal=true` and `goal` describe the same goal with near-exact 1:1 counts, `goal` being a strict superset — so `shot` rows are ingested only when NOT a goal, `goal` rows separately, with no dedup/merge logic needed at all.
+
+Also confirmed absent from AHL's (and ECHL's) PBP entirely, across the same 16+-game sample: `blocked_shot`, `hit`, `faceoff` event types — not a parsing gap, genuinely not charted for either league. Coordinate transform reuses PWHL's unmodified `CANVAS_W`/`CANVAS_H` (600×300) fold — an 8-game AHL sample landed in the same x/y range as PWHL's own sample. Do one visual overlay check against a real rink before fully trusting this on a shot map — numeric range matching alone doesn't catch an axis swap.
+
+**Real production bug, fixed same-day as the initial ship (PR #90):** the first real `ahl-nightly.yml` run wrote 526 skater rows / 34 goalie rows / 23 team rows / 89 games cleanly, but crashed on 5 of 89 games with Postgres error `21000` ("ON CONFLICT DO UPDATE command cannot affect row a second time"). Root cause: the natural key omitted `x_raw`/`y_raw`, so two shots by the same player in the same recorded second collided within a single upsert batch — the exact failure mode `pwhl_shot_events.py` had already solved the same way. Fixed by widening the key to include coordinates (`docs/ahl_shot_events_constraint_fix.sql`); `echl_shot_events.py` was built with this fix already in place from day one rather than rediscovering it.
+
+### `ahl_penalty_shots.py`
+Ingests the PBP `penaltyshot` event (makes AND misses) directly — unlike `pwhl_penalty_shots.py`, which deliberately avoids the PBP `penaltyshot` event (PWHL's version has a thinner team object) in favor of `gameSummary`'s `penaltyShots[]` key. AHL's PBP `penaltyshot` event already has a fully-resolved `shooter_team` object plus full shooter/goalie player objects, so no `gameSummary` fetch is needed at all here.
+
+```bash
+python ahl_penalty_shots.py                  # current season
+python ahl_penalty_shots.py 90               # specific season_id
+python ahl_penalty_shots.py --game 1028362   # single game_id (debug)
+```
+
+No coordinate data exists for penalty shots (make or miss) — same as PWHL, `ahl_penalty_shots` has no x/y columns and these events are never written to `ahl_shot_events`.
+
+### `ahl_live_refresh.py`
+Lightweight, frequent refresh of just `ahl_game_log`'s live-volatile fields (`game_state`, `game_status_code`, `home_score`, `away_score`) for games in a ±1-day window around today. Run via `live-score-refresh.yml`'s 5-minute cron, separate from `ahl_stats.py`'s full nightly ingest.
+
+**Why this exists:** `ahl_stats.py` only runs once nightly (3:40 AM ET) and writes the whole season including future/scheduled games — nothing updates `game_state`/scores again until the following night. A game happening today would sit at whatever status the last nightly snapshot showed for the entire day, even after it goes live or finishes, meaning the Worker's per-minute live-game polling could never actually see a live game. This traced back to a real gap found while building AHL/PWHL live-tracking parity: `pwhl_game_log.game_state` had exactly the same problem, so `pwhl_live_refresh.py` was built as a companion fix in the same PR (#97) rather than an AHL-only patch.
+
+**`game_status_code`** is HockeyTech's numeric `GameStatus` field from `scorebar` — a companion to the existing string `game_state` (`GameStatusString`). Needed because a not-yet-started game's `GameStatusString` is literally its scheduled clock time (e.g. `"7:00PM"`), not a state word, so string-only matching can't reliably distinguish "scheduled" from an unrecognized live state. Confirmed live: `1`=scheduled, `4`=final; `2`/`3` unconfirmed (no in-progress game observed during this build) — the Worker treats "not 1, not 4" as live rather than guessing the exact code. Requires `docs/live_score_refresh_ddl.sql` (adds `game_status_code` to `ahl_game_log`/`pwhl_game_log` — `echl_game_log` got the column from day one in its own foundation DDL, no retrofit needed).
+
+```bash
+python ahl_live_refresh.py
+```
+
+### `ahl_news.py`
+Fetches AHL news from RSS and POSTs to the Worker's `/ahl/news/ingest` endpoint. Runs from GitHub Actions (Cloudflare Workers IPs are blocked by most RSS sources — same reason `pwhl_news.py` runs from Actions). Mirrors `pwhl_news.py`'s structure exactly.
+
+```bash
+python ahl_news.py
+```
+
+**Sources — all 3 AHL-scoped by construction, unlike PWHL's, so no keyword filter (`AHL_KEYWORDS`) is needed anywhere in this file:** `theahl.com/feed` (the official league site — no PWHL equivalent exists, since pwhl.com has no news RSS at all), `thehockeywriters.com/category/ahl/feed/` (a dedicated AHL category feed), and `oursportscentral.com/feeds/l17.xml` (AHL press releases, league id 17 on that site — mirrors PWHL's `osc-pwhl` pattern on the same site).
+
+---
+
+## AHL Season ID Map
+
+| ID | Season | Type | Notes |
+|----|--------|------|-------|
+| 46 | 2004-05 | Regular | Earliest cleanly-listed season |
+| 90 | 2025-26 | Regular | Most recent completed regular season |
+| 92 | 2026 | Calder Cup Playoffs | 24 games, Apr-Jun 2026 |
+| 94 | 2026-27 | Regular | Starts 2026-10-02, zero games as of this writing |
+
+Confirmed live via `feed=modulekit&view=seasons`, 2026-08-29 — season_id is NOT sequential-by-year the way it might look (seasons back to 2004-05 exist). Always resolve current from the live feed (`ahl_stats.py`'s `resolve_current_season()`), never hardcode a "current" value here.
+
+---
+
+## ECHL Pipeline Modules
+
+All ECHL modules use the same HockeyTech/LeagueStat vendor as AHL/PWHL (confirmed live 2026-08-30) and write to `echl_*` tables — structurally a near-exact mirror of `ahl_*.py` (`client_code=echl`, `key=2c2b89ea7345cae8`, `league_id=1`, `site_id=0`, same base URL). Dedicated tables, same reasoning as AHL's own. Full DDL: `docs/echl_new_tables_ddl.sql`/`docs/echl_game_boxscore_ddl.sql` — both straight `ahl_` → `echl_` renames of AHL's DDL, confirmed live to have the identical data-shape ceiling (no shift data, no hit/faceoff/blocked_shot PBP events, hits/faceoffs hardcoded `"0"` in box scores). ECHL was deliberately scoped as a foundation + basic-display pass, NOT full AHL parity, in its first build — matching AHL's own two-pass history (foundation first, parity-with-PWHL as a later, separate pass).
+
+**One real operational difference from AHL/PWHL/OHL/WHL/QMJHL, worth remembering if this key ever breaks:** ECHL's HockeyTech key is NOT exposed on echl.com's own site — the site was rebuilt on Laravel/Livewire and renders stats server-side, so the "open the network tab" recovery path AHL/PWHL use doesn't work here. This key was recovered from `sportsdataverse-py`'s league registry (`sportsdataverse/hockeytech/_leagues.py`) and independently re-verified live against the real feed. If it ever stops working, re-check that registry first — a network-tab hunt on echl.com will not work, for the same reason it didn't during the original investigation.
+
+### `echl_stats.py`
+Fetches rosters, skater/goalie/team stats, and game log. Same season-resolution pattern as `ahl_stats.py` (live-resolves from HockeyTech's own `seasons` feed, `ECHL_SEASON` env var fallback, "most recent started `career=1` season" logic, not simply max `season_id`).
+
+```bash
+python echl_stats.py                  # current season (live-resolved)
+python echl_stats.py 73               # specific season_id (73 = 2025-26 Regular)
+```
+
+**One real field-shape difference from AHL, confirmed live 2026-08-30 (not assumed to transfer):** ECHL's `players` (skaters) `statviewfeed` view carries `team_name` (e.g. `"Kansas City Mavericks"`), NOT `team_code` the way AHL's (and ECHL's own goalie/team views) do — `fetch_skater_stats()` resolves `team_id` via a separate `TEAM_ID_BY_NAME` map instead of `CODE_TO_TEAM_ID` for that one view only. Goalie and team views both carry `team_code` normally.
+
+`_modulekit_get()` was built with the fixed JSONP-unwrap guard (`if text.startswith("(") and text.endswith(")")`) from day one — this module is actually what originally surfaced AHL's own long-standing roster-fetch bug (see `ahl_stats.py`'s writeup above): a Florida Everblades player's `draft_status` field containing literal parentheses hit the identical corrupted-JSON symptom while this file was being written, which is what triggered re-examining (and fixing) `ahl_stats.py`'s copy of the same helper in the same PR (#98).
+
+### `echl_game_boxscore.py`
+Same purpose/shape as `ahl_game_boxscore.py` — per-game skater/goalie box scores from `gameSummary`. Same confirmed data wall: every skater's `hits`/`faceoffAttempts`/`faceoffWins`/`blockedShots`/`toi` reads exactly `0`/`"0:00"` regardless of real ice time (confirmed live, game 24296 — Wyatt McLeod has a real recorded shot but `toi: "0:00"`), not ingested at all. Goalie fields are real (confirmed: Hunter Jones 59:16 TOI / 28 SA / 5 GA / 23 SV, same game) and kept.
+
+```bash
+python echl_game_boxscore.py                # current season
+python echl_game_boxscore.py 73             # specific season_id
+python echl_game_boxscore.py --game 24296   # single game_id (debug)
+```
+
+### `echl_shot_events.py`
+Same disjoint `shot`/`goal` event-pair structure as `ahl_shot_events.py` — confirmed live 2026-08-30 against a real game (24296: 81 events — `goalie_change` x4, `shot` x59, `penalty` x7, `goal` x11). Same confirmed absence of `blocked_shot`/`hit`/`faceoff` event types. Same coordinate canvas (confirmed live: x∈[36,579], y∈[12,282], matching AHL/PWHL's range). Built with the natural key already widened to include `x_raw`/`y_raw` from day one — AHL's own pipeline needed a follow-up migration for this (see `ahl_shot_events.py`'s writeup above); ECHL shipped correctly the first time.
+
+```bash
+python echl_shot_events.py                  # current season
+python echl_shot_events.py 73               # specific season_id
+python echl_shot_events.py --game 24296     # single game_id (debug)
+```
+
+### `echl_penalty_shots.py`
+Same reasoning and shape as `ahl_penalty_shots.py` — reads the PBP `penaltyshot` event directly (confirmed live 2026-08-30, games 24320/24340, identical shape to AHL's: fully-resolved `shooter_team`, full shooter/goalie objects, no coordinates).
+
+```bash
+python echl_penalty_shots.py                # current season
+python echl_penalty_shots.py 73             # specific season_id
+python echl_penalty_shots.py --game 24320   # single game_id (debug)
+```
+
+### `echl_live_refresh.py`
+Mirrors `ahl_live_refresh.py` exactly. Confirmed live 2026-08-30 that ECHL's own `modulekit&view=scorebar` has the identical `GameStatus`/`GameStatusString` shape as AHL's (1=scheduled, 4=final; 2/3 unconfirmed). **No DDL retrofit was needed for this module** — unlike AHL, `echl_game_log` already had `game_status_code` from the original foundation-pass DDL (`docs/echl_new_tables_ddl.sql` included it from day one).
+
+```bash
+python echl_live_refresh.py
+```
+
+### `echl_news.py`
+Mirrors `ahl_news.py`, with one real difference: only **2** sources exist for ECHL, not 3. `echl.com` has no discoverable RSS feed at all (confirmed live 2026-08-30: `/feed` and `/rss` both 404 — same Laravel/Livewire rebuild reason its HockeyTech key isn't network-tab-discoverable either).
+
+```bash
+python echl_news.py
+```
+
+**Sources:** `thehockeywriters.com/category/echl/feed/` (dedicated ECHL category feed) and OurSportsCentral's ECHL press-release feed — **league id 18, NOT 17 like AHL's** (searched for it live rather than assumed; league ids on that site aren't sequential-by-launch-date). Both ECHL-scoped by construction, no keyword filter needed.
+
+---
+
+## ECHL Season ID Map
+
+| ID | Season | Type | Notes |
+|----|--------|------|-------|
+| 73 | 2025-26 | Regular | Last completed full season |
+| 75 | 2026 | All-Star | |
+| 76 | 2026 | Kelly Cup Playoffs | |
+| 77 | 2026 | Preseason | |
+| 78 | 2026-27 | Regular | Not started as of this writing |
+
+Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-season label convention is `"{year} Kelly Cup Playoffs"` — a real, different format from AHL's bare `"{year} Playoffs"` string (checked directly against `echl.com` rather than assumed to transfer from AHL, a recurring lesson across every league addition in this system).
+
+---
+
 ## Database Schema
 
 ### NHL Tables
@@ -558,6 +757,34 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 | `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; WAR blocked until Oct 2026) |
 | `pwhl_skipped_games` | Games skipped per PWHL pipeline module |
 
+### AHL Tables
+| Table | Description |
+|-------|-------------|
+| `ahl_players` | Player master. Unlike `pwhl_players`, carries a real `weight_lbs` (AHL's roster feed has real weight data; PWHL's is always `"0"` and never ingested there) |
+| `ahl_player_seasons` | Per-player per-season stats (GP, G, A, PTS, +/-, PIM, shots, PP/SH goals). No `shot_pct`/`pp_assists`/`sh_assists` columns — confirmed absent from AHL's `players` view entirely, not just occasionally null |
+| `ahl_goalie_seasons` | Per-goalie per-season stats (GP, W/L/OTL, SV%, GAA, shutouts, TOI as HockeyTech's `MM:SS` text) |
+| `ahl_team_seasons` | Per-team per-season stats + PP%/PK%/special-teams counts. `wins` is already the season total (no `regulation_wins`/`non_reg_wins` split needed, unlike PWHL); `ot_losses`/`shootout_losses` are separate columns, unlike PWHL's combined `non_reg_losses` |
+| `ahl_game_log` | Game results/schedule from `feed=modulekit&view=scorebar` (a different view from PWHL's `schedule`) — `game_status_code` (numeric HockeyTech `GameStatus`) added via `docs/live_score_refresh_ddl.sql` for live-game tracking |
+| `ahl_shot_events` | Shot coordinates (`x_norm`/`y_norm`), `event_type` ('shot'\|'goal'). Goal rows carry `assist1_id`/`assist2_id`/PP/SH/EN/GWG flags directly from the PBP `goal` event — no PWHL-style `gameSummary` merge needed. Natural key includes `x_raw`/`y_raw` (see `ahl_stats.py`'s writeup above — a real production Postgres 21000 crash without it) |
+| `ahl_penalty_shots` | Penalty shots (makes + misses), no coordinates — sourced directly from the PBP `penaltyshot` event (unlike PWHL, which needs `gameSummary`) |
+| `ahl_skater_game_box` | Per-skater per-game box score: G/A/P, PIM, +/-, shots. No hits/faceoff/blocked-shots/TOI columns — confirmed always 0/`"0:00"` in the source feed |
+| `ahl_goalie_game_box` | Per-goalie per-game box score: G/A/P, PIM, TOI (real data), shots/goals against, saves |
+| `ahl_skipped_games` | Games skipped per AHL pipeline module (mirrors `pwhl_skipped_games`) |
+
+### ECHL Tables
+| Table | Description |
+|-------|-------------|
+| `echl_players` | Player master, same shape as `ahl_players` (real `weight_lbs`) |
+| `echl_player_seasons` | Per-player per-season stats, same shape as `ahl_player_seasons` |
+| `echl_goalie_seasons` | Per-goalie per-season stats, same shape as `ahl_goalie_seasons` |
+| `echl_team_seasons` | Per-team per-season stats, same shape as `ahl_team_seasons` |
+| `echl_game_log` | Game results/schedule, same `scorebar` source as AHL. `game_status_code` was included from day one in the original foundation DDL — no retrofit needed here, unlike AHL |
+| `echl_shot_events` | Same shape as `ahl_shot_events`; natural key already includes `x_raw`/`y_raw` from day one (built after AHL's own fix was known) |
+| `echl_penalty_shots` | Same shape as `ahl_penalty_shots` |
+| `echl_skater_game_box` | Same shape as `ahl_skater_game_box`, same confirmed hits/faceoff/TOI-always-zero gap |
+| `echl_goalie_game_box` | Same shape as `ahl_goalie_game_box` |
+| `echl_skipped_games` | Games skipped per ECHL pipeline module |
+
 ### Shared Tables (both leagues, one table)
 
 | Table | Description |
@@ -574,6 +801,9 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 |----------|----------|-------------|
 | `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py` + Ruff lint) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
 | `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia — 20 min offset to avoid Supabase contention. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow |
+| `ahl-nightly.yml` | 3:40 AM ET daily | AHL news, stats/rosters/standings, per-game box scores, shot events, penalty shots — 20 min offset after PWHL's own nightly run. `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
+| `echl-nightly.yml` | 4:00 AM ET daily | Same step order as `ahl-nightly.yml` (news, stats, box scores, shot events, penalty shots), 20 min after AHL's own nightly run |
+| `live-score-refresh.yml` | Every 5 minutes | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py` in sequence — a narrow refresh of just `game_state`/`game_status_code`/scores so a live game doesn't sit stale until the next nightly run for any of the 3 leagues. 5 minutes is GitHub Actions' practical scheduling floor, not a hard real-time guarantee |
 | `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
@@ -598,6 +828,9 @@ Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-te
 5. Run `python pwhl_salaries.py` when PWHLPA publishes the new salary guide — still manual
 6. Run backfill for the new season: `python pwhl_stats.py {new_season_id}` — still manual (this is a real data ingest, not a config flip)
 7. **New for future expansion waves:** if HockeyTech assigns a new team_id mid-cycle again, remember the `fetch_roster()` season-mismatch gotcha above — roster data needs the literal current/preseason season_id, not `PWHL_SEASON`, and `pwhl_teams` needs the new team_id seeded before `fetch_roster()` can succeed at all (FK constraint). Also bust the Worker's KV cache for the new team+season combos *after* confirming the backfill actually succeeded, not before — busting first just repopulates the same stale/empty entry if the data isn't there yet.
+
+### AHL / ECHL
+Neither league is wired into `season_lookup.py`'s live Worker-based season resolution — each pipeline resolves its own current season directly from HockeyTech's `seasons` feed (`ahl_stats.py`/`echl_stats.py`'s own `resolve_current_season()`). No manual `AHL_SEASON`/`ECHL_SEASON` secret update is needed for the normal case — both are fallback-only, same as `NHL_SEASON`/`PWHL_SEASON` — but a manual `workflow_dispatch -f season_id=<id>` backfill is still needed to ingest a specific season the live resolver wouldn't pick on its own (e.g. the most recently COMPLETED regular season, once the live resolver has moved on to that season's playoffs or the next regular season) — see `ahl_stats.py`'s "2025-26 regular season never ingested" writeup above for why this matters in practice, not just in theory. AHL's 2026-27 regular season starts 2026-10-02; ECHL's 2026-27 regular season (season_id 78) also had not started as of this writing. No salary source, no shift/Corsi/WAR data exists for either league — see [Known Limitations](#known-limitations).
 
 ---
 
@@ -625,6 +858,11 @@ True RAPM via ridge regression (alpha=2500):
 - **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
 - **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Re-confirmed live (Session: news ingestion investigation) with a real GH Actions runner — still a 403 bot-block page. The per-team `TEAM_NEWS_SOURCES` reddit-* entries and the now-permanently-no-op `/reddit/ingest` route (both in `eyewall-poller`) were removed in the same session; 25 teams had reddit as their *only* team-specific source, and 21 of those 25 got a real replacement blog instead (see `sbnation-ingest.yml`'s comment for the list). MIN/STL/SEA/UTA still have no team-specific blog source at all (28 of 32 teams now do). Revisit Reddit only if a workaround surfaces; not planned for October 2026.
 - **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
+- **AHL/ECHL WAR/RAPM/Corsi: not buildable, a harder wall than PWHL's own shift-data gap, no revisit date set.** Confirmed live (2026-08-28/29: 4 AHL games across 3 seasons including the 2025 Calder Cup Finals G5, and 5 ECHL games) that `modulekit&view=gameshifts` returns `{"home":[],"visitor":[]}` for every real game tested — verified against a real PWHL control game (which DOES return populated shifts through the identical request shape), so this isn't a request-shape mistake on this pipeline's part. AHL/ECHL's PBP also has no `hit`/`blocked_shot`/`faceoff` event types at all (only `goal`/`shot`/`penalty`/`goalie_change`/`penaltyshot` confirmed present across 16+ games each) — the box-score schema even carries `faceoff_wins`/`faceoff_attempts`/`hits` fields per player, but they're hardcoded `"0"` in every game checked for both leagues, confirming it's genuinely not charted, not a PBP-only omission. Consequence: not even attempts-based Corsi/Fenwick is computable for either league, only shots-on-goal + goals — parity with a plain box score, not an advanced stat. Unlike PWHL's shift gap, there's no known future HockeyTech data source that would unblock this, so no revisit date is set.
+- **No AHL/ECHL salary data source exists anywhere** — no PWHLPA-equivalent salary guide has been found for either league.
+- **AHL/ECHL `_modulekit_get()` JSONP-unwrap bug ("the roster-fetch mystery"), RESOLVED 2026-08-30:** the unwrap logic treated the first `"("` anywhere in a `modulekit` response as a JSONP wrapper's open-paren and the last `")"` as its close, but `modulekit/roster` responses are plain JSON and routinely contain literal parentheses in real field values (e.g. a `draft_status` string like `"Prince George Cougars (WHL) (College) 2019"`), corrupting otherwise-valid JSON. Silently broke ~23 of 32 AHL teams' roster fetches per nightly run for weeks; three earlier diagnostic PRs (#91/#92/#93) each guessed the wrong failure shape before this was found while building `echl_stats.py`. Fixed in both `ahl_stats.py` and `echl_stats.py` by only stripping parens when the response actually starts/ends with them (PR #98). See `ahl_stats.py`'s README writeup above for the full history.
+- **`ahl_shot_events`/`echl_shot_events` same-second-shot collision:** two shots by the same player in the same recorded second are real (confirmed live) and crash a same-batch upsert with Postgres error `21000` unless the natural key includes `x_raw`/`y_raw` — the same failure mode `pwhl_shot_events.py` already solved this way. AHL needed a follow-up migration (`docs/ahl_shot_events_constraint_fix.sql`) after hitting this in a real production run; `echl_shot_events.py` shipped with the wider key from day one.
+- **Ruff formatting is a repo-wide CI gate, not per-league:** a new `echl_*.py` file that didn't match ruff's canonical line-wrapping for two chained Supabase query-builder calls broke the completely unrelated NHL nightly workflow's `ruff format --check .` step — that gate runs against the whole repo regardless of which league's files changed. Fixed via `ruff format .` pinned to the workflow's exact version (0.15.20), pure formatting, no logic change (PR #99). Run `ruff check .`/`ruff format --check .` locally before committing any new file to this repo, regardless of which league it's for.
 - **HockeyTech boolean fields:** gameSummary's `properties` booleans arrive as strings (`"true"`/`"false"`), not JSON booleans — confirmed Session 34 via `pwhl_shot_events.py`'s gameSummary merge (a naive `bool(val)` marked every goal `true` for every flag). `gameCenterPlayByPlay`'s `isPowerPlay`/`isBench` on penalty events appear to be real JSON booleans by contrast (real `False` values already observed in production, pre-Session-34). Check any new HockeyTech boolean field against real data before trusting a bare `bool()` call on it.
 - ~~`pwhl_milestones.py` undocumented~~ — resolved 2026-08-13: both `milestones.py` (NHL) and `pwhl_milestones.py` (PWHL) now have their own README sections. Same session found and fixed a real bug this gap likely helped hide: PWHL wrote shorthanded goals as `milestone_type: "shorthanded_goal"` while NHL wrote `"sh_goal"` — the one unintentional divergence out of every shared milestone type — which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal. Also added current-season filtering to the Worker's `/milestones` and `/milestones/latest` routes (see `eyewall-poller`'s README) after a stale prior-season milestone sat as the *only* NHL row in the table for over a month with nothing newer to push it off.
 - **Cache-busting order matters (learned 2026-07):** busting the Worker's KV cache *before* confirming the underlying data fix has actually landed just repopulates the same stale/empty entry on the next request. Always confirm the data is correct first (direct Supabase query, or hit the Worker endpoint with a fresh/never-cached key), then bust. This bit us twice during the expansion-team rollout — once for the season-resolution fix, once for the roster backfill.
