@@ -1,7 +1,8 @@
 name: EyeWall Live Score Refresh
 
-# Keeps pwhl_game_log/ahl_game_log's game_state/game_status_code/scores
-# fresh intraday -- see ahl_live_refresh.py's module docstring for why
+# Keeps pwhl_game_log/ahl_game_log/echl_game_log's game_state/
+# game_status_code/scores fresh intraday -- see ahl_live_refresh.py's
+# module docstring for why
 # this exists (the full nightly pipelines only write those columns once
 # a day, so a live game would otherwise sit stale until the following
 # night). 5 minutes is GitHub Actions' practical floor for a scheduled
@@ -45,3 +46,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python pwhl_live_refresh.py
+
+      - name: Run echl_live_refresh.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python echl_live_refresh.py
