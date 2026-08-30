@@ -300,7 +300,10 @@ def ingest_game(sb, gid: int, home_id: int, season_id: str, season_type: str) ->
                 player_ids.add(row[fld])
     if player_ids:
         existing = (
-            sb.table("echl_players").select("player_id").in_("player_id", list(player_ids)).execute()
+            sb.table("echl_players")
+            .select("player_id")
+            .in_("player_id", list(player_ids))
+            .execute()
         )
         existing_ids = {r["player_id"] for r in (existing.data or [])}
         missing = player_ids - existing_ids
@@ -361,7 +364,9 @@ def get_skipped_games(sb, pipeline: str) -> set:
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    result = sb.table("echl_shot_events").select("game_id").eq("season_id", int(season_id)).execute()
+    result = (
+        sb.table("echl_shot_events").select("game_id").eq("season_id", int(season_id)).execute()
+    )
     return {r["game_id"] for r in (result.data or [])}
 
 

@@ -208,7 +208,10 @@ def ingest_game(sb, gid: int, season_id: str, season_type: str) -> int:
     player_ids = {s["player_id"] for s in shots} | {s["goalie_id"] for s in shots if s["goalie_id"]}
     if player_ids:
         existing = (
-            sb.table("echl_players").select("player_id").in_("player_id", list(player_ids)).execute()
+            sb.table("echl_players")
+            .select("player_id")
+            .in_("player_id", list(player_ids))
+            .execute()
         )
         existing_ids = {r["player_id"] for r in (existing.data or [])}
         missing = player_ids - existing_ids
