@@ -3,17 +3,19 @@ run.py — EyeWall Analytics pipeline orchestrator.
 
 Nightly run order (important — modules depend on each other):
   1. nhl_stats    — rosters, player/team stats, game log
-  2. playoff_race — magic/tragic numbers + clinched/eliminated (needs nhl_stats' fresh standings)
-  3. shot_events  — league-wide shot coordinates from PBP (incremental)
-  4. shift_data   — league-wide shift charts (incremental)
-  5. zone_starts  — per-player zone start counts from PBP (incremental)
-  6. rapm         — 3-year rolling ridge regression RAPM -> player_seasons.rapm
-  7. moneypuck    — WAR (RAPM-derived) + percentiles -> player_seasons
-  8. game_scoring — PBP goals/assists parser -> game_scoring table
-  9. ai_summaries — post-game summaries (all teams)
-  10. ai_scouting  — missing scouting blurbs (all teams)
-  11. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
-  12. ai_line_chemistry — missing line-chemistry blurbs (needs fresh line_combinations -- see
+  2. elo_ratings  — full Elo recompute from game_log (needs nhl_stats' fresh game_log; see
+      docs/elo_prediction_model_results.md -- backs nhl.js's /prediction/analyze)
+  3. playoff_race — magic/tragic numbers + clinched/eliminated (needs nhl_stats' fresh standings)
+  4. shot_events  — league-wide shot coordinates from PBP (incremental)
+  5. shift_data   — league-wide shift charts (incremental)
+  6. zone_starts  — per-player zone start counts from PBP (incremental)
+  7. rapm         — 3-year rolling ridge regression RAPM -> player_seasons.rapm
+  8. moneypuck    — WAR (RAPM-derived) + percentiles -> player_seasons
+  9. game_scoring — PBP goals/assists parser -> game_scoring table
+  10. ai_summaries — post-game summaries (all teams)
+  11. ai_scouting  — missing scouting blurbs (all teams)
+  12. ai_results_vs_process — missing results-vs-process blurbs (NHL only, all teams)
+  13. ai_line_chemistry — missing line-chemistry blurbs (needs fresh line_combinations -- see
       run_all()'s stage("line_combinations", ...) call, not numbered above since this docstring
       predates that stage)
 
@@ -28,6 +30,7 @@ Usage:
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
   python run.py zones            # Zone starts only (incremental)
   python run.py rapm             # RAPM regression only
+  python run.py elo              # Team Elo rating recompute only
   python run.py moneypuck        # MoneyPuck WAR + percentiles only
   python run.py validate         # Internal RAPM sanity checks
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
@@ -142,6 +145,7 @@ def run_all():
     print(f"  EyeWall Analytics Pipeline -- {datetime.now():%Y-%m-%d %H:%M}")
     print(f"{'=' * 55}")
 
+    import elo_ratings
     import line_combinations
     import moneypuck
     import nhl_stats
@@ -162,6 +166,7 @@ def run_all():
         return result
 
     stage("nhl_stats", nhl_stats.run)
+    stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
     stage("shift_data", shift_data.run)
@@ -249,6 +254,10 @@ if __name__ == "__main__":
         import rapm
 
         rapm.run()
+    elif arg == "elo":
+        import elo_ratings
+
+        elo_ratings.run()
     elif arg == "moneypuck":
         import moneypuck
 
