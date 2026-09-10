@@ -160,19 +160,65 @@ hand-built heuristic regimes.
 
 ## 6. Explicitly not decided/built here
 
-- **Production wiring** — this report is the validation, not the
-  implementation. Shipping this needs: a new Supabase table for persistent
-  per-team ratings, a nightly pipeline job to update them after completed
-  games, a one-time season-boundary regression step, and rewiring both
-  branches of `nhl.js`'s `/prediction/analyze` (in-season and preseason) to
-  read from it.
-- **MoneyPuck's team-level adjusted CSV (§1)** as a secondary signal —
-  noted as available, not incorporated or tested.
-- **Whether Elo should also inform PWHL's own `/pwhl/prediction`** — out of
-  scope here; PWHL's game-outcome history is much shorter, and this
-  investigation was scoped to the NHL side only. Worth its own backtest, not
-  an assumed extension.
-- **Any margin-of-victory formula refinement** — `elo.py`'s MOV multiplier
-  (mild boost for larger regulation margins, damped for OT/SO results) is a
-  reasonable literature-inspired choice, not itself swept or validated
-  independently of the K/home_adv/regress_fraction grid above.
+- ~~**Production wiring**~~ — done. `team_elo_ratings` table + nightly
+  `elo_ratings.py` (PR #106), both branches of `nhl.js`'s
+  `/prediction/analyze` rewired to read from it (eyewall-poller PR #93), plus
+  two real follow-on bugs found and fixed during rollout: a cold schedule
+  cache silently returning "Game not found" for every non-CAR team
+  (eyewall-poller #95), and the frontend never sending `team=` at all so the
+  Worker always resolved the default team regardless of who was actually
+  browsing (eyewall-poller #96 / eyewallanalytics #279).
+- **MoneyPuck's team-level adjusted CSV** as a secondary signal — noted as
+  available, not incorporated or tested. Still open.
+- **Whether Elo should also inform PWHL's own `/pwhl/prediction`** — still
+  open; see §7 caveat below on why PWHL specifically shouldn't just inherit
+  this report's NHL result.
+- ~~**Margin-of-victory formula refinement**~~ — tested, see §7. Not worth
+  pursuing further.
+
+## 7. Margin-of-victory formula — tested, no real difference
+
+`backtest_mov.py` compared three MOV multiplier variants against the same
+chronological harness, K/home_adv/regress_fraction held at their validated
+defaults throughout:
+
+- `baseline` — the shipped formula (linear boost capped at 1.75x, OT/SO
+  damped at 0.5x)
+- `flat` — no margin scaling at all (a control: does MOV scaling matter at
+  all, separate from whether its specific shape is right)
+- `diff_dampened` — FiveThirtyEight's published NBA/NFL Elo formula
+  (`ln(margin+1) * 2.2/(0.001*elo_diff_of_winner + 2.2)`), literature
+  constants, not fit to this data. Dampens the MOV bonus when the actual
+  winner was already favored pre-game (expected, less informative) and
+  amplifies it when the winner was the underdog (surprising, more
+  informative) — `baseline` only looks at raw margin, so a blowout by a
+  heavy favorite and the same blowout by a heavy underdog get identical
+  treatment today.
+
+| Variant | All-seasons Brier | All-seasons Acc | Holdout Brier | Holdout Acc |
+|---|---|---|---|---|
+| baseline (shipped) | 0.2420 | 56.58% | 0.2484 | 53.58% |
+| flat (no MOV scaling) | 0.2425 | 56.38% | 0.2483 | 53.28% |
+| diff_dampened (538 formula) | 0.2419 | 56.30% | 0.2481 | 53.58% |
+
+**No meaningful difference between any of the three.** The spread is in the
+same fourth-decimal-place noise band the K/home_adv/regress_fraction sweep
+already found — `diff_dampened` edges `baseline` on Brier/log loss by
+0.0001–0.0002 but is *worse* on all-seasons accuracy (56.30% vs 56.58%),
+and `flat` (literally no margin sensitivity at all) is barely
+distinguishable from either. This is consistent with the general sports-Elo
+literature finding that MOV refinements are a second-order effect on
+single-game predictions — their real value (if any) is in faster/more
+accurate rating convergence over a season, not in moving Brier/accuracy on
+a backtest like this one.
+
+**Recommendation: keep the shipped formula. Not worth the added
+complexity.** Explicitly not tested here: an empty-net-goal-corrected
+margin (stripping empty-net goals before computing margin, so a
+late-empty-netter doesn't inflate a close game into a "decisive" one) —
+`game_scoring`, the only table with goal-level, situation-code-flagged
+data, only covers the 2025-26 season. Testing that variant against a third
+of the data everything else in this report used would be a materially
+weaker check, so it's left for a separate pass if/when `game_scoring` gets
+backfilled further back — not assumed to help just because it's more
+"correct" in principle, same posture as everything else here.
