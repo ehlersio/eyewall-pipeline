@@ -168,11 +168,17 @@ hand-built heuristic regimes.
   (eyewall-poller #95), and the frontend never sending `team=` at all so the
   Worker always resolved the default team regardless of who was actually
   browsing (eyewall-poller #96 / eyewallanalytics #279).
-- **MoneyPuck's team-level adjusted CSV** as a secondary signal — noted as
-  available, not incorporated or tested. Still open.
-- **Whether Elo should also inform PWHL's own `/pwhl/prediction`** — still
-  open; see §7 caveat below on why PWHL specifically shouldn't just inherit
-  this report's NHL result.
+- ~~**MoneyPuck's team-level adjusted CSV** as a secondary signal~~ — tested,
+  see §8. Not worth pursuing further, at least not via the simple blend
+  tried there.
+- ~~**Whether Elo should also inform PWHL's own `/pwhl/prediction`**~~ —
+  investigated, see `docs/pwhl_elo_investigation.md`. Directionally the same
+  conclusion (Elo looks better than the current heuristic scorecard), held
+  with meaningfully less confidence than this report's NHL result — PWHL
+  has about 1/14th the game volume, only one prior-season boundary to test
+  a true-preseason regime against, and the scorecard comparison used there
+  is a reduced port (missing PP%/Corsi terms `pwhl_game_log` doesn't carry
+  point-in-time). Not wired into production off that report alone.
 - ~~**Margin-of-victory formula refinement**~~ — tested, see §7. Not worth
   pursuing further.
 

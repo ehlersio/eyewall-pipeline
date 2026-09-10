@@ -18,3 +18,4 @@ backtest_elo_summary.json
 elo_season_end_ratings.json
 elo_tuning_results.json
 mov_backtest_results.json
+backtest_pwhl_elo_results.json
