@@ -1,0 +1,178 @@
+# Elo Prediction Model — Investigation & Backtest Results
+
+**Type:** Execution report. Runners: `eyewall-pipeline/elo.py` (pure Elo math),
+`backtest_elo.py` (chronological in-season backtest), `backtest_preseason.py`
+(extended with `elo_pred`/`continuity_vw_pred`), `tune_elo.py` (hyperparameter
+sweep). All read-only against production — no writes anywhere.
+
+**Motivating question:** the production preseason fallback
+(`buildPreseasonFallback` in `nhl.js`, validated in
+`true_preseason_backtest_results.md`) predicts an upcoming season off *last
+season's final standings*, dampened by roster-continuity. The objection
+raised: with rosters turning over every offseason (trades, free agency,
+waivers), why lean on a team's old record at all instead of reconstructing
+team strength from *currently rostered* players' individual value (WAR/RAPM)?
+
+That hypothesis was tested directly, twice, before this investigation
+(`prediction_model_backtest_results.md` §4, `true_preseason_backtest_results.md`
+§3) — RAPM/Log5, roster-aware by construction, backtested *worse* than the
+simple standings-based fallback in both the general and true-preseason cases
+(47.6% accuracy in the preseason case, below a coin flip). This investigation
+asked a different question instead: not "how do we patch the roster-value
+idea," but "is there a model actually purpose-built for win prediction we
+should be using instead of adapting tools built for other jobs (RAPM for
+player evaluation, a hand-tuned scorecard) to this one?" — landing on Elo,
+the standard tool for exactly this problem across sports analytics
+(this follows FiveThirtyEight's published NHL Elo methodology).
+
+---
+
+## 1. Data reality check
+
+Live query confirmed `game_log`'s earliest row is `2023-10-10` — only three
+usable seasons exist (2023-24, 2024-25, 2025-26-in-progress), the same
+boundary every other backtest in this repo already works within (2022-23 has
+zero `game_log` rows). Elo needs nothing beyond `game_id, game_date,
+home_team, away_team, home_score, away_score, period_end` — all already in
+`game_log` — so it needed no new data collection.
+
+Also found, not yet used: MoneyPuck publishes a team-level season-summary CSV
+(`seasonSummary/{year}/regular/teams.csv`) with score/venue-adjusted xG%/
+Corsi%/Fenwick% by situation — same domain this pipeline already pulls player
+data from, zero new vendor integration. Not incorporated in this pass; a
+plausible future enrichment if Elo alone ever needs a secondary signal (see
+§6).
+
+## 2. In-season backtest — Elo vs. the production scorecard
+
+`backtest_elo.py` runs ONE continuous chronological pass over every regular-
+season game across all 3 seasons (Elo is inherently cumulative, unlike the
+scorecard's independent per-cutoff snapshots), carrying each team's rating
+forward and regressing it toward the mean once at each season boundary. The
+scorecard prediction is recomputed for the identical games (reusing
+`backtest_predictions.py`'s own `standings_inputs_asof`/`scorecard_win_pct`)
+for a same-game, same-coverage comparison — not a separate run.
+
+| Model | n | Brier ↓ | Log loss ↓ | Accuracy ↑ |
+|---|---|---|---|---|
+| Production scorecard | 3,796 | 0.321 | 2.561 | 55.5% |
+| **Elo** | 3,796 | **0.242** | **0.677** | **56.5%** |
+
+Elo wins on every metric. The scorecard's log loss (2.561 — *worse* than
+always guessing 50/50, which scores 0.693) reproduces the exact overconfidence
+problem `prediction_model_backtest_results.md` §3 already flagged as "worth a
+look on its own." Elo's log loss (0.677, better than the 50/50 baseline)
+doesn't have that problem — it's honestly calibrated by construction, not
+patched after the fact with isotonic regression the way the scorecard needed.
+
+## 3. True-preseason backtest — the regime this whole thread is about
+
+Same 105 real opening-week games `true_preseason_backtest_results.md` used
+(2024-25 + 2025-26, 15-day post-opener window, each team's own first 2 games
+used only to build a roster proxy, never scored). Two new variants added
+alongside the three that already existed:
+
+- **`elo_pred`** — each team's end-of-prior-season Elo rating (from §2's
+  chronological run), regressed toward the mean once via
+  `elo.regress_to_mean()`, exactly like a real season boundary. Needs zero
+  current-season data — no roster proxy, no anchor games, no RAPM pool.
+- **`continuity_vw_pred`** — the value-weighted-continuity idea from this
+  investigation's first pass: weight each retained/departed player's role by
+  prior-season RAPM (clamped ≥0) instead of raw TOI, on the theory that
+  losing a star should count for more than losing a depth player with
+  similar ice time.
+
+| Variant | n | Brier ↓ | Log loss ↓ | Accuracy ↑ |
+|---|---|---|---|---|
+| Raw prior-season fallback | 105 | 0.299 | 2.039 | 58.1% |
+| **Continuity-adjusted (currently shipped)** | 105 | 0.261 | 0.733 | 58.1% |
+| Continuity, value-weighted (new — didn't help) | 105 | 0.270 | 0.780 | 57.1% |
+| RAPM/Log5 | 105 | 0.418 | 2.039 | 46.7% |
+| **Elo** | 105 | **0.237** | **0.666** | **60.0%** |
+
+**Elo beats the currently-shipped continuity-adjusted fallback on every
+metric here too**, using less machinery (no roster proxy, no RAPM pool, no
+anchor-game bookkeeping) than the thing it beats.
+
+**The value-weighted continuity idea did not work** — Brier, log loss, and
+accuracy are all slightly worse than the plain TOI-weighted version already
+in production. Recorded here so it isn't quietly re-proposed later without
+this result being checked first: weighting continuity by RAPM instead of TOI
+is a dead end, on this data.
+
+**Note on drift vs. the original report:** the raw/continuity-adjusted
+numbers here (58.1%/0.261/0.733) differ slightly from
+`true_preseason_backtest_results.md`'s original run (56.2%/0.270/0.754) —
+these backtests pull live data, and real games/backfills landed in the weeks
+between the two runs. The ranking and conclusion are unaffected.
+
+## 4. Hyperparameter tuning — does it help?
+
+`elo.py`'s constants (`K=6`, `HOME_ADVANTAGE=35`, `REGRESS_FRACTION=1/3`) are
+FiveThirtyEight's published NHL values, never fit against this pipeline's own
+data. `tune_elo.py` swept `K ∈ {3,4,6,8,10,14}`, `home_adv ∈ {0,20,35,50,65}`,
+`regress_fraction ∈ {0,0.15,1/3,0.5,0.7}` (150 combinations) — game_log
+fetched once, then every combination simulated in memory (no repeated
+network cost). Selection used Brier score on 2023-24+2024-25 only ("train");
+2025-26 ("holdout") was never looked at during selection, only scored
+afterward for the winning config, so overfitting would be visible rather than
+hidden.
+
+| | Train Brier | Train Acc | Holdout Brier | Holdout Acc |
+|---|---|---|---|---|
+| Default (538 values: K=6, adv=35, regress=1/3) | 0.2388 | 58.1% | **0.2484** | **53.6%** |
+| Best-tuned by train Brier (K=8, adv=35, regress=0.15) | 0.2384 | 58.3% | 0.2504 | 52.3% |
+
+**Two findings, both real:**
+
+1. **Home-ice advantage of 35 Elo points is a genuine, validated signal** —
+   every one of the top 10 configs by train Brier used `home_adv=35`; `0`,
+   `20`, `50`, and `65` all scored measurably worse across every K/regress
+   combination they appeared in. This isn't noise — it independently confirms
+   538's published NHL home-ice value is right for this pipeline's own data
+   too.
+2. **K and regress_fraction barely matter, and "tuning" them is actively
+   counterproductive.** The full top-10 train-Brier spread is 0.2384–0.2387 —
+   a difference in the fourth decimal place, i.e. noise. Picking the
+   train-best combination (K=8, regress=0.15) produces a *worse* holdout
+   result (Brier 0.2504, accuracy 52.3%) than just using the untuned 538
+   defaults (Brier 0.2484, accuracy 53.6%) — a textbook overfitting signature:
+   optimizing against noise in the training metric, which doesn't transfer.
+
+**Recommendation: ship the literature-default constants as-is. Do not tune
+K/regress_fraction against this pipeline's own 3 seasons of data** — there
+isn't enough signal in that range to tune profitably, and the one clear
+result (home-ice = 35) already matches the untouched default. This also
+means Elo's advantage over the scorecard/RAPM in §2–3 isn't a fragile,
+cherry-picked-hyperparameter result — it holds with textbook defaults nobody
+fit to this data.
+
+## 5. Overall recommendation
+
+**Elo beats both currently-shipped systems (in-season scorecard, preseason
+continuity-adjusted fallback) on every metric measured, in both regimes,
+using untuned literature defaults and no data this pipeline doesn't already
+have.** It's also simpler than what it replaces — no roster proxy, no
+anchor-game bookkeeping, no RAPM pool, no separate isotonic-calibration patch
+for the scorecard's known overconfidence. One consistent rating carries
+across the season boundary via regression-to-mean instead of two different
+hand-built heuristic regimes.
+
+## 6. Explicitly not decided/built here
+
+- **Production wiring** — this report is the validation, not the
+  implementation. Shipping this needs: a new Supabase table for persistent
+  per-team ratings, a nightly pipeline job to update them after completed
+  games, a one-time season-boundary regression step, and rewiring both
+  branches of `nhl.js`'s `/prediction/analyze` (in-season and preseason) to
+  read from it.
+- **MoneyPuck's team-level adjusted CSV (§1)** as a secondary signal —
+  noted as available, not incorporated or tested.
+- **Whether Elo should also inform PWHL's own `/pwhl/prediction`** — out of
+  scope here; PWHL's game-outcome history is much shorter, and this
+  investigation was scoped to the NHL side only. Worth its own backtest, not
+  an assumed extension.
+- **Any margin-of-victory formula refinement** — `elo.py`'s MOV multiplier
+  (mild boost for larger regulation margins, damped for OT/SO results) is a
+  reasonable literature-inspired choice, not itself swept or validated
+  independently of the K/home_adv/regress_fraction grid above.

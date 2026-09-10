@@ -36,12 +36,26 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 import backtest_predictions as bp
+import elo
 import rapm
 
 TEST_SEASONS = [20242025, 20252026]  # 2023-24 excluded -- 2022-23 has no prior data at all
 ANCHOR_GAMES = 2  # team's own first N games -- used only to build the roster proxy
 SCORE_GAMES = 3  # next N games after the anchor -- these are what's actually scored
 LEAGUE_AVG_TOI_SECS = 900  # ~15 min/game fallback for true rookies with no prior-season row
+
+# Elo variant needs backtest_elo.py's chronological run to have produced
+# each team's end-of-season rating first (BEFORE that season's own
+# regression-to-mean -- this script applies regress_to_mean itself, using
+# whichever prior season is relevant for each test_season here, same as
+# how the production route would regress a team's rating at the real
+# season boundary).
+try:
+    with open("elo_season_end_ratings.json") as f:
+        _elo_season_end_ratings = {int(k): v for k, v in json.load(f).items()}
+except FileNotFoundError:
+    _elo_season_end_ratings = None
+    print("elo_season_end_ratings.json not found -- run backtest_elo.py first for the Elo variant")
 
 
 def team_schedule(season, team):
@@ -116,6 +130,53 @@ def continuity_fraction(roster, prior_toi, prior_season, team):
     return retained / team_total
 
 
+def continuity_fraction_valueweighted(roster, prior_season, team, rapm_map):
+    """Same idea as continuity_fraction() -- fraction of the team's
+    prior-season role retained by the game-1 roster proxy -- but weighted
+    by each player's prior-season RAPM value (clamped to >=0) instead of
+    raw TOI. A below-average player's minutes don't count against the team
+    when that player leaves; only *good* players departing should read as
+    a real loss. This is what backtest_preseason.py's own §2 finding
+    (continuity-adjustment works mainly as a general overconfidence
+    dampener, not a targeted turnover-detector) suggested trying next --
+    weighting by what actually left, not just how much ice time left.
+
+    Returns None (caller falls back to the plain TOI-weighted fraction) if
+    the team has zero total value under this weighting -- e.g. no player
+    on the roster ever cleared RAPM's own MIN_SECS qualification threshold
+    for that prior season."""
+    rows = rapm.fetch_all(
+        bp.client,
+        "player_seasons",
+        "player_id,games_played,toi_per_game",
+        {"season": prior_season, "team": team, "game_type": 2},
+    )
+    total = retained = 0.0
+    for r in rows:
+        toi = (r.get("toi_per_game") or 0) * (r.get("games_played") or 0)
+        value = toi * max(rapm_map.get(r["player_id"], 0.0), 0.0)
+        total += value
+        if r["player_id"] in roster:
+            retained += value
+    return retained / total if total > 0 else None
+
+
+def elo_preseason_pred(prior_season, home_abbr, away_abbr):
+    """Elo win probability for a true-preseason game -- each team's rating
+    is its end of `prior_season` rating (from backtest_elo.py's
+    chronological run), regressed toward the mean once via
+    elo.regress_to_mean(), same as a real season boundary. Needs no
+    current-season data at all, unlike the RAPM/continuity variants --
+    that's the point of testing it here. Returns None if
+    elo_season_end_ratings.json wasn't found (run backtest_elo.py first)."""
+    if _elo_season_end_ratings is None:
+        return None
+    ratings = _elo_season_end_ratings.get(prior_season, {})
+    r_home = elo.regress_to_mean(ratings.get(home_abbr, elo.INITIAL_RATING))
+    r_away = elo.regress_to_mean(ratings.get(away_abbr, elo.INITIAL_RATING))
+    return elo.expected_prob(r_home + elo.HOME_ADVANTAGE, r_away)
+
+
 def team_impact_preseason(rapm_map, roster, prior_toi):
     """Same Impact = rapm * TOI as the main runner, but TOI comes from the
     prior season (safe, no in-game leakage) instead of cutoff-restricted
@@ -158,12 +219,18 @@ def run_preseason_backtest():
             if roster is None:
                 continue
             cont = continuity_fraction(roster, prior_toi, prior_season, team)
+            cont_vw = (
+                continuity_fraction_valueweighted(roster, prior_season, team, rapm_map)
+                if rapm_map is not None
+                else None
+            )
             standings = prior_season_standings(prior_season, team)
             team_data[team] = {
                 "roster": roster,
                 "anchor_game_ids": anchor_ids,
                 "ready_date": ready_date,
                 "continuity": cont,
+                "continuity_vw": cont_vw,
                 "standings": standings,
             }
 
@@ -211,11 +278,25 @@ def run_preseason_backtest():
             else:
                 cont_p = 0.5 + (raw_p - 0.5) * ((hc + ac) / 2)
 
+            # Value-weighted continuity: same dampening shape, but falls
+            # back to the plain TOI-weighted fraction (not raw_p) per side
+            # when a team's value-weighted fraction is unavailable --
+            # degrading to the already-validated baseline rather than to
+            # the weakest fallback.
+            hc_vw = hd["continuity_vw"] if hd["continuity_vw"] is not None else hc
+            ac_vw = ad["continuity_vw"] if ad["continuity_vw"] is not None else ac
+            if hc_vw is None or ac_vw is None:
+                cont_vw_p = raw_p
+            else:
+                cont_vw_p = 0.5 + (raw_p - 0.5) * ((hc_vw + ac_vw) / 2)
+
             rapm_p = None
             if rapm_map is not None:
                 impact_home = team_impact_preseason(rapm_map, hd["roster"], prior_toi)
                 impact_away = team_impact_preseason(rapm_map, ad["roster"], prior_toi)
                 rapm_p = bp.log5_win_prob(impact_home, impact_away)
+
+            elo_p = elo_preseason_pred(prior_season, home_abbr, away_abbr)
 
             results.append(
                 {
@@ -225,7 +306,9 @@ def run_preseason_backtest():
                     "home_won": int(home_won),
                     "raw_fallback_pred": raw_p,
                     "continuity_pred": cont_p,
+                    "continuity_vw_pred": cont_vw_p,
                     "rapm_pred": rapm_p,
+                    "elo_pred": elo_p,
                     "home_continuity": hc,
                     "away_continuity": ac,
                 }
@@ -260,7 +343,9 @@ if __name__ == "__main__":
     summary = {
         "raw_fallback": summarize(results, "raw_fallback_pred"),
         "continuity_adjusted": summarize(results, "continuity_pred"),
+        "continuity_valueweighted": summarize(results, "continuity_vw_pred"),
         "rapm_log5": summarize(results, "rapm_pred"),
+        "elo": summarize(results, "elo_pred"),
         "avg_continuity": (
             sum(r["home_continuity"] for r in results if r["home_continuity"] is not None)
             / max(1, sum(1 for r in results if r["home_continuity"] is not None))
