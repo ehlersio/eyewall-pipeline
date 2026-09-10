@@ -168,11 +168,13 @@ hand-built heuristic regimes.
   (eyewall-poller #95), and the frontend never sending `team=` at all so the
   Worker always resolved the default team regardless of who was actually
   browsing (eyewall-poller #96 / eyewallanalytics #279).
-- **MoneyPuck's team-level adjusted CSV** as a secondary signal — noted as
-  available, not incorporated or tested. Still open.
+- ~~**MoneyPuck's team-level adjusted CSV** as a secondary signal~~ — tested,
+  see §8. Not worth pursuing further, at least not via the simple blend
+  tried here.
 - **Whether Elo should also inform PWHL's own `/pwhl/prediction`** — still
-  open; see §7 caveat below on why PWHL specifically shouldn't just inherit
-  this report's NHL result.
+  open; PWHL's game-outcome history is much shorter and has had far more
+  expansion churn than NHL's, so this report's NHL result shouldn't be
+  assumed to transfer without its own backtest.
 - ~~**Margin-of-victory formula refinement**~~ — tested, see §7. Not worth
   pursuing further.
 
@@ -222,3 +224,57 @@ of the data everything else in this report used would be a materially
 weaker check, so it's left for a separate pass if/when `game_scoring` gets
 backfilled further back — not assumed to help just because it's more
 "correct" in principle, same posture as everything else here.
+
+## 8. MoneyPuck's score/venue-adjusted xG% — tested, doesn't beat Elo alone
+
+The hypothesis: Elo only ever sees final win/loss, never *how* a team
+played — a team that dominated shot attempts 65/35 but lost 2-1 on bad
+bounces looks identical to Elo as any other loss. MoneyPuck's team-level
+CSV (`seasonSummary/{year}/regular/teams.csv`) reports score-and-venue-
+adjusted expected-goals For/Against per team per season, already corrected
+for the two biggest confounds in raw possession stats (leading teams
+sitting back, home teams getting last change) — in principle a *process*
+signal Elo has no access to, and process stats are generally understood to
+stabilize faster than win/loss records within a season.
+
+Tested against the same 105 true-preseason games, using each team's
+**prior-season** 5v5 adjusted xG% (`scoreVenueAdjustedxGoalsFor /
+(For + Against)`) — the CSV is season-level only, no date-sliced version
+exists, so this can only be used as a preseason prior, not a current-
+season-to-date signal:
+
+- **`moneypuck_pred`** — Log5 combination of the two teams' adjusted xG%
+  (the same standard way of turning two independent "quality shares" into
+  a head-to-head probability already used for RAPM/Impact — a more natural
+  fit here, since xG% is already a bounded [0,1] share with no
+  `GOALS_PER_WIN`-style external scaling constant needed). No home-ice
+  term of its own.
+- **`elo_moneypuck_blend_pred`** — an unfit 50/50 average with `elo_pred`.
+  Deliberately not fit to this data: the K/regress_fraction sweep already
+  showed 2,624 games wasn't enough to safely tune 2-3 numbers without
+  overfitting, and 105 games is drastically smaller — fitting blend
+  weights here would just be tuning noise.
+
+| Variant | n | Brier ↓ | Log loss ↓ | Accuracy ↑ |
+|---|---|---|---|---|
+| **Elo alone (shipped)** | 105 | **0.2368** | **0.6662** | **60.0%** |
+| MoneyPuck alone | 105 | 0.2408 | 0.6745 | 58.1% |
+| Elo + MoneyPuck 50/50 blend | 105 | 0.2377 | 0.6681 | 59.0% |
+
+**Neither beats Elo alone, on any metric.** MoneyPuck alone is worse across
+the board (no surprise on its own — it has no home-ice term — but the
+blend, which does inherit Elo's home-ice signal, is still worse than Elo
+alone on every metric too). Adding this signal doesn't help; it hurts.
+
+**Caveat, same as elsewhere in this report:** 105 games is a small sample,
+and this tested exactly one simple way of using the data (an unfit 50/50
+blend, Log5 combination, no home-ice term on the MoneyPuck side, 5v5-only).
+It's a real negative result for that specific approach, not a proof the
+underlying data carries zero information — a properly weighted blend fit
+on a much larger sample, or an application to the in-season regime with
+date-sliced process data (a bigger undertaking — MoneyPuck's game-by-game
+CSVs, not the season-summary one used here), might tell a different story.
+Not pursued further here given what was actually tested didn't work.
+
+**Recommendation: don't incorporate this. Elo alone remains the better
+preseason model.**

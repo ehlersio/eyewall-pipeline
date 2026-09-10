@@ -30,10 +30,14 @@ prior season is 2022-23) is excluded; only 2024-25 and 2025-26 run.
 Run: python backtest_preseason.py
 """
 
+import csv
+import io
 import json
 import time
 from collections import defaultdict
 from datetime import date, timedelta
+
+import requests
 
 import backtest_predictions as bp
 import elo
@@ -177,6 +181,71 @@ def elo_preseason_pred(prior_season, home_abbr, away_abbr):
     return elo.expected_prob(r_home + elo.HOME_ADVANTAGE, r_away)
 
 
+_moneypuck_cache = {}  # prior_season -> {team: adj_xgpct}, populated once per season
+
+
+def moneypuck_adj_xgpct(prior_season):
+    """{team: score/venue-adjusted 5v5 xG% for } for every team in
+    `prior_season`, from MoneyPuck's team-level seasonSummary CSV -- the
+    same table's own columns split team stats by 'situation'; this reads
+    the 5v5 rows only, consistent with how this codebase already prefers
+    5v5-filtered Corsi over all-situations elsewhere (e.g. nhl.js's own
+    Corsi preference order). MoneyPuck reports raw For/Against counting
+    stats (scoreVenueAdjustedxGoalsFor/Against), not a ready-made
+    percentage -- computed here as For/(For+Against), same convention as
+    every other xG%/Corsi% in this pipeline.
+
+    Season-level only (one row per team per season) -- MoneyPuck's
+    seasonSummary CSVs don't offer a date-sliced version, so this can only
+    ever be used as a *prior-season* prior (this true-preseason regime),
+    not as a current-season-to-date signal the way Elo can be."""
+    if prior_season in _moneypuck_cache:
+        return _moneypuck_cache[prior_season]
+    start_year = int(str(prior_season)[:4])
+    url = f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{start_year}/regular/teams.csv"
+    r = requests.get(url, headers={"User-Agent": "EyeWall-Analytics/1.0"}, timeout=30)
+    r.raise_for_status()
+    reader = csv.DictReader(io.StringIO(r.text))
+    result = {}
+    for row in reader:
+        if row.get("situation") != "5on5":
+            continue
+        gf = float(row.get("scoreVenueAdjustedxGoalsFor") or 0)
+        ga = float(row.get("scoreVenueAdjustedxGoalsAgainst") or 0)
+        if gf + ga > 0:
+            result[row["team"]] = gf / (gf + ga)
+    _moneypuck_cache[prior_season] = result
+    return result
+
+
+def moneypuck_preseason_preds(prior_season, home_abbr, away_abbr, elo_p):
+    """Returns (moneypuck_pred, elo_moneypuck_blend_pred) or (None, None) if
+    either team is missing from the CSV (e.g. a true expansion team with no
+    prior-season row at all). moneypuck_pred: Log5 combination of each
+    team's adjusted xG% -- the same standard sabermetric way of turning two
+    teams' independent "quality shares" into a head-to-head probability
+    already used (and, for RAPM/Impact, already found not to help) elsewhere
+    in this investigation; xG% is a more natural fit for Log5's assumptions
+    than RAPM's Impact was, since it's already a bounded [0,1] share with no
+    external GOALS_PER_WIN-style scaling constant needed. No separate home-
+    ice term here -- elo_moneypuck_blend_pred gets its home-ice signal
+    entirely from elo_p's own contribution, deliberately not double-counted.
+    elo_moneypuck_blend_pred: an unfit 50/50 average with elo_p -- 105 games
+    is far too small a sample to safely fit blend weights (the K/regress_fraction
+    tuning pass already showed *2,624* games wasn't enough to tune 2-3
+    numbers without overfitting; 105 is drastically smaller), so this
+    deliberately uses the simplest possible non-fit combination rather than
+    inventing a tuned weight this dataset can't actually support."""
+    xg = moneypuck_adj_xgpct(prior_season)
+    car_xg, opp_xg = xg.get(home_abbr), xg.get(away_abbr)
+    if car_xg is None or opp_xg is None or elo_p is None:
+        return None, None
+    denom = car_xg + opp_xg - 2 * car_xg * opp_xg
+    mp_p = (car_xg - car_xg * opp_xg) / denom if denom > 0 else 0.5
+    blend_p = 0.5 * elo_p + 0.5 * mp_p
+    return mp_p, blend_p
+
+
 def team_impact_preseason(rapm_map, roster, prior_toi):
     """Same Impact = rapm * TOI as the main runner, but TOI comes from the
     prior season (safe, no in-game leakage) instead of cutoff-restricted
@@ -297,6 +366,7 @@ def run_preseason_backtest():
                 rapm_p = bp.log5_win_prob(impact_home, impact_away)
 
             elo_p = elo_preseason_pred(prior_season, home_abbr, away_abbr)
+            mp_p, blend_p = moneypuck_preseason_preds(prior_season, home_abbr, away_abbr, elo_p)
 
             results.append(
                 {
@@ -309,6 +379,8 @@ def run_preseason_backtest():
                     "continuity_vw_pred": cont_vw_p,
                     "rapm_pred": rapm_p,
                     "elo_pred": elo_p,
+                    "moneypuck_pred": mp_p,
+                    "elo_moneypuck_blend_pred": blend_p,
                     "home_continuity": hc,
                     "away_continuity": ac,
                 }
@@ -346,6 +418,8 @@ if __name__ == "__main__":
         "continuity_valueweighted": summarize(results, "continuity_vw_pred"),
         "rapm_log5": summarize(results, "rapm_pred"),
         "elo": summarize(results, "elo_pred"),
+        "moneypuck_alone": summarize(results, "moneypuck_pred"),
+        "elo_moneypuck_blend": summarize(results, "elo_moneypuck_blend_pred"),
         "avg_continuity": (
             sum(r["home_continuity"] for r in results if r["home_continuity"] is not None)
             / max(1, sum(1 for r in results if r["home_continuity"] is not None))
