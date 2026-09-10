@@ -37,6 +37,19 @@ Usage:
         # pwhl_shot_events.py). Must run AFTER pwhl_shot_events.py has
         # ingested that season's goals, same ordering reasoning as
         # --toi-rollup-only above. See pwhl-nightly.yml.
+    python pwhl_stats.py --game-log-only [season_id]
+        # Runs fetch_game_log() only, for a season_id that resolve_pwhl_season()
+        # deliberately does NOT pick as "current" -- namely preseason. Preseason
+        # isn't swept by the main run() (which always targets PWHL_SEASON, the
+        # live-resolved most-recent REGULAR season) or any of the *-only modes
+        # above, so without this it needs the same kind of manual backfill
+        # playoffs already needs (see pwhl_pbp_events.py's backfill comment).
+        # Unlike playoffs, preseason is a several-week window with new games
+        # completing day to day, so pwhl-nightly.yml runs this unconditionally
+        # every night against the current preseason season_id (hardcoded below,
+        # bump it once a year) rather than leaving it fully manual -- harmless
+        # no-op (fetch_game_log() upserts zero rows) until PWHL actually
+        # publishes that season's schedule.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -48,6 +61,9 @@ Season IDs:
     7 = 2025-26 Preseason
     8 = 2025-26 Regular Season (120 games, current)
     9 = 2025-26 Playoffs
+    10 = 2026-27 Preseason (confirmed live 2026-09 via HockeyTech bootstrap;
+         zero games as of this writing -- PWHL hasn't published this
+         schedule yet)
 
 Response structure note:
     HockeyTech returns a list of {sections: [{title, headers, data: [{row: {...}}]}]}
@@ -145,6 +161,16 @@ SEASON_TYPE_MAP = {
     "7": "preseason",  # 2025-26 Preseason
     "8": "regular",  # 2025-26 Regular Season
     "9": "playoffs",  # 2025-26 Playoffs
+    # "10": "preseason" is hardcoded rather than left to get_season_type()'s
+    # live fallback -- HockeyTech names this one "2026-27 Pre-Season"
+    # (hyphenated, unlike every prior year's one-word "Preseason"), which
+    # doesn't match eyewall-poller's deriveSeasonType() substring check
+    # (`n.includes('preseason')`) and gets silently mislabeled "regular"
+    # over the live path. Confirmed 2026-09 by calling _resolve_season_type
+    # directly against production. Flagged as its own poller-side follow-up
+    # rather than fixed here -- this hardcode sidesteps it for season 10
+    # specifically, same as season "2"'s existing manual correction above.
+    "10": "preseason",  # 2026-27 Preseason
 }
 # Historical IDs stay hardcoded above (no live lookup exists for past
 # seasons); the current season's type is filled in live instead of
@@ -1367,6 +1393,24 @@ def run_gw_goals_rollup_only(season_id: str | None = None) -> None:
     log.info("=== PWHL GW goals rollup complete ===")
 
 
+def run_game_log_only(season_id: str) -> None:
+    """Run fetch_game_log() only, for an explicit season_id -- see the
+    --game-log-only usage note above. Unlike run()'s other fetches, this
+    doesn't need season_type at all (fetch_game_log() itself doesn't use
+    it), but still validates the id is real HockeyTech data before
+    bothering, same courtesy the other *-only modes give a caller."""
+    season_type = _resolve_season_type(season_id)
+    if season_type is None:
+        log.error(
+            f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping game-log-only run"
+        )
+        return
+    log.info(f"=== PWHL game log only — season {season_id} ({season_type}) ===")
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    fetch_game_log(sb, season_id)
+    log.info("=== PWHL game log only complete ===")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if "--shot-totals-only" in args:
@@ -1378,5 +1422,13 @@ if __name__ == "__main__":
     elif "--gw-goals-rollup-only" in args:
         args = [a for a in args if a != "--gw-goals-rollup-only"]
         run_gw_goals_rollup_only(args[0] if args else None)
+    elif "--game-log-only" in args:
+        args = [a for a in args if a != "--game-log-only"]
+        if not args:
+            log.error(
+                "--game-log-only requires an explicit season_id (it has no PWHL_SEASON default)"
+            )
+        else:
+            run_game_log_only(args[0])
     else:
         run(args[0] if args else None)
