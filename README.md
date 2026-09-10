@@ -43,6 +43,7 @@ python run.py shots            # Shot events (incremental)
 python run.py shifts           # Shift charts (incremental)
 python run.py zones            # Zone starts (incremental)
 python run.py rapm             # RAPM regression only
+python run.py elo              # Team Elo rating recompute only
 python run.py moneypuck        # MoneyPuck WAR + percentiles only
 python run.py lines            # Line combinations only
 python run.py rankings         # Power rankings + AI narratives only
@@ -144,6 +145,9 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 
 ### `rapm.py`
 3-year rolling ridge regression RAPM (alpha=2500). 5v5 only. Zone-start adjusted. Signed xG differential formulation. Writes `rapm` column to `player_seasons`. See RAPM methodology section.
+
+### `elo_ratings.py` (2026-09)
+Full nightly recompute of every NHL team's Elo rating (FiveThirtyEight's published NHL constants — K=6, home advantage=35, 1/3 regression-to-mean at each season boundary) from `game_log`, upserted to `team_elo_ratings`. Backs `eyewall-poller`'s `nhl.js` `/prediction/analyze` route (both the in-season and true-preseason branches), replacing the hand-tuned standings scorecard and the roster-continuity fallback — see `docs/elo_prediction_model_results.md` for the backtest this decision is based on (beats both prior systems on every metric, in both regimes, with untuned literature-default constants). Deliberately a full replay each run, not incremental — cheap and self-healing, no "last processed game" state to get out of sync. Requires `docs/team_elo_ratings_create.sql` to have been run first (table + RLS — no migration tooling in this repo).
 
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
