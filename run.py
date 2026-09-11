@@ -19,11 +19,16 @@ Nightly run order (important — modules depend on each other):
       run_all()'s stage("line_combinations", ...) call, not numbered above since this docstring
       predates that stage)
 
+  Also not numbered above (same reason): injuries -- ESPN injury feed ->
+  player_injuries, runs right after nhl_stats (matches against its fresh
+  players table). Independent otherwise -- no other stage depends on it.
+
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
 Usage:
   python run.py                  # run all pipelines (nightly order)
   python run.py nhl              # NHL stats only
+  python run.py injuries         # ESPN injuries only
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
@@ -146,6 +151,7 @@ def run_all():
     print(f"{'=' * 55}")
 
     import elo_ratings
+    import injuries
     import line_combinations
     import moneypuck
     import nhl_stats
@@ -166,6 +172,7 @@ def run_all():
         return result
 
     stage("nhl_stats", nhl_stats.run)
+    stage("injuries", injuries.run)  # matches against nhl_stats' fresh players table
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
@@ -234,6 +241,10 @@ if __name__ == "__main__":
         import nhl_stats
 
         nhl_stats.run()
+    elif arg == "injuries":
+        import injuries
+
+        injuries.run()
     elif arg == "playoffs":
         import playoff_race
 
