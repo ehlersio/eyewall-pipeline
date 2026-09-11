@@ -110,7 +110,7 @@ python echl_news.py                        # ECHL news -> Worker
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
+nhl_stats → injuries → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
 ```
 
 ### `nhl_stats.py`
@@ -175,6 +175,19 @@ Forward lines and D pairs inferred from shift + shot events, for all 32 teams (l
 **32-team expansion (2026-07):** previously CAR-only. Shot events are now fetched by looking up the target team's own `game_id`s from `game_log`, then filtering `shot_events` by that game_id list + `situation_code='1551'` — not `shot_events.car_game`, which only ever flags games CAR played in and can't be reused as a generic per-team filter. Verified against CAR's previously-stored 20252026 rows: identical shift/shot counts, unit composition, TOI, and xGF% before and after the refactor.
 
 **Prior-season blend:** `db.NHL_SEASON` flips league-wide the moment ANY team's first regular-season game is played, not per-team — a team whose own opener is later than the league's first game loses access to its own real, fully-populated prior-season lines days before it has current-season data to replace them with; the same gap, smaller, persists for the first few weeks after a team's own opener while shift data is still thin. Whenever current-season clustering falls short of 4 lines / 3 pairs for a team, the remaining rank slots are now filled from that team's own last written prior-season units, filtered to players still on the live roster (`api-web.nhle.com/v1/roster/{team}/current`) and never patching a unit that's lost only one of its members — the whole unit is dropped instead. Carried-over rows are tagged `source='prior_season'` (vs `'current'`) so the frontend can label them distinctly. Requires `docs/session_line_combinations_source_column.sql` to be run in Supabase first (adds the `source` column).
+
+### `injuries.py`
+NHL injury status from ESPN's public (unofficial, undocumented) injuries feed — one league-wide call, all 32 teams, no per-team looping needed. Writes to `player_injuries`. Independent of every other pipeline stage; runs right after `nhl_stats` so player matching sees a fresh `players` table.
+
+**Why ESPN, not the NHL API:** the NHL's own API has no injuries/scratches endpoint at all — confirmed via both the community-documented endpoint references and direct inspection of live `api-web.nhle.com` responses (landing/boxscore/right-rail carry none of this). ESPN's site API does, at the same "stable but unofficial" tier as MoneyPuck's CSVs and HockeyTech (AHL/ECHL/PWHL), both already depended on elsewhere in this pipeline.
+
+**Hard-won API quirk:** ESPN's endpoint returns a 403 for a custom `User-Agent` header specifically (confirmed live: this module's own honest identifying string, `EyeWall-Analytics/1.0 (eyewallanalytics.com)`, gets blocked; `requests`' own default `python-requests/2.x` UA does not) — an ESPN-side anti-scraping heuristic on this particular undocumented endpoint, not a general Python-vs-curl thing (curl's own default UA also passes fine). `injuries.py` deliberately sends no custom UA at all; don't "fix" that by adding one back without verifying against a live 200 first.
+
+**Player matching:** ESPN has no ID shared with this app's `players` table (NHL's own numeric `player_id`), so matching is by normalized name (accents/apostrophes/case stripped), scoped to the team ESPN says the player is on — scoping to one team's ~30-40 players makes name collisions a non-issue in practice. A miss still gets a row written (`player_id=null`, raw name kept, logged as unmatched) rather than being dropped — confirmed live (2026-09-11) that most misses are genuinely `players.team IS NULL` rows (offseason free agents/unsigned players as of that roster snapshot, e.g. Jake Bean, Adam Henrique, Evander Kane), not a matching bug.
+
+**Known data-quality caveat, confirmed live:** ESPN's feed can carry stale entries — one CAR player showed `status: "Out"` dated three months earlier (a since-healed injury from the prior season's playoffs, never cleared from the feed). `espn_updated_at` is carried through specifically so a consumer can judge staleness itself; this module doesn't filter on it — that's a display-layer decision, not an ingestion one.
+
+Requires `docs/session_player_injuries_table.sql` to be run in Supabase first (creates the table + RLS policy).
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
@@ -735,6 +748,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `game_scoring` | Goal-by-goal scoring data |
 | `game_xg` | Per-game expected goals |
 | `line_combinations` | Inferred lines and D pairs, all 32 teams (2026-07 — previously CAR-only) |
+| `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed — see `injuries.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
