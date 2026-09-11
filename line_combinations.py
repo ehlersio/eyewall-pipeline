@@ -19,7 +19,9 @@ Algorithm (per team):
   6. Compute xGF/xGA/xGF% for each unit using the shot events that fell within
      the shared shift windows.
   7. Enrich with player names from the `players` table.
-  8. Upsert into `line_combinations`.
+  8. Blend in prior-season units for any rank slot the current season's data
+     can't fill yet (see "Prior-season blend" below).
+  9. Upsert into `line_combinations`.
 
 Scope:
   - All 32 NHL teams (loop; pass --team for a single team).
@@ -33,6 +35,29 @@ not the `shot_events.car_game` flag -- that flag only ever marks games CAR
 played in, so it can't be reused as a per-team filter (special_teams.py hit
 this same trap; its per-team shot fetch now uses the same game_id-list
 pattern, see that file's `fetch_game_ids_for_team`).
+
+Prior-season blend (added to fix empty/partial lines early in a season):
+  `db.NHL_SEASON` is resolved league-wide (see eyewall-poller's seasons.js)
+  and flips the moment ANY team's regular-season game has been played --
+  not per-team. A team whose own opener is later than the league's first
+  game loses access to its own real, fully-populated prior-season lines
+  days before it has any current-season data to replace them with. Same
+  problem, smaller version, for the first few weeks after a team's own
+  opener: shift data needs several games before MIN_UNIT_SECS clears for
+  all 4 lines / 3 pairs.
+
+  Fix: whenever current-season clustering falls short of 4 lines or 3
+  pairs for a team, the remaining rank slots are filled from that team's
+  own last written prior-season units -- filtered to players still on the
+  live current roster (api-web.nhle.com/v1/roster/{team}/current; a
+  player who was traded/left as a UFA/retired can't appear), and excluding
+  any player already placed via a current-season unit. Never fabricated --
+  a slot with neither a current nor a surviving prior unit is just left
+  empty, same as today. Carried-over rows are tagged `source="prior_season"`
+  (vs "current") in the upsert so the frontend can label them distinctly
+  from both live-inferred and the hand-maintained staticLines.js fallback.
+  If the live roster fetch fails, blending is skipped entirely for that
+  team's run (fail safe -- never guess roster membership).
 
 Usage:
   python line_combinations.py                # current season, all 32 teams
@@ -48,10 +73,18 @@ import argparse
 import math
 from collections import defaultdict
 
+import requests
+
 from db import NHL_SEASON, get_client
+from pipeline_common import FetchError
+
+NHL_BASE = "https://api-web.nhle.com/v1"
+HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
 
 MIN_PAIR_SECS = 60  # ignore pairs with < 1 min shared ice (noise)
 MIN_UNIT_SECS = 300  # a unit must have 5+ min together to surface in UI
+FORWARD_TARGET = 4  # lines to try to fill per team
+DEFENSE_TARGET = 3  # D pairs to try to fill per team
 
 ALL_TEAMS = [
     "ANA",
@@ -345,17 +378,173 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
     return forward_units[:4] + def_units[:3]  # top 4 lines + top 3 D pairs
 
 
+# ── Prior-season blend ────────────────────────────────────────────────────────
+
+
+def nhl_get(url, params=None):
+    try:
+        r = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        raise FetchError(f"NHL GET failed: {url} — {e}") from e
+
+
+def fetch_current_roster_ids(team):
+    """Player ids (forwards + defensemen only -- goalies aren't part of line
+    units) currently in the team's organization, per the live camp roster.
+
+    This is /roster/{team}/current, not /roster/{team}/{season} -- during
+    preseason `season` (NHL_SEASON) can still be resolved to the PRIOR
+    season for weeks (see module docstring), so a season-numbered roster
+    fetch would silently return last year's roster instead of this year's,
+    defeating the point of checking who's still actually on the team.
+
+    Returns a set[int], or None if the fetch failed (caller must treat None
+    as "can't verify roster membership" and skip blending, not "empty
+    roster" -- an NHL team's live roster is never actually empty).
+    """
+    try:
+        data = nhl_get(f"{NHL_BASE}/roster/{team}/current")
+    except FetchError as e:
+        print(f"  WARN: couldn't fetch current roster for {team}: {e}")
+        return None
+    ids = set()
+    for group in ("forwards", "defensemen"):
+        for p in data.get(group, []):
+            ids.add(p["id"])
+    return ids
+
+
+def prior_season(season):
+    """20262027 -> 20252026. Season ids are YYYY(YYYY+1); the prior season
+    is both halves shifted back one year, i.e. season - 10001."""
+    return season - 10001
+
+
+def fetch_prior_units(client, team, season):
+    """This team's own last-written line_combinations rows for the season
+    immediately before `season`. Returns [] on no data or fetch error --
+    same "just skip it" posture as the rest of this module's Supabase
+    reads; a missing prior season is a normal, expected state (a team's
+    first season in this dataset, or a gap in nightly runs), not a bug."""
+    # Explicit column list, not select("*") -- must match the insert-row
+    # shape exactly (below) so a carried-over row can be spread straight
+    # into a fresh insert. select("*") would smuggle this row's own `id`
+    # (and any other DB-only column) into the new insert as a literal
+    # value instead of letting Postgres assign a fresh one.
+    columns = (
+        "team,unit_type,rank,player_a,player_b,player_c,"
+        "name_a,name_b,name_c,pos_a,pos_b,pos_c,toi_secs,xgf,xga,xgf_pct"
+    )
+    try:
+        rows = (
+            client.table("line_combinations")
+            .select(columns)
+            .eq("team", team)
+            .eq("season", prior_season(season))
+            .order("unit_type")
+            .order("rank")
+            .execute()
+            .data
+        )
+    except Exception as e:
+        print(f"  WARN: couldn't fetch prior-season line_combinations for {team}: {e}")
+        return []
+    return rows or []
+
+
+def _prior_row_player_ids(row):
+    return [
+        pid
+        for pid in (row.get("player_a"), row.get("player_b"), row.get("player_c"))
+        if pid is not None
+    ]
+
+
+def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
+    """Fill any rank slot current_rows is short of (per unit_type) from
+    prior_rows, skipping any prior unit containing a player no longer on
+    roster_ids or already placed via a current-season unit. Never
+    reassigns a missing player into a partial prior unit -- a triplet that
+    loses one of three members is dropped whole, not patched.
+
+    current_rows / prior_rows: lists of upsert-shaped dicts (unit_type,
+    rank, player_a/b/c, name_a/b/c, pos_a/b/c, toi_secs, xgf, xga, xgf_pct).
+    Returns a new list, re-ranked contiguously per unit_type, each row
+    carrying a "source" field ("current" or "prior_season").
+
+    If roster_ids is None (live roster fetch failed), returns current_rows
+    unchanged (tagged "current") -- fail safe, no blending attempted.
+    """
+    for row in current_rows:
+        row["source"] = "current"
+
+    if roster_ids is None or not prior_rows:
+        return current_rows
+
+    out = []
+    for unit_type, target in target_counts.items():
+        current_of_type = [r for r in current_rows if r["unit_type"] == unit_type]
+        used_players = set()
+        for r in current_of_type:
+            used_players.update(_prior_row_player_ids(r))
+
+        merged = list(current_of_type)
+        remaining = target - len(merged)
+        if remaining > 0:
+            prior_of_type = sorted(
+                (r for r in prior_rows if r["unit_type"] == unit_type),
+                key=lambda r: r["rank"],
+            )
+            for pr in prior_of_type:
+                if remaining <= 0:
+                    break
+                pids = _prior_row_player_ids(pr)
+                if not pids or not all(pid in roster_ids for pid in pids):
+                    continue  # a member left the org -- drop the whole unit, don't patch it
+                if any(pid in used_players for pid in pids):
+                    continue  # avoid showing the same player in two rows
+                carried = {**pr, "season": season, "source": "prior_season"}
+                merged.append(carried)
+                used_players.update(pids)
+                remaining -= 1
+
+        # Re-rank contiguously starting at 1, current-season units first
+        # (they're already sorted by TOI descending from cluster_into_units).
+        # Done before printing, not after, so the printed label matches the
+        # rank actually written -- a carried-over unit's slot isn't decided
+        # until every current-season unit of this type has claimed its spot.
+        for i, r in enumerate(merged, start=1):
+            r["rank"] = i
+        for r in merged:
+            if r["source"] != "prior_season":
+                continue
+            label = f"Line {r['rank']}" if unit_type == "F" else f"D{r['rank']}"
+            names = " / ".join(n for n in (r.get("name_a"), r.get("name_b"), r.get("name_c")) if n)
+            print(f"  {label:6s}  {names:<45}  (carried over from prior season)")
+        out.extend(merged)
+
+    return out
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-def run_team(client, team, season, dry_run=False):
-    """Compute and (unless dry_run) write line combinations for one team.
+def compute_current_season_rows(client, team, season):
+    """Everything run_team() used to do end-to-end before the prior-season
+    blend existed: load this team's current-season shift/shot data, cluster
+    it into units, build the upsert-shaped rows.
 
-    Returns the number of unit rows written (or that would be written under
-    --dry-run), or None if there wasn't enough data to compute anything.
+    Returns [] (not None) whenever there's nothing usable -- no shift data
+    yet, no game_log entry, or no unit cleared MIN_UNIT_SECS. Those used to
+    be early `return None`s straight out of run_team(), which meant a team
+    with zero current-season data skipped the prior-season blend entirely --
+    exactly backwards, since that's the case blending exists for. An empty
+    list here just means run_team()'s blend step has nothing of its own to
+    prefer, so every slot falls through to a surviving prior-season unit
+    (or stays empty, if there's no prior data either).
     """
-    print(f"\n--- {team} ---")
-
     # 1. Load this team's shifts (situation column may be null; filter at shot level)
     raw_shifts = fetch_all(
         client,
@@ -365,8 +554,8 @@ def run_team(client, team, season, dry_run=False):
     )
     print(f"  {len(raw_shifts):,} shift rows")
     if not raw_shifts:
-        print("  no shift data — run shift_data.py first")
-        return None
+        print("  no current-season shift data yet — leaving this to the prior-season blend")
+        return []
 
     # 2. Look up this team's game_ids for the season, then its 5v5 shot events.
     # game_log has one row per team per game, so filtering by team here gives
@@ -377,8 +566,8 @@ def run_team(client, team, season, dry_run=False):
     )
     game_ids = [g["game_id"] for g in game_rows]
     if not game_ids:
-        print("  no games in game_log — skip")
-        return None
+        print("  no games in game_log yet — leaving this to the prior-season blend")
+        return []
 
     raw_shots = fetch_all(
         client,
@@ -431,8 +620,8 @@ def run_team(client, team, season, dry_run=False):
     )
 
     if not units:
-        print("  no units met the minimum TOI threshold — check shift data coverage")
-        return None
+        print("  no units met the minimum TOI threshold — leaving this to the prior-season blend")
+        return []
 
     # 7. Build upsert rows
     rows = []
@@ -499,11 +688,45 @@ def run_team(client, team, season, dry_run=False):
             else f"  {label:6s}  {names:<45}  {toi_min}m  xGF%=—"
         )
 
+    return rows
+
+
+def run_team(client, team, season, dry_run=False):
+    """Compute and (unless dry_run) write line combinations for one team.
+
+    Returns the number of unit rows written (or that would be written under
+    --dry-run), or None if there was nothing to write even after attempting
+    the prior-season blend.
+    """
+    print(f"\n--- {team} ---")
+
+    rows = compute_current_season_rows(client, team, season)
+
+    # Blend in prior-season units for any rank slot current data can't fill
+    # yet. Runs even when rows is empty (see compute_current_season_rows'
+    # docstring) -- an all-empty current season is exactly the case this
+    # exists for, not a reason to skip it. Skips the extra fetches entirely
+    # once current data already covers every slot -- the common case once a
+    # season's a few weeks old.
+    target_counts = {"F": FORWARD_TARGET, "D": DEFENSE_TARGET}
+    current_counts = {ut: sum(1 for r in rows if r["unit_type"] == ut) for ut in target_counts}
+    if any(current_counts[ut] < target_counts[ut] for ut in target_counts):
+        roster_ids = fetch_current_roster_ids(team)
+        prior_rows = fetch_prior_units(client, team, season) if roster_ids is not None else []
+        rows = blend_units(rows, prior_rows, roster_ids, season, target_counts)
+    else:
+        for r in rows:
+            r["source"] = "current"
+
+    if not rows:
+        print("  nothing to write — no current-season data and no usable prior-season data")
+        return None
+
     if dry_run:
         print(f"  (dry-run) {len(rows)} line combination rows would be written")
         return len(rows)
 
-    # 8. Delete old rows for this season/team, then insert fresh
+    # Delete old rows for this season/team, then insert fresh
     client.table("line_combinations").delete().eq("season", season).eq("team", team).execute()
     for i in range(0, len(rows), 500):
         client.table("line_combinations").insert(rows[i : i + 500]).execute()
