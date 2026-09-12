@@ -193,6 +193,21 @@ NHL injury status from ESPN's public (unofficial, undocumented) injuries feed �
 
 Requires `docs/session_player_injuries_table.sql` to be run in Supabase first (creates the table + RLS policy), then `docs/session_injury_details_history.sql` (adds the detail columns + creates `player_injury_history`) — the latter **before** deploying the details/history version of `injuries.py`, since every insert now names the new columns.
 
+### `scratches.py` (2026-09)
+Persists every NHL game's scratches to `game_scratches`, one row per scratched player per game, from the NHL's own `gamecenter/{id}/right-rail` payload (`gameInfo.homeTeam/awayTeam.scratches` — the list `GameStatsPopup.jsx` already showed per game but nothing stored). Reuses `nhl_stats.fetch_right_rail()`. Confirmed present for regular-season and playoff games back to at least 2023-24; playoff lists run much longer (extra reserve players are carried), so consumers should split by `game_type`.
+
+Each scratch is classified against `player_injury_history` (the latest snapshot on or before the game date, within `MAX_SNAPSHOT_LAG_DAYS` = 3): on that day's report → `injured` (or `suspended`), not on it → `healthy`, no snapshot close enough → `unknown` — never a guess. Every game before `player_injury_history` started (2026-09-12) is therefore `unknown`, so a historical backfill gives real scratch counts, just unclassified. Matching is by NHL `player_id` first, then `(team, normalized name)` for ESPN rows `injuries.py` couldn't match.
+
+Incremental: only completed `game_log` games with no `game_scratches` rows yet are fetched (a game where nobody was scratched writes no rows and is re-checked nightly — rare enough not to warrant a separate marker). Runs right after `injuries` in `run.py`.
+
+```bash
+python scratches.py                              # current season, new games only
+python scratches.py 20252026                     # backfill a season
+python scratches.py --game 2025020500 --dry-run  # single game, no writes
+```
+
+Requires `docs/session_game_scratches.sql` to be run in Supabase first (creates the table + RLS policy) — before this module is deployed, since the nightly `scratches` stage upserts into it.
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
@@ -754,6 +769,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `line_combinations` | Inferred lines and D pairs, all 32 teams (2026-07 — previously CAR-only) |
 | `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed, current state only (full refresh each run), including body part/side/detail/return date — see `injuries.py` above |
 | `player_injury_history` | (2026-09) Daily snapshots of `player_injuries`, one row per `(snapshot_date, team, player_name)` — see `injuries.py` above |
+| `game_scratches` | (2026-09) One row per scratched player per game, classified healthy/injured/suspended/unknown — see `scratches.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
