@@ -46,7 +46,10 @@ output, and nothing else depends on this running first.
 """
 
 import argparse
+import re
 import unicodedata
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -139,6 +142,65 @@ def normalize_name(name):
     return "".join(ch for ch in ascii_only.lower() if ch.isalnum())
 
 
+# ESPN's own "nothing more specific" placeholder -- stored as NULL rather
+# than a string every consumer would have to know to hide. "Undisclosed"
+# (an injury_type value) is deliberately NOT treated as a placeholder: it's
+# real information (the team is withholding it), shown as-is.
+PLACEHOLDER_DETAILS = {"", "not specified"}
+
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def clean_detail(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return None if text.lower() in PLACEHOLDER_DETAILS else text
+
+
+def parse_details(inj):
+    """ESPN entry -> the four detail columns (confirmed live 2026-09-12:
+    `details.type` on every entry, `side` on ~1 in 4, `detail` on ~1 in 3,
+    `returnDate` on every entry). returnDate is truncated to its date part
+    and dropped if it isn't an ISO date at all -- it lands in a Postgres
+    `date` column, and one malformed value would otherwise fail the whole
+    batch insert."""
+    details = inj.get("details") or {}
+    raw_return = clean_detail(details.get("returnDate"))
+    match = ISO_DATE_RE.match(raw_return) if raw_return else None
+    return {
+        "injury_type": clean_detail(details.get("type")),
+        "injury_side": clean_detail(details.get("side")),
+        "injury_detail": clean_detail(details.get("detail")),
+        "return_date": match.group(0) if match else None,
+    }
+
+
+def snapshot_date():
+    """The history table's day key. Eastern time, matching the nightly
+    cron's own schedule (3 AM ET) -- a UTC date would stamp a 3 AM ET run
+    with the same calendar day either way, but a manual evening run would
+    otherwise land on tomorrow's UTC date."""
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def build_history_rows(rows, snap):
+    """Today's snapshot rows for player_injury_history, deduplicated on the
+    table's (snapshot_date, team, player_name) key -- a same-batch upsert
+    that names one conflict key twice fails outright with Postgres 21000
+    (same failure mode ahl_shot_events hit), so a duplicate ESPN listing
+    must be collapsed here rather than trusted not to happen."""
+    seen = set()
+    history = []
+    for row in rows:
+        key = (row["team"], row["player_name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        history.append({**row, "snapshot_date": snap})
+    return history
+
+
 def fetch_espn_injuries():
     r = requests.get(ESPN_INJURIES_URL, timeout=30)
     r.raise_for_status()
@@ -201,6 +263,7 @@ def run(dry_run=False):
                     "espn_status_raw": inj.get("status"),
                     "comment": inj.get("shortComment"),
                     "espn_updated_at": inj.get("date"),
+                    **parse_details(inj),
                 }
             )
 
@@ -208,8 +271,12 @@ def run(dry_run=False):
     for u in unmatched:
         print(f"  WARN: no players-table match for {u}")
 
+    snap = snapshot_date()
+    history = build_history_rows(rows, snap)
+
     if dry_run:
         print(f"  (dry-run) {len(rows)} rows would be written")
+        print(f"  (dry-run) {len(history)} player_injury_history rows would be upserted for {snap}")
         return len(rows)
 
     # Full refresh -- small dataset (dozens of rows league-wide), same
@@ -225,6 +292,17 @@ def run(dry_run=False):
         for i in range(0, len(rows), 500):
             client.table("player_injuries").insert(rows[i : i + 500]).execute()
     print(f"  OK player_injuries: {len(rows)} rows written")
+
+    # Daily history -- player_injuries above is wiped every run, so this is
+    # the only record of who was hurt on a given day (man-games lost, WAR
+    # lost to injury, injury timelines all read from here). Upsert, not
+    # insert: re-running on the same day overwrites that day's snapshot
+    # instead of duplicating it.
+    for i in range(0, len(history), 500):
+        client.table("player_injury_history").upsert(
+            history[i : i + 500], on_conflict="snapshot_date,team,player_name"
+        ).execute()
+    print(f"  OK player_injury_history: {len(history)} rows upserted for {snap}")
     return len(rows)
 
 

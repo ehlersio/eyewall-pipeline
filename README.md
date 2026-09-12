@@ -187,7 +187,11 @@ NHL injury status from ESPN's public (unofficial, undocumented) injuries feed �
 
 **Known data-quality caveat, confirmed live:** ESPN's feed can carry stale entries — one CAR player showed `status: "Out"` dated three months earlier (a since-healed injury from the prior season's playoffs, never cleared from the feed). `espn_updated_at` is carried through specifically so a consumer can judge staleness itself; this module doesn't filter on it — that's a display-layer decision, not an ingestion one.
 
-Requires `docs/session_player_injuries_table.sql` to be run in Supabase first (creates the table + RLS policy).
+**Injury details (2026-09):** each row also carries `injury_type` (body part/category — "Knee", "Upper Body", "Undisclosed"), `injury_side`, `injury_detail` ("Surgery", "Fracture"), and `return_date` (ESPN's estimated return), parsed from each ESPN entry's `details` object by `parse_details()`. ESPN's "Not Specified" placeholder is stored as `NULL`; "Undisclosed" is kept as real information. ESPN's `longComment` (a long third-party editorial blurb) is deliberately not stored.
+
+**Daily history (2026-09):** `player_injuries` is wiped and reloaded every run, so each run also upserts a dated snapshot of the same rows into `player_injury_history`, keyed on `(snapshot_date, team, player_name)` — `snapshot_date` is the Eastern-time date of the run, and re-running on the same day overwrites that day's snapshot rather than duplicating it. This is the source for anything needing "who was hurt on day X" (man-games lost, WAR lost to injury, injury timelines).
+
+Requires `docs/session_player_injuries_table.sql` to be run in Supabase first (creates the table + RLS policy), then `docs/session_injury_details_history.sql` (adds the detail columns + creates `player_injury_history`) — the latter **before** deploying the details/history version of `injuries.py`, since every insert now names the new columns.
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
@@ -748,7 +752,8 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `game_scoring` | Goal-by-goal scoring data |
 | `game_xg` | Per-game expected goals |
 | `line_combinations` | Inferred lines and D pairs, all 32 teams (2026-07 — previously CAR-only) |
-| `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed — see `injuries.py` above |
+| `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed, current state only (full refresh each run), including body part/side/detail/return date — see `injuries.py` above |
+| `player_injury_history` | (2026-09) Daily snapshots of `player_injuries`, one row per `(snapshot_date, team, player_name)` — see `injuries.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
