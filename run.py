@@ -21,7 +21,10 @@ Nightly run order (important — modules depend on each other):
 
   Also not numbered above (same reason): injuries -- ESPN injury feed ->
   player_injuries, runs right after nhl_stats (matches against its fresh
-  players table). Independent otherwise -- no other stage depends on it.
+  players table). Then scratches -- NHL right-rail scratches ->
+  game_scratches, right after injuries (needs nhl_stats' fresh game_log
+  and injuries' same-day player_injury_history snapshot to classify
+  healthy vs injured). Nothing else depends on either.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -29,6 +32,8 @@ Usage:
   python run.py                  # run all pipelines (nightly order)
   python run.py nhl              # NHL stats only
   python run.py injuries         # ESPN injuries only
+  python run.py scratches        # Game scratches only (incremental)
+  python run.py scratches 20252026  # Game scratches backfill for a season
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
@@ -158,6 +163,7 @@ def run_all():
     import playoff_race
     import power_rankings
     import rapm
+    import scratches
     import shift_data
     import shot_events
     import special_teams
@@ -173,6 +179,7 @@ def run_all():
 
     stage("nhl_stats", nhl_stats.run)
     stage("injuries", injuries.run)  # matches against nhl_stats' fresh players table
+    stage("scratches", scratches.run)  # needs fresh game_log + today's injury snapshot
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
@@ -245,6 +252,10 @@ if __name__ == "__main__":
         import injuries
 
         injuries.run()
+    elif arg == "scratches":
+        import scratches
+
+        scratches.run(season)
     elif arg == "playoffs":
         import playoff_race
 
