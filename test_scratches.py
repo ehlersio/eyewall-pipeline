@@ -131,7 +131,7 @@ def _fake_client(game_log, done_ids, history):
             "game_scratches": [{"game_id": g} for g in done_ids],
             "player_injury_history": history,
         }[name]
-        for method in ("select", "eq", "gte", "range"):
+        for method in ("select", "eq", "gte", "gt", "order", "limit"):
             getattr(q, method).return_value = q
         q.execute.return_value = MagicMock(data=data)
         return q
@@ -225,3 +225,46 @@ class TestRun:
         # missing/unreachable table can't fail an empty night.
         queried = [c.args[0] for c in client.table.call_args_list]
         assert "game_scratches" not in queried
+
+    @patch("scratches.time.sleep")
+    @patch("scratches.fetch_right_rail", return_value=RIGHT_RAIL)
+    def test_preseason_games_are_skipped(self, mock_fetch, _sleep):
+        preseason_only = [
+            {
+                "game_id": 2026010001,
+                "game_date": "2026-09-20",
+                "game_type": 1,
+                "home_team": "CAR",
+                "away_team": "NSH",
+            },
+        ]
+        client = _fake_client(preseason_only, done_ids=set(), history=[])
+        with (
+            patch("scratches.get_client", return_value=client),
+            patch("scratches.upsert") as mock_upsert,
+        ):
+            assert run(season=20262027) == 0
+        mock_fetch.assert_not_called()
+        mock_upsert.assert_not_called()
+
+    @patch("scratches.time.sleep")
+    @patch("scratches.fetch_right_rail", return_value=RIGHT_RAIL)
+    def test_preseason_is_dropped_but_regular_and_playoff_games_still_run(self, mock_fetch, _sleep):
+        mixed = [
+            *GAME_LOG,
+            {
+                "game_id": 2026010001,
+                "game_date": "2026-09-20",
+                "game_type": 1,
+                "home_team": "CAR",
+                "away_team": "NSH",
+            },
+        ]
+        client = _fake_client(mixed, done_ids=set(), history=[])
+        with (
+            patch("scratches.get_client", return_value=client),
+            patch("scratches.upsert"),
+        ):
+            run(season=20262027)
+        fetched = sorted(c.args[0] for c in mock_fetch.call_args_list)
+        assert fetched == [2026020050, 2026020100]
