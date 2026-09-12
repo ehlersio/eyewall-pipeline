@@ -21,6 +21,13 @@ a historical backfill still gives real scratch counts, just unclassified.
 Matching is by NHL player_id first (injuries.py sets it when it matched the
 ESPN name), then by (team, normalized name) for ESPN rows it couldn't match.
 
+Preseason is skipped (game_type 1): its right-rail "scratches" list is
+effectively the whole training-camp roster that didn't dress -- ~91 per
+game across the 2025-26 backfill vs ~3 per team in the regular season -- so it
+says nothing about lineup decisions and would swamp every healthy-scratch
+count. Regular season (2) and playoffs (3) are kept; playoff lists still
+run long (extra reserve players), so consumers should split by game_type.
+
 Incremental: only games in game_log (completed games -- nhl_stats.py only
 writes OFF/FINAL games) with no game_scratches rows yet are fetched. A game
 where neither team scratched anyone writes no rows and is re-checked each
@@ -53,6 +60,9 @@ from nhl_stats import fetch_right_rail
 MAX_SNAPSHOT_LAG_DAYS = 3
 
 PAGE_SIZE = 1000
+
+# NHL gameType for preseason -- skipped entirely (see module docstring).
+PRESEASON_GAME_TYPE = 1
 
 
 def parse_scratches(right_rail, home_abbr, away_abbr):
@@ -122,66 +132,62 @@ def classify(game_date, team, player_id, player_name, history_index, snapshot_da
     return ("suspended" if status == "suspension" else "injured"), status
 
 
-def fetch_games(client, season, game_id=None):
-    """Completed games for `season` from game_log, one entry per game_id
-    (game_log stores one row per team per game)."""
-    games = {}
-    offset = 0
+def fetch_keyset(client, table, select, apply_filters, cursor_col="id"):
+    """Keyset-paginated read: ORDER BY cursor_col + `cursor_col > last_seen`.
+
+    Same pattern as line_combinations.py's fetch_all(), but takes a filter
+    callback so callers can use range filters (fetch_history's
+    snapshot_date >= since) that fetch_all's eq/in-only dict can't express.
+    Deliberately NOT offset pagination (.range() without an ORDER BY):
+    Postgres doesn't guarantee a stable row order across separate requests,
+    so unordered offset pages can repeat some rows and skip others --
+    confirmed live on game_scratches (2026-09-12), where two unordered
+    paginated counts of the same unchanged table disagreed by thousands of
+    rows per game_type despite identical totals.
+    """
+    rows, last = [], 0
+    cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"
     while True:
-        q = (
-            client.table("game_log")
-            .select("game_id,game_date,game_type,home_team,away_team")
-            .eq("season", season)
-        )
-        if game_id is not None:
-            q = q.eq("game_id", game_id)
-        page = q.range(offset, offset + PAGE_SIZE - 1).execute().data or []
-        for r in page:
-            games.setdefault(r["game_id"], r)
-        if len(page) < PAGE_SIZE:
+        q = apply_filters(client.table(table).select(cols))
+        batch = q.gt(cursor_col, last).order(cursor_col).limit(PAGE_SIZE).execute().data or []
+        rows.extend(batch)
+        if len(batch) < PAGE_SIZE:
             break
-        offset += PAGE_SIZE
+        last = batch[-1][cursor_col]
+    return rows
+
+
+def fetch_games(client, season, game_id=None):
+    """Completed games for `season` from game_log, one entry per game_id.
+    Cursor is game_id (as in line_combinations.py): game_log has one row
+    per team per game, so a page boundary can split a game's two rows --
+    harmless here, since only one row per game_id is kept anyway."""
+
+    def filters(q):
+        q = q.eq("season", season)
+        return q.eq("game_id", game_id) if game_id is not None else q
+
+    rows = fetch_keyset(
+        client, "game_log", "game_id,game_date,game_type,home_team,away_team", filters, "game_id"
+    )
+    games = {}
+    for r in rows:
+        games.setdefault(r["game_id"], r)
     return games
 
 
 def fetch_done_game_ids(client, season):
-    done = set()
-    offset = 0
-    while True:
-        page = (
-            client.table("game_scratches")
-            .select("game_id")
-            .eq("season", season)
-            .range(offset, offset + PAGE_SIZE - 1)
-            .execute()
-            .data
-            or []
-        )
-        done.update(r["game_id"] for r in page)
-        if len(page) < PAGE_SIZE:
-            break
-        offset += PAGE_SIZE
-    return done
+    rows = fetch_keyset(client, "game_scratches", "game_id", lambda q: q.eq("season", season))
+    return {r["game_id"] for r in rows}
 
 
 def fetch_history(client, since):
-    rows = []
-    offset = 0
-    while True:
-        page = (
-            client.table("player_injury_history")
-            .select("snapshot_date,team,player_id,player_name,status")
-            .gte("snapshot_date", since)
-            .range(offset, offset + PAGE_SIZE - 1)
-            .execute()
-            .data
-            or []
-        )
-        rows.extend(page)
-        if len(page) < PAGE_SIZE:
-            break
-        offset += PAGE_SIZE
-    return rows
+    return fetch_keyset(
+        client,
+        "player_injury_history",
+        "snapshot_date,team,player_id,player_name,status",
+        lambda q: q.gte("snapshot_date", since),
+    )
 
 
 def run(season=None, game_id=None, dry_run=False):
@@ -190,6 +196,12 @@ def run(season=None, game_id=None, dry_run=False):
     print(f"\n=== Scratches Pipeline (season {season}) ===")
 
     games = fetch_games(client, season, game_id)
+    preseason = [gid for gid, g in games.items() if g.get("game_type") == PRESEASON_GAME_TYPE]
+    if preseason:
+        games = {gid: g for gid, g in games.items() if gid not in set(preseason)}
+        print(
+            f"  skipping {len(preseason)} preseason game(s) -- camp-roster lists, not lineup decisions"
+        )
     # Skip the game_scratches lookup entirely when game_log has nothing for
     # this season (every offseason night) -- one fewer query, and a
     # not-yet-created table can't fail an otherwise no-op run.
@@ -252,9 +264,9 @@ def run(season=None, game_id=None, dry_run=False):
         print(f"  (dry-run) {len(rows)} rows would be upserted")
         return len(rows)
 
+    # db.upsert() prints its own "OK game_scratches: N rows upserted" line.
     if rows:
         upsert(client, "game_scratches", rows, "game_id,player_id")
-    print(f"  OK game_scratches: {len(rows)} rows upserted")
     return len(rows)
 
 
