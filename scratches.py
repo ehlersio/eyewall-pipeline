@@ -22,8 +22,8 @@ Matching is by NHL player_id first (injuries.py sets it when it matched the
 ESPN name), then by (team, normalized name) for ESPN rows it couldn't match.
 
 Preseason is skipped (game_type 1): its right-rail "scratches" list is
-effectively the whole training-camp roster that didn't dress -- ~124 per
-game in the 2025-26 backfill vs ~2 per team in the regular season -- so it
+effectively the whole training-camp roster that didn't dress -- ~91 per
+game across the 2025-26 backfill vs ~3 per team in the regular season -- so it
 says nothing about lineup decisions and would swamp every healthy-scratch
 count. Regular season (2) and playoffs (3) are kept; playoff lists still
 run long (extra reserve players), so consumers should split by game_type.
