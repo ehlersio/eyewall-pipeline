@@ -52,6 +52,9 @@ Usage:
   python run.py playoff_odds     # Simulated playoff odds only (needs fresh nhl_stats + elo_ratings)
   python run.py injury_impact    # Man-games + WAR lost to injury, last 7 days of games
   python run.py injury_impact 20262027 --full  # Recompute every game of a season
+  python run.py goalie_starts    # Boxscore goalie starters, new games only
+  python run.py goalie_starts 20232024  # Goalie starters backfill for a season
+  python run.py starting_goalie  # Start probabilities for every team's next game
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
@@ -174,6 +177,7 @@ def run_all():
 
     import draft_history
     import elo_ratings
+    import goalie_starts
     import injuries
     import injury_impact
     import line_combinations
@@ -187,6 +191,7 @@ def run_all():
     import shift_data
     import shot_events
     import special_teams
+    import starting_goalie
     import transactions
     import zone_starts
 
@@ -201,6 +206,8 @@ def run_all():
     stage("nhl_stats", nhl_stats.run)
     stage("injuries", injuries.run)  # matches against nhl_stats' fresh players table
     stage("scratches", scratches.run)  # needs fresh game_log + today's injury snapshot
+    stage("goalie_starts", goalie_starts.run)  # needs fresh game_log (boxscore starters)
+    stage("starting_goalie", starting_goalie.run)  # needs rosters, injury snapshot, goalie_starts
     stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
     stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
@@ -302,6 +309,14 @@ if __name__ == "__main__":
         import injury_impact
 
         injury_impact.run(season=season, full="--full" in sys.argv)
+    elif arg == "goalie_starts":
+        import goalie_starts
+
+        goalie_starts.run(season=season)
+    elif arg == "starting_goalie":
+        import starting_goalie
+
+        starting_goalie.run(season=season)
     elif arg == "playoffs":
         import playoff_race
 
