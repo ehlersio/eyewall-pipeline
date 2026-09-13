@@ -588,14 +588,24 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
 # season_id with no entry here would have silently fallen back to the
 # `2025` default in _parse_game_date, misdating every game until someone
 # noticed and added a line.
+# season_id -> the calendar year the season STARTS, for every season type
+# (preseason, regular, and playoffs alike). _parse_game_date() puts Sep-Dec
+# dates in that year and Jan-Jun dates in the next one, so a playoff season
+# maps to the same start year as its regular season, not the year its games
+# are played in. Verified 2026-09-13 by checking that the weekday
+# HockeyTech prints in every schedule date ("Wed, May 8") matches the
+# computed date's weekday: seasons 3 and 6 had been entered as their
+# playoff year (2024/2025), dating every 2023-24 and 2024-25 playoff game
+# a year late, and season 10 was missing entirely (fell through to 2025).
 SEASON_YEAR_MAP = {
     "1": 2023,
     "2": 2023,
-    "3": 2024,  # 2023-24 regular / playoffs
+    "3": 2023,  # 2023-24 regular / playoffs
     "5": 2024,
-    "6": 2025,  # 2024-25 regular / playoffs
+    "6": 2024,  # 2024-25 regular / playoffs
     "8": 2025,
     "9": 2025,  # 2025-26 regular / playoffs
+    "10": 2026,  # 2026-27 preseason
 }
 SEASON_YEAR_MAP.setdefault(PWHL_SEASON, _pwhl_live["start_year"])
 
@@ -1230,6 +1240,21 @@ def compute_gw_goals(sb, season_id: str, season_type: str) -> None:
     log.info(f"  {n} player season rows updated with gw_goals")
 
 
+def _goal_count(value) -> int:
+    """HockeyTech schedule goal count -> int.
+
+    Unplayed games carry "-" rather than a number -- confirmed live
+    2026-09-13 on all 12 games of the newly published 2026-27 preseason
+    schedule (season 10), where `int("-")` crashed the nightly
+    --game-log-only step (and, via GitHub Actions' stop-on-failure, every
+    PWHL step after it) three nights running. Anything non-numeric is
+    treated like a missing count (0), the same as the previous `or 0`
+    handling of None/"" -- game_state, not the score, is what marks a game
+    Final."""
+    text = str(value).strip() if value is not None else ""
+    return int(text) if text.isdigit() else 0
+
+
 def fetch_game_log(sb, season_id: str) -> None:
     """Fetch season schedule/results and upsert to pwhl_game_log."""
     log.info(f"Fetching game log (season {season_id})...")
@@ -1282,8 +1307,8 @@ def fetch_game_log(sb, season_id: str) -> None:
                 or None,
                 "home_team_id": int(home_id) if home_id else None,
                 "away_team_id": int(away_id) if away_id else None,
-                "home_score": int(g.get("home_goal_count", 0) or 0),
-                "away_score": int(g.get("visiting_goal_count", 0) or 0),
+                "home_score": _goal_count(g.get("home_goal_count")),
+                "away_score": _goal_count(g.get("visiting_goal_count")),
                 "game_state": "Final" if is_final else status,
                 "ot": bool(g.get("ot")),
                 "shootout": bool(g.get("shootout")),
