@@ -17,6 +17,7 @@ from playoff_odds import (
     explain_change,
     home_win_prob,
     next_game_day_ids,
+    rating_sd,
     seed,
     simulate,
 )
@@ -122,6 +123,49 @@ class TestSimulate:
         imp = sim["impacts"][1]
         assert imp["home"]["E1_0"] > imp["away"]["E1_0"]
         assert imp["away"]["E1_1"] > imp["home"]["E1_1"]
+
+    def _conference_round_robin(self, teams, names):
+        games, gid = [], 0
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                if teams[a]["conference"] == teams[b]["conference"]:
+                    gid += 1
+                    games.append(
+                        {
+                            "game_id": gid,
+                            "game_date": "2026-10-01",
+                            "home": a,
+                            "away": b,
+                            "neutral": False,
+                        }
+                    )
+        return games
+
+    def test_zero_rating_sd_matches_fixed_ratings(self):
+        teams, names = _league()
+        ratings = {n: 1500.0 + 10 * i for i, n in enumerate(names)}
+        games = self._conference_round_robin(teams, names)
+        a = simulate(teams, games, ratings, n_sims=300, rng=np.random.default_rng(5))
+        b = simulate(teams, games, ratings, n_sims=300, rng=np.random.default_rng(5), rating_sd=0.0)
+        assert a["playoff_pct"] == b["playoff_pct"]
+
+    def test_rating_uncertainty_pulls_odds_toward_the_middle(self):
+        teams, names = _league()
+        ratings = dict.fromkeys(names, 1500.0)
+        ratings["E1_0"], ratings["E1_7"] = 1600.0, 1400.0
+        games = self._conference_round_robin(teams, names)
+        fixed = simulate(teams, games, ratings, n_sims=3000, rng=np.random.default_rng(3))
+        fuzzy = simulate(
+            teams, games, ratings, n_sims=3000, rng=np.random.default_rng(3), rating_sd=120.0
+        )
+        assert fuzzy["playoff_pct"]["E1_0"] < fixed["playoff_pct"]["E1_0"]
+        assert fuzzy["playoff_pct"]["E1_7"] > fixed["playoff_pct"]["E1_7"]
+
+    def test_rating_sd_shrinks_as_games_are_played(self):
+        assert rating_sd(0, sd0=60, n0=40) == 60
+        assert abs(rating_sd(40, sd0=60, n0=40) - 60 / 2**0.5) < 1e-9
+        assert rating_sd(80, sd0=60, n0=40) < rating_sd(40, sd0=60, n0=40)
+        assert rating_sd(20, sd0=0, n0=40) == 0
 
     def test_next_game_day(self):
         games = [

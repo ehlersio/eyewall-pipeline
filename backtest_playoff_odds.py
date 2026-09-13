@@ -1,29 +1,32 @@
 """
 backtest_playoff_odds.py -- How well would playoff_odds.py have predicted
-who made the playoffs, from snapshots in each past season?
+who made the playoffs, from snapshots in each past season? Also tunes the
+rating-uncertainty constants (playoff_odds.RATING_SD_PRESEASON /
+RATING_SD_HALF_GAMES) with --tune.
 
 For each season this pipeline has game_log data for (2023-24 through
-2025-26) and each snapshot date (Nov 15, Jan 1, Mar 1):
-- standings as of that date from the NHL's own standings-by-date endpoint
-  (api-web.nhle.com/v1/standings/{date}) -- official points, regulation
-  wins, wins, division and conference;
-- Elo ratings as of that date, replayed from game_log with the same
-  constants and season-boundary regression as elo_ratings.py;
-- the rest of that season's schedule from game_log (every game after the
-  snapshot; neutral-site flags aren't in game_log, so every game is
-  treated as having home ice -- a negligible difference);
-- playoff_odds.simulate() on those inputs.
+2025-26), four snapshots:
+- preseason: the day before opening night. Every team at 0 points
+  (the NHL's standings-by-date endpoint returns no teams before a season
+  starts), divisions/conferences from that season's Nov 15 standings;
+- Nov 15, Jan 1, Mar 1: standings as of that date from the NHL's own
+  standings-by-date endpoint (api-web.nhle.com/v1/standings/{date}).
+Elo ratings as of each date are replayed from game_log with the same
+constants and season-boundary regression as elo_ratings.py; the rest of
+that season's schedule comes from game_log (neutral-site flags aren't in
+game_log, so every game gets home ice -- a negligible difference).
 Scored against the 16 teams that actually appear in that season's playoff
-games (game_type 3 in game_log). Compared with a "currently holds a
-playoff spot" baseline (probability 1 or 0).
+games (game_type 3 in game_log), and compared with a "currently holds a
+playoff spot" baseline (probability 1 or 0; 0.5 for everyone preseason).
 
 Read-only -- no Supabase writes. Writes docs/playoff_odds_backtest_results.md.
 
-Run: python backtest_playoff_odds.py [--sims 5000]
+Run: python backtest_playoff_odds.py [--sims 5000] [--tune]
 """
 
 import argparse
 import math
+from datetime import date, timedelta
 
 import numpy as np
 import requests
@@ -34,7 +37,10 @@ import playoff_odds
 import rapm
 
 SEASONS = [20232024, 20242025, 20252026]
-SNAPSHOTS = [("11-15", 0), ("01-01", 1), ("03-01", 1)]  # (month-day, years after season start)
+IN_SEASON_SNAPSHOTS = [("11-15", 0), ("01-01", 1), ("03-01", 1)]  # (month-day, years after start)
+TUNE_SD0 = [0, 25, 50, 75, 100]
+TUNE_N0 = [20, 40, 80]
+TUNE_SIMS = 2000
 RESULTS_DOC = "docs/playoff_odds_backtest_results.md"
 
 
@@ -59,8 +65,8 @@ def standings_as_of(day: str) -> dict:
 
 
 def ratings_as_of(games_by_season: dict, season: int, day: str) -> dict:
-    """Replay every game before `day`, regressing to the mean at each season
-    boundary -- same as elo_ratings.compute_ratings(), stopped at a date."""
+    """Replay every game on or before `day`, regressing to the mean at each
+    season boundary -- same as elo_ratings.compute_ratings(), stopped at a date."""
     ratings = {}
     for s in sorted(games_by_season):
         if s > season:
@@ -102,16 +108,27 @@ def log_loss(pairs):
     ) / len(pairs)
 
 
-def run(n_sims=5000):
+def load_snapshots() -> list:
+    """Everything the simulations need, fetched once: one dict per snapshot."""
     games_by_season = {s: elo_ratings.load_games(s) for s in SEASONS}
-    rows, model_pairs, base_pairs = [], [], []
+    snaps = []
     for season in SEASONS:
         actual = playoff_teams(season)
         print(f"season {season}: {len(actual)} playoff teams in game_log")
-        for md, off in SNAPSHOTS:
-            day = snapshot_date(season, md, off)
-            teams = standings_as_of(day)
-            ratings = ratings_as_of(games_by_season, season, day)
+        alignment = standings_as_of(snapshot_date(season, *IN_SEASON_SNAPSHOTS[0]))
+        opener = min(g["game_date"] for g in games_by_season[season])
+        pre_day = (date.fromisoformat(opener) - timedelta(days=1)).isoformat()
+        dated = [("preseason", pre_day, None)] + [
+            (snapshot_date(season, md, off), snapshot_date(season, md, off), "live")
+            for md, off in IN_SEASON_SNAPSHOTS
+        ]
+        for label, day, source in dated:
+            if source == "live":
+                teams = standings_as_of(day)
+            else:
+                teams = {
+                    t: {**a, "points": 0, "wins": 0, "rw": 0, "gp": 0} for t, a in alignment.items()
+                }
             remaining = [
                 {
                     "game_id": g["game_id"],
@@ -123,78 +140,160 @@ def run(n_sims=5000):
                 for g in games_by_season[season]
                 if g["game_date"] > day and g["home_team"] in teams and g["away_team"] in teams
             ]
-            sim = playoff_odds.simulate(
-                teams, remaining, ratings, n_sims=n_sims, rng=np.random.default_rng(7)
+            snaps.append(
+                {
+                    "season": season,
+                    "label": label,
+                    "teams": teams,
+                    "ratings": ratings_as_of(games_by_season, season, day),
+                    "remaining": remaining,
+                    "actual": actual,
+                    "avg_gp": sum(t["gp"] for t in teams.values()) / len(teams),
+                }
             )
-            # Baseline: does the team hold a playoff spot today (same seeding rules, today's points)?
-            names = sorted(teams)
+    return snaps
+
+
+def evaluate(snaps, n_sims, sd0, n0):
+    """(per-snapshot rows, model pairs, baseline pairs) for one setting."""
+    rows, model_pairs, base_pairs = [], [], []
+    for snap in snaps:
+        teams, names = snap["teams"], sorted(snap["teams"])
+        sd = playoff_odds.rating_sd(snap["avg_gp"], sd0=sd0, n0=n0)
+        sim = playoff_odds.simulate(
+            teams,
+            snap["remaining"],
+            snap["ratings"],
+            n_sims=n_sims,
+            rng=np.random.default_rng(7),
+            rating_sd=sd,
+        )
+        if snap["label"] == "preseason":
+            holds = np.full((1, len(names)), 0.5)
+        else:
             pts = np.array([[teams[t]["points"] for t in names]], dtype=float)
             rw = np.array([[teams[t]["rw"] for t in names]], dtype=float)
             wins = np.array([[teams[t]["wins"] for t in names]], dtype=float)
             holds, _ = playoff_odds.seed(names, teams, pts, rw, wins, np.random.default_rng(7))
-            snap_model = [
-                (float(sim["playoff_pct"][t]), 1.0 if t in actual else 0.0) for t in names
-            ]
-            snap_base = [
-                (1.0 if holds[0, i] else 0.0, 1.0 if t in actual else 0.0)
-                for i, t in enumerate(names)
-            ]
-            model_pairs += snap_model
-            base_pairs += snap_base
-            rows.append((season, day, len(remaining), brier(snap_model), brier(snap_base)))
-            print(
-                f"  {day}: {len(remaining)} games left | Brier model {brier(snap_model):.3f} vs baseline {brier(snap_base):.3f}"
+            holds = holds.astype(float)
+        snap_model = [(float(sim["playoff_pct"][t]), float(t in snap["actual"])) for t in names]
+        snap_base = [(float(holds[0, i]), float(t in snap["actual"])) for i, t in enumerate(names)]
+        model_pairs += snap_model
+        base_pairs += snap_base
+        rows.append(
+            (
+                snap["season"],
+                snap["label"],
+                len(snap["remaining"]),
+                sd,
+                brier(snap_model),
+                brier(snap_base),
             )
+        )
+    return rows, model_pairs, base_pairs
 
+
+def calibration(pairs):
     buckets = {}
-    for p, y in model_pairs:
-        b = min(int(p * 10), 9)
-        buckets.setdefault(b, []).append((p, y))
+    for p, y in pairs:
+        buckets.setdefault(min(int(p * 10), 9), []).append((p, y))
+    return [
+        (b, len(v), sum(p for p, _ in v) / len(v), sum(y for _, y in v) / len(v))
+        for b, v in sorted(buckets.items())
+    ]
 
+
+def write_doc(n_sims, tuned, chosen, fixed, tuning_grid):
+    sd0, n0 = chosen
+    rows_t, model_t, base_t = tuned
+    rows_f, model_f, _ = fixed
     lines = [
         "# Playoff odds backtest",
         "",
-        f"`backtest_playoff_odds.py`, {n_sims:,} simulations per snapshot. Standings from the NHL's standings-by-date",
-        "endpoint, Elo ratings replayed from game_log to each date, remaining games from game_log.",
-        "Scored against the 16 teams that played in that season's playoffs. Lower Brier / log loss is better;",
-        'the baseline is "currently holds a playoff spot" (probability 1 or 0).',
+        f"`backtest_playoff_odds.py`, {n_sims:,} simulations per snapshot. Seasons 2023-24 through 2025-26;",
+        "snapshots preseason (day before opening night, all teams at 0 points), Nov 15, Jan 1, Mar 1.",
+        "Standings from the NHL's standings-by-date endpoint, Elo ratings replayed from game_log to each date,",
+        "remaining games from game_log. Scored against the 16 teams that played in that season's playoffs.",
+        'Lower Brier / log loss is better. Baseline: "currently holds a playoff spot" (1 or 0; 0.5 preseason).',
         "",
-        "| Season | Snapshot | Games left | Brier (model) | Brier (baseline) |",
-        "|---|---|---|---|---|",
+        f"**Chosen rating uncertainty:** {sd0} Elo points preseason, shrinking over n0 = {n0} games "
+        f"(`RATING_SD_PRESEASON = {float(sd0)}`, `RATING_SD_HALF_GAMES = {float(n0)}`).",
+        "",
+        f"**Overall** ({len(model_t)} team-snapshots): Brier **{brier(model_t):.3f}** with uncertainty vs "
+        f"**{brier(model_f):.3f}** with fixed ratings vs **{brier(base_t):.3f}** baseline; log loss "
+        f"**{log_loss(model_t):.3f}** vs **{log_loss(model_f):.3f}** fixed.",
+        "",
+        "| Season | Snapshot | Games left | Rating sd | Brier (uncertainty) | Brier (fixed) | Brier (baseline) |",
+        "|---|---|---|---|---|---|---|",
     ]
-    lines += [f"| {s} | {d} | {n} | {bm:.3f} | {bb:.3f} |" for s, d, n, bm, bb in rows]
+    for (s, label, n, sd, bm, bb), (_, _, _, _, bf, _) in zip(rows_t, rows_f):
+        lines.append(f"| {s} | {label} | {n} | {sd:.1f} | {bm:.3f} | {bf:.3f} | {bb:.3f} |")
     lines += [
-        "",
-        f"**Overall** ({len(model_pairs)} team-snapshots): Brier model **{brier(model_pairs):.3f}** vs baseline "
-        f"**{brier(base_pairs):.3f}**; log loss model **{log_loss(model_pairs):.3f}**.",
         "",
         "## Calibration",
         "",
-        "| Predicted | Teams | Avg predicted | Actually made it |",
-        "|---|---|---|---|",
+        "| Predicted | Teams | Avg predicted | Actually made it | (fixed ratings: avg predicted / made it) |",
+        "|---|---|---|---|---|",
     ]
-    for b in sorted(buckets):
-        pairs = buckets[b]
-        lines.append(
-            f"| {b * 10}-{b * 10 + 10}% | {len(pairs)} | {sum(p for p, _ in pairs) / len(pairs):.0%} | "
-            f"{sum(y for _, y in pairs) / len(pairs):.0%} |"
-        )
+    fixed_cal = {b: (p, y) for b, _, p, y in calibration(model_f)}
+    for b, n, p, y in calibration(model_t):
+        fp, fy = fixed_cal.get(b, (float("nan"), float("nan")))
+        lines.append(f"| {b * 10}-{b * 10 + 10}% | {n} | {p:.0%} | {y:.0%} | {fp:.0%} / {fy:.0%} |")
+    if tuning_grid:
+        lines += [
+            "",
+            f"## Tuning grid ({TUNE_SIMS:,} simulations per snapshot, same seed)",
+            "",
+            "| sd0 | n0 | Brier | Log loss |",
+            "|---|---|---|---|",
+        ]
+        lines += [f"| {a} | {b} | {br:.4f} | {ll:.4f} |" for a, b, br, ll in tuning_grid]
+        lines += [
+            "",
+            "Chosen by lowest Brier. With 3 seasons x 4 snapshots x 32 teams, adjacent settings differ by",
+            "little -- the point is a reasonable amount of uncertainty, not a precise optimum.",
+        ]
     lines += [
         "",
         "Caveats: game_log's period_end is only populated for 2025-26 (2023-24/2024-25 games all read as",
         "regulation), so replayed ratings for those seasons skip Elo's overtime damping; neutral-site games",
-        "are treated as home games. Snapshot dates falling before a season's first game are skipped by construction",
-        "(none do for these seasons).",
+        "are treated as home games.",
     ]
     with open(RESULTS_DOC, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def run(n_sims=5000, tune=False):
+    snaps = load_snapshots()
+    grid = []
+    chosen = (playoff_odds.RATING_SD_PRESEASON, playoff_odds.RATING_SD_HALF_GAMES)
+    if tune:
+        for sd0 in TUNE_SD0:
+            for n0 in TUNE_N0 if sd0 else [TUNE_N0[0]]:
+                _, pairs, _ = evaluate(snaps, TUNE_SIMS, sd0, n0)
+                grid.append((sd0, n0, brier(pairs), log_loss(pairs)))
+                print(
+                    f"  tune sd0={sd0:>3} n0={n0:>2}: Brier {brier(pairs):.4f}, log loss {log_loss(pairs):.4f}"
+                )
+        best = min(grid, key=lambda g: (g[2], g[3]))
+        chosen = (best[0], best[1])
+        print(f"  -> chosen sd0={chosen[0]}, n0={chosen[1]}")
+    tuned = evaluate(snaps, n_sims, *chosen)
+    fixed = evaluate(snaps, n_sims, 0.0, chosen[1] or 40.0)
+    for (s, label, n, sd, bm, bb), (*_, bf, _) in zip(tuned[0], fixed[0]):
+        print(
+            f"  {s} {label:>10}: {n} games left, sd {sd:5.1f} | Brier {bm:.3f} (fixed {bf:.3f}, baseline {bb:.3f})"
+        )
+    write_doc(n_sims, tuned, chosen, fixed, grid)
     print(
-        f"\nOverall Brier model {brier(model_pairs):.3f} vs baseline {brier(base_pairs):.3f} -> {RESULTS_DOC}"
+        f"\nOverall Brier {brier(tuned[1]):.3f} (fixed {brier(fixed[1]):.3f}, baseline "
+        f"{brier(tuned[2]):.3f}) -> {RESULTS_DOC}"
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Backtest playoff_odds.py against past seasons")
+    parser = argparse.ArgumentParser(description="Backtest (and tune) playoff_odds.py")
     parser.add_argument("--sims", type=int, default=5000)
+    parser.add_argument("--tune", action="store_true", help="Grid-search the rating uncertainty")
     args = parser.parse_args()
-    run(n_sims=args.sims)
+    run(n_sims=args.sims, tune=args.tune)
