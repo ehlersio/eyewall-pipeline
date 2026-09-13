@@ -276,6 +276,23 @@ python injury_impact.py 20262027 --full --dry-run
 
 Requires `docs/session_injury_impact.sql` to be run in Supabase first (creates both tables + RLS policies).
 
+### `goalie_starts.py` / `starting_goalie.py` (2026-09)
+
+**`goalie_starts.py`** → `goalie_game_starts`: every goalie who dressed in every regular-season and playoff game, from the NHL's own gamecenter boxscore (`playerByGameStats.{home,away}Team.goalies[]` — `starter` flag, TOI, decision). The `starter` flag is the NHL's, present back to 2023-24; it matches the most-TOI goalie in 96.9% of team-games (the rest are pulled starters, correctly still flagged). If a team's goalies ever come back with no starter flagged, the most-TOI goalie is marked (counted in the run summary). Preseason skipped. Incremental: games in `game_log` with no rows yet. Runs right after `scratches` in `run.py`.
+
+**`starting_goalie.py`** → `goalie_start_probs`: for every team's **next** regular-season game (only the next — the one after depends on who starts this one) once it's within 2 days, the probability each candidate goalie starts, summing to 1 per team per game. Two guards against training-camp rosters (found in the first dry run: `players.team` lists 5–6 goalies per team in camp, and spreading probability over every invitee isn't what the model was fit on): games further out aren't predicted — NHL rosters are cut before opening night — and a team with more than 3 healthy roster goalies is skipped (and named in the run summary). Candidates are the team's current roster goalies (`players.position = 'G'`), minus anyone listed out / injured-reserve on the latest injury snapshot (within 3 days); a day-to-day goalie stays a candidate with his status recorded in `factors` (the model has never seen injury data, so it isn't allowed to guess). The NHL publishes no probable starters, so this is a model of each team's own pattern. Features (`goalie_model.py`, from `goalie_game_starts` this season and last): share of the team's last 10 starts, started the previous game, back-to-back after starting / not starting it, days since his last start, no start in the last 20 games — a conditional logit over the candidates. Each game's rows are rewritten nightly until it's played, so what's left is the morning-of prediction, scoreable against `goalie_game_starts`. Plain probabilities — no betting framing. Runs right after `goalie_starts`.
+
+**Backtest** (`backtest_starting_goalie.py` → `docs/starting_goalie_backtest_results.md`, read-only): 7,837 team-game choices across 2023-24 to 2025-26, forward-chaining (each test season scored by a model fit only on earlier seasons). The model picks the starter **74.9%** (2024-25) / **72.8%** (2025-26) of the time vs 56.7% / 57.6% for "last game's starter starts again" and 64.8% / 62.9% for "share of the last 10"; **91–93% on back-to-backs**; pooled log loss 0.535 vs 0.685 / 0.680. Probabilities are well calibrated (candidates given 56% started 60% of the time, 84% → 85%, 96% → 96%) — with `goalie_model.fit`'s L2 at 0.001; at 0.01 every probability was squeezed toward 50/50 (55% → 64% actual). League-wide, the previous game's starter repeats only ~42% of the time (tandems and rotations), which is why the fitted weight on "started last" is negative once recent share is known. Production weights (`starting_goalie.WEIGHTS`) are the fit on all three seasons.
+
+```bash
+python goalie_starts.py                    # current season, new games only
+python goalie_starts.py 20232024           # backfill a season
+python starting_goalie.py --dry-run        # every team's next game, no writes
+python backtest_starting_goalie.py         # writes docs/starting_goalie_backtest_results.md
+```
+
+Requires `docs/session_starting_goalie.sql` to be run in Supabase first (creates both tables + RLS policies).
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
