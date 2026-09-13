@@ -332,6 +332,24 @@ def _stale_standings_abbrs(standings_map: dict, season: int) -> set:
     }
 
 
+# gameOutcome.lastPeriodType -> game_log.period_end, for schedule entries
+# without a periodDescriptor number.
+_LAST_PERIOD_TYPE_TO_PERIOD = {"REG": 3, "OT": 4, "SO": 5}
+
+
+def period_end_of(game: dict) -> int:
+    """The period a schedule game ended in: 3 = regulation, 4 = OT, 5 =
+    shootout. periodDescriptor.number first, then gameOutcome.lastPeriodType,
+    and only then the regulation default -- a bare default of 3 is what left
+    every 2023-24/2024-25 game_log row stuck at regulation (see
+    backfill_period_end.py), silently disabling Elo's overtime damping."""
+    number = (game.get("periodDescriptor") or {}).get("number")
+    if isinstance(number, int) and number >= 3:
+        return number
+    last = (game.get("gameOutcome") or {}).get("lastPeriodType")
+    return _LAST_PERIOD_TYPE_TO_PERIOD.get(last, 3)
+
+
 def fetch_schedule(team: str, season: int) -> list:
     try:
         data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
@@ -659,7 +677,7 @@ def run(season: int = NHL_SEASON):
                     "opp_score": opp_score,
                     "opponent": opponent,
                     "game_type": g.get("gameType", 2),
-                    "period_end": g.get("periodDescriptor", {}).get("number", 3),
+                    "period_end": period_end_of(g),
                     # team_scored_first + PP/PK filled in below via incremental PBP fetch
                 }
             )
