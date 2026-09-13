@@ -255,9 +255,9 @@ def write_doc(n_sims, tuned, chosen, fixed, tuning_grid):
         ]
     lines += [
         "",
-        "Caveats: game_log's period_end is only populated for 2025-26 (2023-24/2024-25 games all read as",
-        "regulation), so replayed ratings for those seasons skip Elo's overtime damping; neutral-site games",
-        "are treated as home games.",
+        f"Overtime/shootout rate: {playoff_odds.OT_RATE:.1%} of games (pooled 2023-24..2025-26 game_log).",
+        "Caveats: neutral-site games are treated as home games; head-to-head and later NHL tiebreakers",
+        "aren't modeled.",
     ]
     with open(RESULTS_DOC, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

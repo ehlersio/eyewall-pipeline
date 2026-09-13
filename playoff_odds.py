@@ -11,9 +11,10 @@ Model:
   (e.g. the 2026-27 Global Series in Finland). Same model and constants as
   /prediction/analyze's game predictions.
 - OT_RATE of games go past regulation, giving the loser 1 point.
-  Measured from game_log 2025-26 (202 of 816 games, 24.8%) -- the only
-  season whose period_end data is populated (2023-24/2024-25 are all
-  stored as regulation, a separate known data gap).
+  Measured from game_log regular seasons 2023-24..2025-26 (1,725 of
+  7,790 team-games, 22.1%; by season 20.9% / 20.7% / 24.8%). The
+  backtest barely moves across that range (Brier 0.1612-0.1615), so the
+  pooled rate is used rather than chasing one season.
 - Rating uncertainty: tonight's rating is only an estimate of a team's
   true strength, so each simulated season shifts every team's rating by
   its own random N(0, sd) amount for that whole season. sd shrinks as the
@@ -59,7 +60,7 @@ from db import NHL_SEASON, get_client, upsert
 from nhl_stats import fetch_schedule
 
 N_SIMS = 10_000
-OT_RATE = 0.248
+OT_RATE = 0.221
 IMPACT_MIN = 0.005  # 0.5 percentage points
 MAX_CONTRIBUTIONS = 5
 DONE_STATES = {"OFF", "FINAL"}
@@ -68,9 +69,11 @@ REGULAR_SEASON = 2
 # Rating uncertainty (Elo points, 1 standard deviation) before any games,
 # and the games-played scale over which it shrinks -- see rating_sd().
 # From `backtest_playoff_odds.py --tune` (2026-09-13, 2023-24..2025-26,
-# preseason + Nov 15 / Jan 1 / Mar 1 snapshots): 50 / 40 had the lowest
-# Brier (0.1615 vs 0.1646 for fixed ratings); neighbors were close, so
-# this is "a reasonable amount", not a precise optimum. 0 = fixed ratings.
+# preseason + Nov 15 / Jan 1 / Mar 1 snapshots; re-run after the
+# 2023-24/2024-25 period_end backfill): 50 / 40 had the lowest Brier and
+# log loss (0.1617 / 0.4718 vs 0.1652 / 0.4829 for fixed ratings);
+# neighbors were close, so this is "a reasonable amount", not a precise
+# optimum. 0 = fixed ratings.
 RATING_SD_PRESEASON = 50.0
 RATING_SD_HALF_GAMES = 40.0
 
