@@ -59,9 +59,10 @@ do not try to close all of these in this pass):
     deterministic cutoff — not a real hockey tiebreaker. This only matters
     if two teams are tied in points exactly at the rank-3/rank-4 boundary;
     away from that boundary it doesn't affect pool membership.
-  - games_remaining assumes a fixed 82-game season
-    (games_remaining = 82 - games_played), not a live remaining-schedule
-    count.
+  - games_remaining = season length - games_played. The season length is
+    read from the live schedule each run (season_length(); the NHL went
+    from 82 to 84 games in 2026-27), falling back to 82 only if that fetch
+    fails -- it used to be a hardcoded 82.
   - Once team_seasons.clinch_indicator is populated (non-null) for a team,
     it is ground truth from the NHL itself — these computed columns are a
     pre-clinch estimate only. Preferring clinch_indicator for display is a
@@ -69,8 +70,20 @@ do not try to close all of these in this pass):
 """
 
 from db import NHL_SEASON, get_client
+from nhl_stats import fetch_schedule
 
+# Fallback only -- season_length() reads the real count from the schedule.
 GAMES_IN_SEASON = 82
+
+
+def season_length(season: int, sample_team: str = "TOR") -> int:
+    """Regular-season games per team, from the live schedule. Every team
+    plays the same number, so one team's club schedule is enough (84 in
+    2026-27, 82 before). Falls back to GAMES_IN_SEASON if the fetch fails
+    or returns nothing."""
+    n = sum(1 for g in fetch_schedule(sample_team, season) if g.get("gameType") == 2)
+    return n or GAMES_IN_SEASON
+
 
 # clinchIndicator letters that all imply "has a playoff spot locked up"
 # (x=wildcard/playoff berth, y=division title, z=conference top seed,
@@ -84,7 +97,8 @@ def _points(team: dict) -> int:
 
 
 def _games_remaining(team: dict) -> int:
-    return max(0, GAMES_IN_SEASON - (team.get("games_played") or 0))
+    total = team.get("games_in_season") or GAMES_IN_SEASON
+    return max(0, total - (team.get("games_played") or 0))
 
 
 def ceiling(team: dict) -> int:
@@ -246,6 +260,11 @@ def run(season: int = NHL_SEASON):
     if not teams:
         print("  No teams with usable standings data — skipping.")
         return
+
+    games_in_season = season_length(season)
+    print(f"  Season length: {games_in_season} regular-season games per team")
+    for t in teams:
+        t["games_in_season"] = games_in_season
 
     by_division: dict = {}
     by_conference: dict = {}

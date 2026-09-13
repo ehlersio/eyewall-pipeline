@@ -28,7 +28,10 @@ Nightly run order (important — modules depend on each other):
   -- ESPN's NHL transactions feed -> nhl_transactions; fully independent,
   placed here only to keep the ESPN-sourced stages together. Then
   draft_history -- NHL records API draft picks (with each pick's chain of
-  owners) -> draft_pick_history; also fully independent.
+  owners) -> draft_pick_history; also fully independent. playoff_odds runs
+  right after playoff_race -- Monte Carlo playoff odds from tonight's
+  standings, game_log results and Elo ratings -> playoff_odds /
+  playoff_odds_game_impacts.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -43,6 +46,7 @@ Usage:
   python run.py draft_history    # Draft pick history, last 5 drafts
   python run.py draft_history 1963  # Draft pick history since a draft year (backfill)
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
+  python run.py playoff_odds     # Simulated playoff odds only (needs fresh nhl_stats + elo_ratings)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
@@ -169,6 +173,7 @@ def run_all():
     import line_combinations
     import moneypuck
     import nhl_stats
+    import playoff_odds
     import playoff_race
     import power_rankings
     import rapm
@@ -194,6 +199,7 @@ def run_all():
     stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
+    stage("playoff_odds", playoff_odds.run)  # needs fresh standings + game_log + elo_ratings
     stage("shot_events", shot_events.run)
     stage("shift_data", shift_data.run)
     stage("zone_starts", zone_starts.run)
@@ -278,6 +284,10 @@ if __name__ == "__main__":
 
         # A first draft year (e.g. 1963 for a full backfill), not an NHL season.
         draft_history.run(since_year=season)
+    elif arg == "playoff_odds":
+        import playoff_odds
+
+        playoff_odds.run(season=season)
     elif arg == "playoffs":
         import playoff_race
 
