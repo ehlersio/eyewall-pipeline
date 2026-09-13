@@ -26,7 +26,9 @@ Nightly run order (important — modules depend on each other):
   and injuries' same-day player_injury_history snapshot to classify
   healthy vs injured). Nothing else depends on either. Then transactions
   -- ESPN's NHL transactions feed -> nhl_transactions; fully independent,
-  placed here only to keep the ESPN-sourced stages together.
+  placed here only to keep the ESPN-sourced stages together. Then
+  draft_history -- NHL records API draft picks (with each pick's chain of
+  owners) -> draft_pick_history; also fully independent.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -38,6 +40,8 @@ Usage:
   python run.py scratches 20252026  # Game scratches backfill for a season
   python run.py transactions     # ESPN NHL transactions, current calendar year
   python run.py transactions 2025   # Transactions backfill for a calendar year
+  python run.py draft_history    # Draft pick history, last 5 drafts
+  python run.py draft_history 1963  # Draft pick history since a draft year (backfill)
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
@@ -159,6 +163,7 @@ def run_all():
     print(f"  EyeWall Analytics Pipeline -- {datetime.now():%Y-%m-%d %H:%M}")
     print(f"{'=' * 55}")
 
+    import draft_history
     import elo_ratings
     import injuries
     import line_combinations
@@ -186,6 +191,7 @@ def run_all():
     stage("injuries", injuries.run)  # matches against nhl_stats' fresh players table
     stage("scratches", scratches.run)  # needs fresh game_log + today's injury snapshot
     stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
+    stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
@@ -267,6 +273,11 @@ if __name__ == "__main__":
 
         # Calendar year(s), not an NHL season -- ESPN's feed is keyed by year.
         transactions.run(years=[season] if season else None)
+    elif arg == "draft_history":
+        import draft_history
+
+        # A first draft year (e.g. 1963 for a full backfill), not an NHL season.
+        draft_history.run(since_year=season)
     elif arg == "playoffs":
         import playoff_race
 
