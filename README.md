@@ -260,6 +260,22 @@ python backtest_playoff_odds.py --sims 5000  # writes docs/playoff_odds_backtest
 
 Requires `docs/session_playoff_odds.sql` to be run in Supabase first (creates both tables + RLS policies). A `--dry-run` works without it (skips the change explanation); a real run fails loudly.
 
+### `injury_impact.py` (2026-09)
+
+Man-games and WAR each team has lost to injury this season → `injury_games_lost` (one row per player per missed game) and `team_injury_impact` (one row per team-season: `games_played`, `man_games_lost`, `war_lost`, `players_injured`, league ranks `rank_man_games`/`rank_war_lost` where 1 = most lost, and a `players` breakdown). Runs right after `moneypuck` in `run.py`.
+
+**A man-game lost:** for a completed regular-season game, a player on his team's injury report that day — the latest `player_injury_history` snapshot on or before the game date, within 3 days (same rule as `scratches.py`) — as day-to-day, out, or injured-reserve, who has no `shift_events` rows in that game (didn't dress). Day-to-day players who played aren't counted; suspensions never are. An ESPN entry `injuries.py` couldn't match to an NHL id can't be checked against shifts, so it counts only when listed out / IR. **WAR lost:** each missed game carries the player's WAR per game — `player_seasons.war` (moneypuck's season total) pooled over this regular season and last, ÷ games played, when that's ≥ 20 games; a team's WAR lost sums the positive rates (losing a below-replacement player isn't a loss here). Goalies have no WAR (`goalie_seasons` has GSAx), so they count in man-games only.
+
+**Coverage:** `player_injury_history` starts 2026-09-12, so this fills from the 2026-27 regular season on — games with no snapshot close enough are skipped, never guessed, and there's no earlier injury data to backfill. Injuries a team never discloses to ESPN's report can't be seen. Each night recomputes the last 7 days of games (shift data that lands late, report corrections — a game whose shifts aren't loaded yet waits for the next night), removes rows that no longer hold, then rebuilds every team's summary from `injury_games_lost`.
+
+```bash
+python injury_impact.py                     # current season, last 7 days
+python injury_impact.py --full              # current season, every game
+python injury_impact.py 20262027 --full --dry-run
+```
+
+Requires `docs/session_injury_impact.sql` to be run in Supabase first (creates both tables + RLS policies).
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
