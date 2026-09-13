@@ -31,7 +31,10 @@ Nightly run order (important — modules depend on each other):
   owners) -> draft_pick_history; also fully independent. playoff_odds runs
   right after playoff_race -- Monte Carlo playoff odds from tonight's
   standings, game_log results and Elo ratings -> playoff_odds /
-  playoff_odds_game_impacts.
+  playoff_odds_game_impacts. injury_impact runs right after moneypuck --
+  man-games and WAR lost to injury per team (needs game_log, today's
+  injury snapshot, shift_data's shift_events and moneypuck's fresh WAR)
+  -> injury_games_lost / team_injury_impact.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -47,6 +50,8 @@ Usage:
   python run.py draft_history 1963  # Draft pick history since a draft year (backfill)
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py playoff_odds     # Simulated playoff odds only (needs fresh nhl_stats + elo_ratings)
+  python run.py injury_impact    # Man-games + WAR lost to injury, last 7 days of games
+  python run.py injury_impact 20262027 --full  # Recompute every game of a season
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
@@ -170,6 +175,7 @@ def run_all():
     import draft_history
     import elo_ratings
     import injuries
+    import injury_impact
     import line_combinations
     import moneypuck
     import nhl_stats
@@ -213,6 +219,8 @@ def run_all():
     moneypuck_result = stage("moneypuck", moneypuck.run)
     if moneypuck_result and moneypuck_result is not STAGE_FAILED:
         failed_stages.extend(moneypuck_result)
+
+    stage("injury_impact", injury_impact.run)  # needs game_log, injury snapshot, shifts, fresh WAR
 
     stage("line_combinations", line_combinations.run)  # must run after shift_data + shot_events
     stage("special_teams", special_teams.run)  # must run after shift_data
@@ -260,7 +268,9 @@ def run_all():
 
 if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else "all"
-    season = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    # Only a numeric second argument is a season -- `injury_impact --full` and
+    # `validate eh.csv` pass something else there, and int() would crash on it.
+    season = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
 
     if arg == "nhl":
         import nhl_stats
@@ -288,6 +298,10 @@ if __name__ == "__main__":
         import playoff_odds
 
         playoff_odds.run(season=season)
+    elif arg == "injury_impact":
+        import injury_impact
+
+        injury_impact.run(season=season, full="--full" in sys.argv)
     elif arg == "playoffs":
         import playoff_race
 
