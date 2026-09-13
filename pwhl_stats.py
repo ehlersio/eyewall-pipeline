@@ -1240,6 +1240,66 @@ def compute_gw_goals(sb, season_id: str, season_type: str) -> None:
     log.info(f"  {n} player season rows updated with gw_goals")
 
 
+def build_season_row(season_id, season_type: str, bootstrap_entry: dict) -> dict:
+    """pwhl_seasons row for a season_id, from its HockeyTech bootstrap
+    `seasons[]` entry (id / name / start_date -- confirmed live 2026-09-13,
+    e.g. {"id": "10", "name": "2026-27 Pre-Season", "start_date":
+    "2026-10-01"}). start_year follows SEASON_YEAR_MAP's convention (the
+    year the season STARTS, playoffs included) -- from the map when the
+    season is listed, otherwise from start_date, minus one for playoffs
+    (a playoff season's games start in the spring after its season began).
+    end_year = start_year + 1, matching the hand-entered 2024-25+ rows."""
+    sid = str(season_id)
+    start_year = SEASON_YEAR_MAP.get(sid)
+    if start_year is None:
+        start_date = str(bootstrap_entry.get("start_date") or "")
+        year = int(start_date[:4]) if start_date[:4].isdigit() else datetime.now(UTC).year
+        start_year = year - 1 if season_type == "playoffs" else year
+    return {
+        "season_id": int(sid),
+        "season_name": bootstrap_entry.get("name") or f"Season {sid}",
+        "season_type": season_type,
+        "start_year": start_year,
+        "end_year": start_year + 1,
+    }
+
+
+def ensure_season_row(sb, season_id, season_type: str) -> bool:
+    """Insert a pwhl_seasons row for season_id if there isn't one yet.
+
+    pwhl_game_log.season_id (and other PWHL tables) has a foreign key to
+    pwhl_seasons, which was only ever hand-seeded -- no code wrote it. So a
+    new HockeyTech season_id failed every write until someone added the row
+    by hand: the 2026-27 preseason (season 10) failed the nightly
+    --game-log-only step with a 23503 FK violation on 2026-09-13, right
+    after the "-" goal-count crash was fixed. Returns True if a row was
+    inserted. Never guesses: if HockeyTech's bootstrap data doesn't list
+    the season, it logs and inserts nothing, so the FK error still surfaces
+    loudly downstream."""
+    existing = (
+        sb.table("pwhl_seasons").select("season_id").eq("season_id", int(season_id)).execute().data
+    )
+    if existing:
+        return False
+    try:
+        boot = ht_get({"view": "bootstrap"})
+        boot = boot[0] if isinstance(boot, list) and boot else boot
+        entry = next(
+            (s for s in (boot or {}).get("seasons", []) if str(s.get("id")) == str(season_id)),
+            None,
+        )
+    except FetchError as e:
+        log.warning(f"  pwhl_seasons: bootstrap fetch failed, not seeding season {season_id}: {e}")
+        return False
+    if entry is None:
+        log.warning(f"  pwhl_seasons: season {season_id} not in HockeyTech bootstrap, not seeding")
+        return False
+    row = build_season_row(season_id, season_type, entry)
+    sb.table("pwhl_seasons").insert(row).execute()
+    log.info(f"  pwhl_seasons: seeded missing season row {row}")
+    return True
+
+
 def _goal_count(value) -> int:
     """HockeyTech schedule goal count -> int.
 
@@ -1344,6 +1404,7 @@ def run(season_id: str | None = None) -> None:
 
     log.info(f"=== PWHL Stats pipeline — season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    ensure_season_row(sb, season_id, season_type)  # FK target for this run's season-scoped writes
 
     # fetch_roster() runs after the stats fetches, not before: skater/goalie
     # stats stub-upsert pwhl_players.team_id from each player's *stats-view*
@@ -1432,6 +1493,7 @@ def run_game_log_only(season_id: str) -> None:
         return
     log.info(f"=== PWHL game log only — season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    ensure_season_row(sb, season_id, season_type)  # FK target for pwhl_game_log
     fetch_game_log(sb, season_id)
     log.info("=== PWHL game log only complete ===")
 
