@@ -225,6 +225,22 @@ python transactions.py --dry-run
 
 Requires `docs/session_nhl_transactions.sql` to be run in Supabase first (creates the table + RLS policy).
 
+### `draft_history.py` (2026-09)
+Every NHL draft pick since 1963 (13,152 as of 2026-09) from the NHL's own records API (`records.nhl.com/site/api/draft`) into `draft_pick_history`, including the chain of teams that owned each pick before it was used — the API's `teamPickHistory`. One request returns everything (`limit=-1`); `cayenneExp=draftYear>=N` narrows it. Distinct from the year-specific `draft_*_2026` tables `draft_ingest.py` maintains for draft day.
+
+`pick_chain` (original owner first, drafting team last) is parsed from the two formats the API uses: dash chains (`NYR-VAN-PIT-PHI`, 2025 #12 — a team can appear twice when a pick comes back) and, for ~540 older picks, `NJD (from ATL)` / `NYI (from NYI)` (a team using its own pick). Anything else keeps the drafting team alone with the raw string in `history_raw`, and is logged. `times_traded` = chain length − 1. Tri-codes are kept as the API gives them, defunct franchises included (AFM, ATL, PHX, …). 43% of picks since 2015 changed hands at least once. `player_id` is null for ~790 mostly older picks.
+
+Nightly it re-fetches the last 5 drafts (prospects get an NHL `playerId` after being drafted, which the records API fills in later) and upserts on `(draft_year, overall_pick)`.
+
+```bash
+python draft_history.py              # last 5 drafts
+python draft_history.py --all        # every draft since 1963
+python draft_history.py --since 2015
+python draft_history.py --all --dry-run
+```
+
+Requires `docs/session_draft_pick_history.sql` to be run in Supabase first (creates the table + RLS policy).
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
@@ -788,6 +804,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `player_injury_history` | (2026-09) Daily snapshots of `player_injuries`, one row per `(snapshot_date, team, player_name)` — see `injuries.py` above |
 | `game_scratches` | (2026-09) One row per scratched player per game, classified healthy/injured/suspended/unknown — see `scratches.py` above |
 | `nhl_transactions` | (2026-09) ESPN NHL transactions feed, one row per ESPN entry with keyword categories + trade counterparties — see `transactions.py` above |
+| `draft_pick_history` | (2026-09) Every NHL draft pick since 1963 with its chain of owners (`pick_chain`), one row per `(draft_year, overall_pick)` — see `draft_history.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
