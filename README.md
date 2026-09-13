@@ -208,6 +208,23 @@ python scratches.py --game 2025020500 --dry-run  # single game, no writes
 
 Requires `docs/session_game_scratches.sql` to be run in Supabase first (creates the table + RLS policy) — before this module is deployed, since the nightly `scratches` stage upserts into it.
 
+### `transactions.py` (2026-09)
+Ingests ESPN's NHL transactions feed (`site.api.espn.com/.../hockey/nhl/transactions` — unofficial, same tier and same no-custom-User-Agent quirk as `injuries.py`) into `nhl_transactions`. The NHL's own API has no transactions endpoint.
+
+Feed facts, confirmed live: `season=` is a **calendar year**, paged at 1,000 (`pageCount` in the body); there is **no structured player data** — each entry is a date, a team, and free text; about 1 in 4 entries bundles several moves; typos appear ("Singed", "PLaced", "Recaled"). Each entry is therefore stored whole and tagged with keyword `categories` (trade, waivers, injury, signing, recall, assignment, release, suspension, staff) over the full text, with one `primary_category` by priority (trade > release > suspension > staff > signing > waivers > injury > recall > assignment, else `other`). Sentence-splitting was rejected: it breaks on "St. Louis", "J.J Moser", "Sault Ste. Marie". 2,866 of 2,873 usable 2025-26 entries match a category (7 fall to `other`; one empty entry is skipped).
+
+`counterparties` lists other NHL teams named in trade/waiver entries (full name, nickname, or a unique city — "New York" never matches on city alone), after stripping AHL-affiliate mentions like "from Chicago (AHL)" so a Carolina recall doesn't tag the Blackhawks. Each side of a trade is its own ESPN entry; pairing them is left to the Worker. Measured on 2025-26: about three quarters of trade entries (204 of 267) have their other half on the same day, and nearly every unpaired one simply has no other half in ESPN's feed.
+
+Nightly it re-fetches the whole current calendar year (a few requests) and upserts on `dedupe_key` (sha1 of date + ESPN team id + text); in January it also re-fetches the prior year. `season` is the NHL season by the July 1 league-year boundary.
+
+```bash
+python transactions.py              # current calendar year
+python transactions.py 2025 2026    # backfill calendar years
+python transactions.py --dry-run
+```
+
+Requires `docs/session_nhl_transactions.sql` to be run in Supabase first (creates the table + RLS policy).
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 
@@ -770,6 +787,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed, current state only (full refresh each run), including body part/side/detail/return date — see `injuries.py` above |
 | `player_injury_history` | (2026-09) Daily snapshots of `player_injuries`, one row per `(snapshot_date, team, player_name)` — see `injuries.py` above |
 | `game_scratches` | (2026-09) One row per scratched player per game, classified healthy/injured/suspended/unknown — see `scratches.py` above |
+| `nhl_transactions` | (2026-09) ESPN NHL transactions feed, one row per ESPN entry with keyword categories + trade counterparties — see `transactions.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |

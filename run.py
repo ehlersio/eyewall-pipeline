@@ -24,7 +24,9 @@ Nightly run order (important — modules depend on each other):
   players table). Then scratches -- NHL right-rail scratches ->
   game_scratches, right after injuries (needs nhl_stats' fresh game_log
   and injuries' same-day player_injury_history snapshot to classify
-  healthy vs injured). Nothing else depends on either.
+  healthy vs injured). Nothing else depends on either. Then transactions
+  -- ESPN's NHL transactions feed -> nhl_transactions; fully independent,
+  placed here only to keep the ESPN-sourced stages together.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -34,6 +36,8 @@ Usage:
   python run.py injuries         # ESPN injuries only
   python run.py scratches        # Game scratches only (incremental)
   python run.py scratches 20252026  # Game scratches backfill for a season
+  python run.py transactions     # ESPN NHL transactions, current calendar year
+  python run.py transactions 2025   # Transactions backfill for a calendar year
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
@@ -167,6 +171,7 @@ def run_all():
     import shift_data
     import shot_events
     import special_teams
+    import transactions
     import zone_starts
 
     failed_stages = []
@@ -180,6 +185,7 @@ def run_all():
     stage("nhl_stats", nhl_stats.run)
     stage("injuries", injuries.run)  # matches against nhl_stats' fresh players table
     stage("scratches", scratches.run)  # needs fresh game_log + today's injury snapshot
+    stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("shot_events", shot_events.run)
@@ -256,6 +262,11 @@ if __name__ == "__main__":
         import scratches
 
         scratches.run(season)
+    elif arg == "transactions":
+        import transactions
+
+        # Calendar year(s), not an NHL season -- ESPN's feed is keyed by year.
+        transactions.run(years=[season] if season else None)
     elif arg == "playoffs":
         import playoff_race
 
