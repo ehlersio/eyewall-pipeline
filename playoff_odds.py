@@ -14,8 +14,13 @@ Model:
   Measured from game_log 2025-26 (202 of 816 games, 24.8%) -- the only
   season whose period_end data is populated (2023-24/2024-25 are all
   stored as regulation, a separate known data gap).
-- Ratings are held fixed within a simulated season -- simpler, and it
-  keeps every number traceable to tonight's ratings.
+- Rating uncertainty: tonight's rating is only an estimate of a team's
+  true strength, so each simulated season shifts every team's rating by
+  its own random N(0, sd) amount for that whole season. sd shrinks as the
+  season goes on (rating_sd(): RATING_SD_PRESEASON * sqrt(n0 / (n0 +
+  average games played))). Without this, fixed ratings made the odds
+  overconfident -- most visibly preseason (COL 95% before a game). Both
+  constants are tuned by `backtest_playoff_odds.py --tune`.
 - Seeding per simulated season: top 3 in each division, then the 2 best
   remaining teams in each conference. Ties: points, then regulation
   wins, then wins, then random (the first NHL tiebreakers; head-to-head
@@ -42,6 +47,7 @@ Run order: after nhl_stats (standings, game_log results), elo_ratings
 """
 
 import argparse
+import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -58,6 +64,22 @@ IMPACT_MIN = 0.005  # 0.5 percentage points
 MAX_CONTRIBUTIONS = 5
 DONE_STATES = {"OFF", "FINAL"}
 REGULAR_SEASON = 2
+
+# Rating uncertainty (Elo points, 1 standard deviation) before any games,
+# and the games-played scale over which it shrinks -- see rating_sd().
+# From `backtest_playoff_odds.py --tune` (2026-09-13, 2023-24..2025-26,
+# preseason + Nov 15 / Jan 1 / Mar 1 snapshots): 50 / 40 had the lowest
+# Brier (0.1615 vs 0.1646 for fixed ratings); neighbors were close, so
+# this is "a reasonable amount", not a precise optimum. 0 = fixed ratings.
+RATING_SD_PRESEASON = 50.0
+RATING_SD_HALF_GAMES = 40.0
+
+
+def rating_sd(avg_games_played, sd0=RATING_SD_PRESEASON, n0=RATING_SD_HALF_GAMES) -> float:
+    """Uncertainty in a team's true rating after `avg_games_played` games:
+    sd0 * sqrt(n0 / (n0 + games)) -- sd0 preseason, sd0/sqrt(2) after n0
+    games, shrinking like a standard error as results accumulate."""
+    return sd0 * math.sqrt(n0 / (n0 + max(float(avg_games_played), 0.0)))
 
 
 def et_today():
@@ -166,10 +188,20 @@ def seed(names, teams, pts, rw, wins, rng):
     return made, div_first
 
 
-def simulate(teams, games, ratings, n_sims=N_SIMS, rng=None, track_game_ids=(), ot_rate=OT_RATE):
+def simulate(
+    teams,
+    games,
+    ratings,
+    n_sims=N_SIMS,
+    rng=None,
+    track_game_ids=(),
+    ot_rate=OT_RATE,
+    rating_sd=0.0,
+):
     """Simulate the remaining schedule n_sims times. Returns per-team odds
     and, for each game in track_game_ids, each team's odds conditional on
-    that game's result."""
+    that game's result. rating_sd > 0 gives each team its own random rating
+    shift per simulated season (see module docstring); 0 = fixed ratings."""
     rng = rng if rng is not None else np.random.default_rng()
     names = sorted(teams)
     idx = {t: i for i, t in enumerate(names)}
@@ -178,16 +210,19 @@ def simulate(teams, games, ratings, n_sims=N_SIMS, rng=None, track_game_ids=(), 
         return np.tile(np.array([teams[t][field] for t in names], dtype=float), (n_sims, 1))
 
     pts, rw, wins = start("points"), start("rw"), start("wins")
+    sim_ratings = np.tile(
+        np.array([ratings.get(t, elo.INITIAL_RATING) for t in names], dtype=float), (n_sims, 1)
+    )
+    if rating_sd > 0:
+        sim_ratings += rng.normal(0.0, rating_sd, size=sim_ratings.shape)
     track = {gid: j for j, gid in enumerate(track_game_ids)}
     tracked_home_won = np.zeros((n_sims, len(track)), dtype=bool)
 
     for g in games:
         h, a = idx[g["home"]], idx[g["away"]]
-        p = home_win_prob(
-            ratings.get(g["home"], elo.INITIAL_RATING),
-            ratings.get(g["away"], elo.INITIAL_RATING),
-            g.get("neutral", False),
-        )
+        hfa = 0.0 if g.get("neutral", False) else elo.HOME_ADVANTAGE
+        # Same formula as elo.expected_prob(), vectorized over simulations.
+        p = 1.0 / (1.0 + 10 ** ((sim_ratings[:, a] - sim_ratings[:, h] - hfa) / 400.0))
         hw = rng.random(n_sims) < p
         ot = rng.random(n_sims) < ot_rate
         loser_pts = np.where(ot, 1.0, 0.0)
@@ -351,8 +386,13 @@ def run(season=None, n_sims=N_SIMS, dry_run=False, seed_value=None):
         return "no_games"
 
     track_ids = next_game_day_ids(games)
+    avg_gp = sum(t["gp"] for t in teams.values()) / len(teams) if teams else 0.0
+    sd = rating_sd(avg_gp)
+    print(f"  rating uncertainty: {sd:.1f} Elo points (avg {avg_gp:.1f} games played)")
     rng = np.random.default_rng(seed_value)
-    sim = simulate(teams, games, ratings, n_sims=n_sims, rng=rng, track_game_ids=track_ids)
+    sim = simulate(
+        teams, games, ratings, n_sims=n_sims, rng=rng, track_game_ids=track_ids, rating_sd=sd
+    )
 
     try:
         prev_run_date, prev_pct, prev_impacts = load_previous_run(client, season, run_date)
