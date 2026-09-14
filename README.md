@@ -151,6 +151,12 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 ### `elo_ratings.py` (2026-09)
 Full nightly recompute of every NHL team's Elo rating (FiveThirtyEight's published NHL constants — K=6, home advantage=35, 1/3 regression-to-mean at each season boundary) from `game_log`, upserted to `team_elo_ratings`. Backs `eyewall-poller`'s `nhl.js` `/prediction/analyze` route (both the in-season and true-preseason branches), replacing the hand-tuned standings scorecard and the roster-continuity fallback — see `docs/elo_prediction_model_results.md` for the backtest this decision is based on (beats both prior systems on every metric, in both regimes, with untuned literature-default constants). Deliberately a full replay each run, not incremental — cheap and self-healing, no "last processed game" state to get out of sync. Requires `docs/team_elo_ratings_create.sql` to have been run first (table + RLS — no migration tooling in this repo).
 
+**Lineup adjustment — tested, not adopted (2026-09):** `backtest_lineup_adjustment.py` (read-only; results in `docs/lineup_adjustment_backtest_results.md`) asks whether knowing each night's lineup would improve Elo's game-winner probabilities. It's an upper bound: it uses the actual lineups from ~3,900 NHL boxscores, more than any injury report says ahead of time. Two adjustments on top of the Elo logit, each fit on games it's then not scored on:
+- **Missing regular skaters**, valued by prior-season WAR per game. `player_seasons.war` covers only 2024-25 and 2025-26, so this is tested within 2025-26 (fit on one half, score the other). **No gain:** Brier 0.2438 → 0.2445 and 0.2530 → 0.2532, and the fitted weight flips sign between halves.
+- **The starting goalie**, valued by prior-season goals saved above average from the NHL stats API. Tested across seasons. **A small, consistent gain:** Brier 0.2484 → 0.2481 and 0.2373 → 0.2368, with a stable weight (0.31 / 0.23). But it assumes the starter is known, and it's worth only ~5–8% of Elo's edge over "home team wins".
+
+Neither is used; the public methodology page says so. Revisit the goalie adjustment during 2026-27, once `goalie_start_probs` history exists, using the probable-starter probabilities rather than the actual starter. Boxscores are cached in `lineup_backtest_cache.json` (gitignored).
+
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
 
