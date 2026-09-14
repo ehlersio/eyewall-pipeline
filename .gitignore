@@ -19,3 +19,7 @@ elo_season_end_ratings.json
 elo_tuning_results.json
 mov_backtest_results.json
 backtest_pwhl_elo_results.json
+
+# backtest_lineup_adjustment.py -- boxscore cache (~3,900 games) and run output
+lineup_backtest_cache.json
+lineup_backtest_results.json
