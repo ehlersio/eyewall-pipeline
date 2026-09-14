@@ -28,7 +28,10 @@ Nightly run order (important — modules depend on each other):
   -- ESPN's NHL transactions feed -> nhl_transactions; fully independent,
   placed here only to keep the ESPN-sourced stages together. Then
   draft_history -- NHL records API draft picks (with each pick's chain of
-  owners) -> draft_pick_history; also fully independent. playoff_odds runs
+  owners) -> draft_pick_history; also fully independent. Then trade_trees
+  -- parses the stored trade entries into trades / trade_assets, resolves
+  picks against draft_pick_history and links each asset to its next trade
+  (needs both stages just before it). playoff_odds runs
   right after playoff_race -- Monte Carlo playoff odds from tonight's
   standings, game_log results and Elo ratings -> playoff_odds /
   playoff_odds_game_impacts. injury_impact runs right after moneypuck --
@@ -48,6 +51,7 @@ Usage:
   python run.py transactions 2025   # Transactions backfill for a calendar year
   python run.py draft_history    # Draft pick history, last 5 drafts
   python run.py draft_history 1963  # Draft pick history since a draft year (backfill)
+  python run.py trade_trees      # Structured trades + where each asset went next
   python run.py playoffs         # Magic/tragic numbers only (needs fresh nhl_stats data)
   python run.py playoff_odds     # Simulated playoff odds only (needs fresh nhl_stats + elo_ratings)
   python run.py injury_impact    # Man-games + WAR lost to injury, last 7 days of games
@@ -196,6 +200,7 @@ def run_all():
     import shot_events
     import special_teams
     import starting_goalie
+    import trade_trees
     import transactions
     import win_probs
     import zone_starts
@@ -215,6 +220,7 @@ def run_all():
     stage("starting_goalie", starting_goalie.run)  # needs rosters, injury snapshot, goalie_starts
     stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
     stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
+    stage("trade_trees", trade_trees.run)  # needs fresh nhl_transactions + draft_pick_history
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("win_probs", win_probs.run)  # needs tonight's elo_ratings; logs today/tomorrow pre-game
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
@@ -309,6 +315,10 @@ if __name__ == "__main__":
 
         # A first draft year (e.g. 1963 for a full backfill), not an NHL season.
         draft_history.run(since_year=season)
+    elif arg == "trade_trees":
+        import trade_trees
+
+        trade_trees.run()
     elif arg == "playoff_odds":
         import playoff_odds
 
