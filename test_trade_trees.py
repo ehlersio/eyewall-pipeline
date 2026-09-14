@@ -179,6 +179,24 @@ class TestPicks:
             pick["resolved_overall"] == 126 and pick["drafted_player_name"] == "Brandon Gorzynski"
         )
 
+    def test_pick_number_without_a_year_uses_the_trade_year_first(self):
+        # 2015-era "the 77th pick in this year's draft": no round, no year
+        overall_only = [
+            entry(
+                12,
+                "2025-06-20",
+                "SEA",
+                ["DAL"],
+                "Traded F Some One to Dallas for the 126th pick in this year's draft.",
+            )
+        ]
+        (pick,) = [a for a in build(overall_only)[1] if a["asset_type"] == "pick"]
+        assert (pick["pick_round"], pick["resolved_year"], pick["resolved_overall"]) == (
+            None,
+            2025,
+            126,
+        )
+
 
 class TestLinks:
     def test_player_and_pick_link_to_the_next_trade_they_went_out_in(self):

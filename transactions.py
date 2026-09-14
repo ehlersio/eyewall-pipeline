@@ -55,6 +55,25 @@ from injuries import ESPN_TEAM_ID_TO_ABBR
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl"
 PAGE_LIMIT = 1000
 
+# Franchises ESPN still serves history for but no longer lists in /teams.
+# Arizona (ESPN id 24) moved to Utah in 2024; without this its own entries
+# were skipped (246 in four sample backfill years) and other teams' trades
+# with it had no partner. "ARI" is the tri-code the NHL's draft records
+# (draft_pick_history.pick_chain) use for it.
+HISTORICAL_TEAMS = [
+    {
+        "id": "24",
+        "abbreviation": "ARI",
+        "displayName": "Arizona Coyotes",
+        "name": "Coyotes",
+        "location": "Arizona",
+    },
+]
+TEAM_ID_TO_ABBR = {
+    **ESPN_TEAM_ID_TO_ABBR,
+    **{int(t["id"]): t["abbreviation"] for t in HISTORICAL_TEAMS},
+}
+
 # (category, pattern) -- matched case-insensitively over the whole entry.
 # Typos seen live are folded in ("singed", "recaled", "injure reserve").
 CATEGORIES = [
@@ -119,7 +138,7 @@ def build_team_patterns(espn_teams):
     city_counts = Counter(t.get("location") for t in espn_teams)
     out = []
     for t in espn_teams:
-        abbr = ESPN_TEAM_ID_TO_ABBR.get(int(t["id"]))
+        abbr = TEAM_ID_TO_ABBR.get(int(t["id"]))
         if not abbr:
             continue
         names = [t.get("displayName"), t.get("name")]
@@ -155,7 +174,7 @@ def build_row(entry, team_patterns):
         espn_id = int(team.get("id"))
     except (TypeError, ValueError):
         return None
-    abbr = ESPN_TEAM_ID_TO_ABBR.get(espn_id)
+    abbr = TEAM_ID_TO_ABBR.get(espn_id)
     description = (entry.get("description") or "").strip()
     if not abbr or not description or not entry.get("date"):
         return None
@@ -181,9 +200,10 @@ def build_row(entry, team_patterns):
 
 
 def fetch_teams():
+    """ESPN's current teams plus HISTORICAL_TEAMS (not in /teams any more)."""
     r = requests.get(f"{ESPN_BASE}/teams", timeout=30)
     r.raise_for_status()
-    return [t["team"] for t in r.json()["sports"][0]["leagues"][0]["teams"]]
+    return [t["team"] for t in r.json()["sports"][0]["leagues"][0]["teams"]] + HISTORICAL_TEAMS
 
 
 def fetch_year(year):

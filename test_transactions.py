@@ -15,6 +15,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 from transactions import (
+    HISTORICAL_TEAMS,
     build_row,
     build_team_patterns,
     categorize,
@@ -211,6 +212,29 @@ class TestBuildRow:
             PATTERNS,
         )
         assert row["counterparties"] == []
+
+    def test_arizona_history_is_kept_as_ari(self):
+        # ESPN id 24 is gone from /teams (the franchise moved to Utah) but its
+        # 2015-24 entries are still in the feed
+        patterns = build_team_patterns(ESPN_TEAMS + HISTORICAL_TEAMS)
+        own = build_row(
+            {
+                "date": "2019-02-20T08:00Z",
+                "team": {"id": "24"},
+                "description": "Acquired D Stefan Elliott from Chicago for D Victor Bartley.",
+            },
+            patterns,
+        )
+        assert own["team"] == "ARI" and own["counterparties"] == ["CHI"]
+        other = build_row(
+            {
+                "date": "2019-02-20T08:00Z",
+                "team": {"id": "4"},
+                "description": "Acquired D Victor Bartley from the Arizona Coyotes for D Stefan Elliott.",
+            },
+            patterns,
+        )
+        assert other["counterparties"] == ["ARI"]
 
     def test_unrecognized_team_or_empty_text_is_skipped(self):
         assert (
