@@ -1,7 +1,8 @@
 """
 test_trade_parse.py -- coverage for trade_parse.py (ESPN free-text trades ->
-structured assets). Every description here is a real ESPN entry from the
-2025-26 feed, copied verbatim, typos included. No network/DB.
+structured assets). Every description here is a real ESPN entry -- from the
+2025-26 feed, or (TestHistoricalForms) the 2015-24 backfill -- copied
+verbatim, typos included. No network/DB.
 """
 
 import re
@@ -10,15 +11,23 @@ from trade_parse import normalize_year, parse_assets, parse_entry, split_trade_c
 
 TEAMS = [
     ("ANA", "Anaheim Ducks", "Ducks", "Anaheim"),
+    ("ARI", "Arizona Coyotes", "Coyotes", "Arizona"),
+    ("BOS", "Boston Bruins", "Bruins", "Boston"),
     ("BUF", "Buffalo Sabres", "Sabres", "Buffalo"),
+    ("CHI", "Chicago Blackhawks", "Blackhawks", "Chicago"),
     ("COL", "Colorado Avalanche", "Avalanche", "Colorado"),
     ("DAL", "Dallas Stars", "Stars", "Dallas"),
     ("DET", "Detroit Red Wings", "Red Wings", "Detroit"),
+    ("EDM", "Edmonton Oilers", "Oilers", "Edmonton"),
+    ("FLA", "Florida Panthers", "Panthers", "Florida"),
+    ("MTL", "Montreal Canadiens", "Canadiens", "Montreal"),
     ("NYR", "New York Rangers", "Rangers", None),
     ("PHI", "Philadelphia Flyers", "Flyers", "Philadelphia"),
     ("PIT", "Pittsburgh Penguins", "Penguins", "Pittsburgh"),
     ("SEA", "Seattle Kraken", "Kraken", "Seattle"),
+    ("STL", "St. Louis Blues", "Blues", "St. Louis"),
     ("TBL", "Tampa Bay Lightning", "Lightning", "Tampa Bay"),
+    ("TOR", "Toronto Maple Leafs", "Maple Leafs", "Toronto"),
     ("VAN", "Vancouver Canucks", "Canucks", "Vancouver"),
     ("WSH", "Washington Capitals", "Capitals", "Washington"),
 ]
@@ -179,6 +188,153 @@ class TestAssets:
         ]
 
     def test_unrecognized_text_is_unknown_not_guessed(self):
+        assert parse_assets("undisclosed") == [{"type": "unknown", "raw": "undisclosed"}]
         assert parse_assets("some other consideration") == [
             {"type": "unknown", "raw": "some other consideration"}
         ]
+
+
+def numbered(assets):
+    return [(a["year"], a["round"], a["overall"]) for a in assets if a["type"] == "pick"]
+
+
+class TestHistoricalForms:
+    """2015-2024 phrasing from the ESPN backfill -- each clause as posted,
+    with its entry's verb."""
+
+    def test_pick_numbers_before_the_noun_or_without_one(self):
+        assert numbered(
+            parse_assets("a 2015 third-round (No. 66) and a 2016 seventh-round draft pick")
+        ) == [(2015, 3, 66), (2016, 7, None)]
+        assert numbered(parse_assets("a 2015 fifth-round (No. 147) pick")) == [(2015, 5, 147)]
+        assert numbered(parse_assets("a 2017 fifth-round draft pick (No. 143)")) == [(2017, 5, 143)]
+        assert numbered(parse_assets("two 2015 second-round (No. 45 and 52) draft picks")) == [
+            (2015, 2, 45),
+            (2015, 2, 52),
+        ]
+
+    def test_rounds_sharing_one_round_word(self):
+        assert numbered(
+            parse_assets(
+                "their 2015 second- (No. 57), third- (No. 79) and seventh-round (No. 184) draft picks"
+            )
+        ) == [(2015, 2, 57), (2015, 3, 79), (2015, 7, 184)]
+        assert numbered(
+            parse_assets(
+                "their 2015 second- (No. 39), 2016 second- and a 2017 sixth-round draft picks"
+            )
+        ) == [(2015, 2, 39), (2016, 2, None), (2017, 6, None)]
+        assert picks(parse_assets("2015 first- and third-round draft picks")) == [
+            (2015, 1),
+            (2015, 3),
+        ]
+
+    def test_years_spread_across_rounds_and_picks(self):
+        a = parse_assets("a 2016 second-round and 2017 third-round draft picks")
+        assert picks(a) == [(2016, 2), (2017, 3)] and not any(p["pairing_uncertain"] for p in a)
+        assert picks(parse_assets("2015 and 2016 second-round draft picks")) == [
+            (2015, 2),
+            (2016, 2),
+        ]
+        assert picks(parse_assets("second-round draft picks in 2016 and 2017")) == [
+            (2016, 2),
+            (2017, 2),
+        ]
+        assert picks(parse_assets("a sixth-round pick in the 2017 NHL Entry Draft")) == [(2017, 6)]
+        assert picks(
+            parse_assets("a third-round pick in the 2017 National Hockey League Draft")
+        ) == [(2017, 3)]
+        assert picks(parse_assets("Chicago's second-round pick in the 2018 Draft")) == [(2018, 2)]
+        assert picks(parse_assets("a conditional 2016 fourth-round entry draft")) == [(2016, 4)]
+        assert picks(parse_assets("a 2016 third-round draft choice")) == [(2016, 3)]
+        (p,) = parse_assets("a conditional 2017 or 2018 seventh-round draft pick")
+        assert (p["year"], p["round"], p["conditional"]) == (
+            None,
+            7,
+            True,
+        )  # either year: not guessed
+
+    def test_overall_numbers_and_vague_picks(self):
+        assert numbered(parse_assets("the 38th and 89th picks in this year's draft")) == [
+            (None, None, 38),
+            (None, None, 89),
+        ]
+        assert numbered(parse_assets("the 47th pick in the NHL draft")) == [(None, None, 47)]
+        (p,) = parse_assets("a 2018 conditional draft pick")
+        assert (p["year"], p["round"], p["conditional"]) == (2018, None, True)
+        assert [p["year"] for p in parse_assets("conditional 2019 and 2020 draft picks")] == [
+            2019,
+            2020,
+        ]
+
+    def test_older_verbs_and_arizona(self):
+        (t,) = parse_entry(
+            "Aquired D Devante Stephens from the Buffalo Sabres in exchange for D Matthew Spencer.",
+            PATTERNS,
+        )
+        assert t["partner"] == "BUF" and players(t["received"]) == [("Devante Stephens", "D")]
+        (t,) = parse_entry(
+            "Received RW Vasily Podkolzin from Vancouver in exchange for a fourth-round draft pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "VAN" and picks(t["sent"]) == [(None, 4)]
+        (t,) = parse_entry("Acquired D Stefan Elliott from Arizona for D Victor Bartley.", PATTERNS)
+        assert t["partner"] == "ARI"
+
+    def test_asides_are_dropped(self):
+        (t,) = parse_entry(
+            "Acquired C Freddie Hamilton from Colorado for a conditional 2016 seventh-round draft "
+            "pick and assigned Hamilton to Stockton (AHL).",
+            PATTERNS,
+        )
+        assert [a["type"] for a in t["sent"]] == ["pick"]
+        (t,) = parse_entry(
+            "Acquired a 2015 third-round (No. 86) draft pick from Edmonton as compensation for the "
+            "Oilers' hiring of coach Todd McLellan.",
+            PATTERNS,
+        )
+        assert (
+            t["partner"] == "EDM" and numbered(t["received"]) == [(2015, 3, 86)] and t["sent"] == []
+        )
+        (t,) = parse_entry(
+            "Traded C Valtteri Filppula and 2017 fourth- and seventh-round draft picks to "
+            "Philadelphia for D Mark Streit, who was traded to Pittsburgh for a 2018 fourth-round "
+            "draft pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "PHI" and players(t["received"]) == [("Mark Streit", "D")]
+        assert players(t["sent"]) == [("Valtteri Filppula", "C")]
+        assert picks(t["sent"]) == [(2017, 4), (2017, 7)]
+        (t,) = parse_entry(
+            "Acquired F Reilly Smith and the contract of F Marc Savard from Boston for F Jimmy Hayes.",
+            PATTERNS,
+        )
+        assert players(t["received"]) == [("Reilly Smith", "F"), ("Marc Savard", "F")]
+        (t,) = parse_entry(
+            "Acquired C Robby Fabbri from the St. Louis Blues for C Jacob de la Rose.", PATTERNS
+        )
+        assert players(t["sent"]) == [("Jacob de la Rose", "C")]
+
+    def test_rights_and_several_trades_in_one_sentence(self):
+        (t,) = parse_entry(
+            "Traded the rights to G Anders Nilsson to Buffalo for a 2017 fifth-round draft pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "BUF"
+        assert t["sent"] == [
+            {"type": "player", "name": "Anders Nilsson", "position": "G", "rights": True}
+        ]
+        first, second = parse_entry(
+            "Traded RW Adam Cracknell to St. Louis for future considerations, and RW Nathan Horton "
+            "to Toronto for RW David Clarkson.",
+            PATTERNS,
+        )
+        assert (first["partner"], second["partner"]) == ("STL", "TOR")
+        assert players(second["received"]) == [("David Clarkson", "RW")]
+        three = parse_entry(
+            "Traded F Steve Ott to Montreal for a 2018 sixth-round draft pick; F Thomas Vanek to "
+            "Florida for D Dylan McIlrath and a conditional 2017 third-round draft pick; and F Tomas "
+            "Jurco to Chicago for a 2017 third-round draft pick.",
+            PATTERNS,
+        )
+        assert [t["partner"] for t in three] == ["MTL", "FLA", "CHI"]

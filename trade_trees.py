@@ -152,9 +152,14 @@ def resolve_pick_group(assets, giver, taker, tx_date, hops, by_overall, last_dra
     if all(y > last_draft_year for y in years):
         return [{"resolved": None, "note": "future"} for _ in assets]
 
-    exact = [by_overall.get((y, a["overall"])) for a in assets for y in years if a["overall"]]
-    if first["overall"] and len([r for r in exact if r]) == len(assets):
-        return [{"resolved": r, "note": None} for r in exact if r]
+    # ESPN's own pick number; with no year stated ("the 77th pick in this
+    # year's draft"), the first of the trade's year / the next where every
+    # number exists
+    if all(a["overall"] for a in assets):
+        for y in years:
+            exact = [by_overall.get((y, a["overall"])) for a in assets]
+            if all(exact):
+                return [{"resolved": r, "note": None} for r in exact]
 
     cands = [
         r
