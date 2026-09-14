@@ -243,6 +243,24 @@ python draft_history.py --all --dry-run
 
 Requires `docs/session_draft_pick_history.sql` to be run in Supabase first (creates the table + RLS policy).
 
+### `trade_parse.py` / `trade_trees.py` (2026-09)
+Structured NHL trades and where every asset went next → `trades` + `trade_assets`, read by the Worker's `/trades/tree` route (tap a trade in the app's Transactions feed to see its tree). Built nightly from the stored `nhl_transactions` entries (ESPN free text — see `transactions.py` above).
+
+**`trade_parse.py`** (pure, no I/O) turns one entry into trade clauses — `{partner, via, received, sent}` — and each asset list into players (name, position, rights), picks (year, round, conditional, ESPN's own pick number, original team), future considerations, cash, or `unknown` with its raw text (never guessed). Handles every form in the 2025-26 feed: "Acquired … from X in exchange for …", "Traded … to X", "Sent … in exchange for …", three-team trades, two trades in one entry, trades bundled with recalls, plural positions ("Ds A and B"), compound picks ("second and fourth-round picks in the 2027 and 2029 drafts", flagged `pairing_uncertain`), and ESPN's typos ("20206", "thrid", "Philadephia", "Acquire", a missing "from"). On the 267 stored trade entries: 282 clauses, 1 with no identifiable partner, 0 unrecognized assets, and 106 of 106 paired trades whose two halves agree on every player.
+
+**`trade_trees.py`** pairs each team's clause with its partner's within 2 days (same rule as the Worker's feed; each team's own "Acquired" list is what it got, falling back to the other side's "sent" list), then:
+- resolves picks against `draft_pick_history`: the pick whose `pick_chain` hands it straight from the giver to the receiver in the stated year and round, or ESPN's pick number when given; several identical picks in one phrase resolve as a set when the candidates match their count. Otherwise `pick_note` says why: `future` (not drafted yet), `not_traced` (e.g. a conditional pick that was deferred or never conveyed), `several_possible`. On the stored trades: 104 resolved, 58 future, 11 not traced or ambiguous — about 90% of already-drafted picks.
+- links every received player (by normalized name) or resolved pick to the next trade its new team sent it on in (`next_trade_id`) — the tree's edges.
+
+`player_id` is filled only when the name matches exactly one row in `players` (258 of 317; the rest are mostly AHL players and prospects). Full rebuild each night: upserts on `trade_id` / `(trade_id, idx)`, deletes trades that no longer exist.
+
+```bash
+python trade_trees.py              # rebuild from every stored trade entry
+python trade_trees.py --dry-run
+```
+
+Run order: after `transactions` and `draft_history`. Requires `docs/session_trade_trees.sql` to be run in Supabase first (creates both tables + RLS policies).
+
 ### `playoff_odds.py` (2026-09)
 NHL playoff odds by simulating the rest of the regular season (default 10,000 times) → `playoff_odds` (one row per team per nightly run, history kept) and `playoff_odds_game_impacts`. Runs right after `playoff_race` in `run.py`.
 
@@ -889,6 +907,8 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `game_scratches` | (2026-09) One row per scratched player per game, classified healthy/injured/suspended/unknown — see `scratches.py` above |
 | `nhl_transactions` | (2026-09) ESPN NHL transactions feed, one row per ESPN entry with keyword categories + trade counterparties — see `transactions.py` above |
 | `draft_pick_history` | (2026-09) Every NHL draft pick since 1963 with its chain of owners (`pick_chain`), one row per `(draft_year, overall_pick)` — see `draft_history.py` above |
+| `trades` | (2026-09) One row per NHL trade, paired from `nhl_transactions` entries — see `trade_trees.py` above |
+| `trade_assets` | (2026-09) Every player / pick / consideration in each trade, picks resolved to the drafted player, `next_trade_id` linking to where it went next — see `trade_trees.py` above |
 | `playoff_odds` | (2026-09) Simulated playoff/division odds and projected points, one row per `(season, run_date, team)`, with a `change` explanation — see `playoff_odds.py` above |
 | `playoff_odds_game_impacts` | (2026-09) Each team's playoff odds conditional on each result of the next game-day's games, one row per `(season, run_date, game_id, outcome, team)` — see `playoff_odds.py` above |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
