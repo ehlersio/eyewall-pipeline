@@ -293,6 +293,37 @@ python backtest_starting_goalie.py         # writes docs/starting_goalie_backtes
 
 Requires `docs/session_starting_goalie.sql` to be run in Supabase first (creates both tables + RLS policies).
 
+### `win_probs.py` / `prediction_scorecard.py` (2026-09)
+
+The public prediction scorecard: how the app's published predictions have actually done.
+
+**`win_probs.py`** → `game_win_probs`: each morning, the pre-game Elo win probability for every regular-season/playoff game today and tomorrow that hasn't started — the same model and inputs as the Worker's `/prediction/analyze` and the game preview's win bar (`team_elo_ratings`, refreshed by `elo_ratings` right before this stage, and `playoff_odds.home_win_prob()`: `elo.expected_prob()` with home advantage unless the schedule marks the game neutral-site). A game's row is rewritten each run until it starts, so what remains is the morning-of number; the scorecard only ever grades predictions published before puck drop. Runs right after `elo_ratings`.
+
+**`prediction_scorecard.py`** → `prediction_scorecard` (one row per model × kind × period; read by the Worker's `/scorecard` route for the League page card). Three models:
+- `game_winner` — `game_win_probs` vs `game_log` results; baseline "the home team wins".
+- `starting_goalie` — `goalie_start_probs` (the morning-of rows) vs `goalie_game_starts` (the NHL's starter flag); a starter who wasn't a candidate counts as a miss at probability 0; baseline "last game's starter".
+- `playoff_odds` — the season's first run and the first runs on/after Nov 15, Jan 1 and Mar 1 vs the teams that made the playoffs; `pending` until the full playoff field has played.
+
+Each graded two ways: **`live`** (published before the fact, from 2026-27 on — rebuilt nightly, with the latest graded predictions in `recent`) and **`backtest`** (the model replayed on past seasons without seeing results ahead of time, labeled as a backtest, never as a track record — only computed with `--backtest`, since it replays three seasons and fetches past standings; the rows persist). Metrics: accuracy, Brier score, log loss, the baseline's accuracy/Brier, and calibration (predicted vs actual, 10 buckets). Plain probabilities — no betting framing. Runs after `playoff_odds` (and after `goalie_starts`, `nhl_stats`).
+
+Backtest results (2026-09-13):
+
+| Model | Period | n | Accuracy | Brier | Baseline |
+|---|---|---|---|---|---|
+| Game winner (Elo) | 2023-24 to 2025-26 | 3,936 games | 56.5% | 0.242 | home team wins: 54.2%, 0.248 |
+| Starting goalie | 2024-25 to 2025-26 (each fit only on earlier seasons) | 5,246 team-games | 73.9% | 0.361 | last game's starter: 57.1%, 0.492 |
+| Playoff odds | 2023-24 to 2025-26 | 384 team-snapshots | 71.6% | 0.162 | holds a playoff spot: 71.4%, 0.224 |
+
+Playoff odds barely beat "currently holds a playoff spot" on yes/no accuracy — their value is in the probabilities themselves (Brier 0.162 vs 0.224), which the card should say plainly.
+
+```bash
+python win_probs.py --dry-run                    # games today and tomorrow
+python prediction_scorecard.py --dry-run         # live rows only
+python prediction_scorecard.py --backtest        # + write the three backtest rows
+```
+
+Requires `docs/session_prediction_scorecard.sql` to be run in Supabase first (creates both tables + RLS policies).
+
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
 

@@ -55,6 +55,9 @@ Usage:
   python run.py goalie_starts    # Boxscore goalie starters, new games only
   python run.py goalie_starts 20232024  # Goalie starters backfill for a season
   python run.py starting_goalie  # Start probabilities for every team's next game
+  python run.py win_probs        # Pre-game Elo win probabilities, games today/tomorrow
+  python run.py prediction_scorecard             # Public scorecard, live rows
+  python run.py prediction_scorecard --backtest  # ...plus the three backtest rows
   python run.py shots            # Shot events only (incremental)
   python run.py shifts           # Shift charts only (incremental)
   python run.py shifts 20242025  # Shift charts for a specific season (backfill)
@@ -186,6 +189,7 @@ def run_all():
     import playoff_odds
     import playoff_race
     import power_rankings
+    import prediction_scorecard
     import rapm
     import scratches
     import shift_data
@@ -193,6 +197,7 @@ def run_all():
     import special_teams
     import starting_goalie
     import transactions
+    import win_probs
     import zone_starts
 
     failed_stages = []
@@ -211,8 +216,11 @@ def run_all():
     stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
     stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
+    stage("win_probs", win_probs.run)  # needs tonight's elo_ratings; logs today/tomorrow pre-game
     stage("playoff_race", playoff_race.run)  # needs nhl_stats' fresh standings
     stage("playoff_odds", playoff_odds.run)  # needs fresh standings + game_log + elo_ratings
+    # needs game_log results, goalie_starts, win_probs, playoff_odds (live rows only)
+    stage("prediction_scorecard", prediction_scorecard.run)
     stage("shot_events", shot_events.run)
     stage("shift_data", shift_data.run)
     stage("zone_starts", zone_starts.run)
@@ -317,6 +325,14 @@ if __name__ == "__main__":
         import starting_goalie
 
         starting_goalie.run(season=season)
+    elif arg == "win_probs":
+        import win_probs
+
+        win_probs.run(season=season)
+    elif arg == "prediction_scorecard":
+        import prediction_scorecard
+
+        prediction_scorecard.run(season=season, backtest="--backtest" in sys.argv)
     elif arg == "playoffs":
         import playoff_race
 
