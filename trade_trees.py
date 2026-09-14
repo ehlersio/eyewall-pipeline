@@ -41,8 +41,11 @@ Run order: after transactions (the entries) and draft_history (pick records).
 
 import argparse
 import hashlib
+from collections import defaultdict
 from datetime import date
 from itertools import pairwise
+
+import requests
 
 from db import get_client, upsert
 from injuries import normalize_name
@@ -176,7 +179,68 @@ def resolve_pick_group(assets, giver, taker, tx_date, hops, by_overall, last_dra
     return [{"resolved": None, "note": note} for _ in assets]
 
 
-def asset_row(tid, idx, tx_date, from_team, to_team, asset, players_by_key):
+NHL_STATS = "https://api.nhle.com/stats/rest/en"
+FIRST_INDEX_SEASON = 2014  # the transactions backfill starts in 2015
+MIN_FIRST_PREFIX = 3  # "Alex" -> "Alexander", but not "J" -> anyone
+
+
+def fetch_nhl_player_index(last_season, first_season=FIRST_INDEX_SEASON):
+    """[(player_id, full_name, last_name)] for every NHL skater and goalie
+    who played a regular-season game from first_season on -- the NHL stats
+    API, one request per season and kind. The players table only covers
+    recent seasons; this is what gives older trade names an NHL id."""
+    rows = []
+    for year in range(first_season, last_season + 1):
+        for kind, name_field in (("skater", "skaterFullName"), ("goalie", "goalieFullName")):
+            r = requests.get(
+                f"{NHL_STATS}/{kind}/summary",
+                params={"limit": -1, "cayenneExp": f"seasonId={year}{year + 1} and gameTypeId=2"},
+                timeout=60,
+            )
+            r.raise_for_status()
+            rows += [
+                (d["playerId"], d[name_field], d.get("lastName"))
+                for d in r.json().get("data") or []
+            ]
+    return rows
+
+
+class PlayerIndex:
+    """Trade-text name -> NHL player id. The exact normalized full name when
+    it belongs to exactly one player; otherwise the one player with the same
+    last name whose first name is a prefix of the other's ("Alex Kerfoot" /
+    "Alexander Kerfoot"). Anything ambiguous or unmatched stays None --
+    AHL players and prospects mostly."""
+
+    def __init__(self, rows):  # [(player_id, full_name, last_name or None)]
+        self.by_name = defaultdict(set)
+        self.by_last = defaultdict(set)
+        for pid, full, last in rows:
+            if not full:
+                continue
+            self.by_name[normalize_name(full)].add(pid)
+            last = last or full.split()[-1]
+            first = full[: len(full) - len(last)].strip() if full.endswith(last) else ""
+            self.by_last[normalize_name(last)].add((normalize_name(first), pid))
+
+    def lookup(self, name):
+        ids = self.by_name.get(normalize_name(name), set())
+        if ids:
+            return next(iter(ids)) if len(ids) == 1 else None
+        parts = (name or "").split()
+        if len(parts) < 2:
+            return None
+        first, last = normalize_name(" ".join(parts[:-1])), normalize_name(parts[-1])
+        cands = {
+            pid
+            for f, pid in self.by_last.get(last, ())
+            if min(len(f), len(first)) >= MIN_FIRST_PREFIX
+            and (f.startswith(first) or first.startswith(f))
+        }
+        return next(iter(cands)) if len(cands) == 1 else None
+
+
+def asset_row(tid, idx, tx_date, from_team, to_team, asset, player_index):
     row = {
         "trade_id": tid,
         "idx": idx,
@@ -201,12 +265,10 @@ def asset_row(tid, idx, tx_date, from_team, to_team, asset, players_by_key):
         "next_trade_id": None,
     }
     if asset["type"] == "player":
-        key = normalize_name(asset["name"])
-        ids = players_by_key.get(key, [])
         row.update(
             player_name=asset["name"],
-            player_key=key,
-            player_id=ids[0] if len(ids) == 1 else None,
+            player_key=normalize_name(asset["name"]),
+            player_id=player_index.lookup(asset["name"]),
             position=asset.get("position"),
             rights=bool(asset.get("rights")),
         )
@@ -225,7 +287,7 @@ def asset_row(tid, idx, tx_date, from_team, to_team, asset, players_by_key):
     return row
 
 
-def build(entries, team_patterns, players_by_key, draft_rows):
+def build(entries, team_patterns, player_index, draft_rows):
     """-> (trade rows, asset rows) with picks resolved and next_trade_id linked."""
     hops, by_overall = pick_hops(draft_rows)
     last_draft_year = max((r["draft_year"] for r in draft_rows), default=0)
@@ -247,7 +309,7 @@ def build(entries, team_patterns, players_by_key, draft_rows):
         rows = trade_asset_rows(legs)
         groups = {}
         for i, (giver, taker, asset) in enumerate(rows):
-            row = asset_row(tid, i, first["tx_date"], giver, taker, asset, players_by_key)
+            row = asset_row(tid, i, first["tx_date"], giver, taker, asset, player_index)
             assets.append(row)
             if asset["type"] == "pick":
                 groups.setdefault((giver, taker, asset["raw"]), []).append((row, asset))
@@ -331,9 +393,14 @@ def run(dry_run=False):
         if "trade" in (r.get("categories") or [])
     ]
     team_patterns = tx.build_team_patterns(tx.fetch_teams())
-    players_by_key = {}
-    for p in fetch_keyset(client, "players", "id,name", lambda q: q):
-        players_by_key.setdefault(normalize_name(p["name"]), []).append(p["id"])
+    name_rows = [
+        (p["id"], p["name"], None) for p in fetch_keyset(client, "players", "id,name", lambda q: q)
+    ]
+    try:
+        name_rows += fetch_nhl_player_index(date.today().year)
+    except Exception as e:  # the players table alone still matches recent names
+        print(f"  WARN NHL stats player index unavailable ({e}); matching on players only")
+    player_index = PlayerIndex(name_rows)
     draft_rows = fetch_keyset(
         client,
         "draft_pick_history",
@@ -341,7 +408,7 @@ def run(dry_run=False):
         lambda q: q,
     )
 
-    trades, assets = build(entries, team_patterns, players_by_key, draft_rows)
+    trades, assets = build(entries, team_patterns, player_index, draft_rows)
     by_type = {}
     for a in assets:
         by_type[a["asset_type"]] = by_type.get(a["asset_type"], 0) + 1
