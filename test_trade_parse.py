@@ -14,14 +14,18 @@ TEAMS = [
     ("ARI", "Arizona Coyotes", "Coyotes", "Arizona"),
     ("BOS", "Boston Bruins", "Bruins", "Boston"),
     ("BUF", "Buffalo Sabres", "Sabres", "Buffalo"),
+    ("CGY", "Calgary Flames", "Flames", "Calgary"),
     ("CHI", "Chicago Blackhawks", "Blackhawks", "Chicago"),
     ("COL", "Colorado Avalanche", "Avalanche", "Colorado"),
     ("DAL", "Dallas Stars", "Stars", "Dallas"),
     ("DET", "Detroit Red Wings", "Red Wings", "Detroit"),
     ("EDM", "Edmonton Oilers", "Oilers", "Edmonton"),
     ("FLA", "Florida Panthers", "Panthers", "Florida"),
+    ("MIN", "Minnesota Wild", "Wild", "Minnesota"),
     ("MTL", "Montreal Canadiens", "Canadiens", "Montreal"),
+    ("NSH", "Nashville Predators", "Predators", "Nashville"),
     ("NYR", "New York Rangers", "Rangers", None),
+    ("OTT", "Ottawa Senators", "Senators", "Ottawa"),
     ("PHI", "Philadelphia Flyers", "Flyers", "Philadelphia"),
     ("PIT", "Pittsburgh Penguins", "Penguins", "Pittsburgh"),
     ("SEA", "Seattle Kraken", "Kraken", "Seattle"),
@@ -338,3 +342,110 @@ class TestHistoricalForms:
             PATTERNS,
         )
         assert [t["partner"] for t in three] == ["MTL", "FLA", "CHI"]
+
+
+class TestWordingSlips:
+    """Trades where ESPN left a word out or folded a team name in -- each
+    clause as posted, with its entry's verb."""
+
+    def test_missing_for_after_the_team(self):
+        (t,) = parse_entry(
+            "Acquired D Jeff Petry from Edmonton a 2015 second-round draft pick and a conditional "
+            "2015 fifth-round draft pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "EDM" and players(t["received"]) == [("Jeff Petry", "D")]
+        assert picks(t["sent"]) == [(2015, 2), (2015, 5)]
+
+    def test_team_name_inside_the_asset_list_and_team_typos(self):
+        # this "Traded A for TEAM B" form: the posting team got A and gave B
+        (t,) = parse_entry(
+            "Traded C Jonathan Gruden and a 2020 second-round draft pick for Ottawa G Matt Murray.",
+            PATTERNS,
+        )
+        assert t["partner"] == "OTT" and players(t["received"]) == [("Jonathan Gruden", "C")]
+        assert players(t["sent"]) == [("Matt Murray", "G")]
+        (t,) = parse_entry(
+            "Traded C Luke Kunin and a 2020 draft pick for Minnesota C Nick Bonino and two 2020 "
+            "draft picks.",
+            PATTERNS,
+        )
+        assert t["partner"] == "MIN" and players(t["sent"]) == [("Nick Bonino", "C")]
+        assert picks(t["received"]) == [(2020, None)] and picks(t["sent"]) == [(2020, None)] * 2
+        (t,) = parse_entry("Traded G Jake Allen to Montreal Canadians.", PATTERNS)
+        assert t["partner"] == "MTL" and players(t["sent"]) == [("Jake Allen", "G")]
+
+    def test_trades_tacked_onto_another_move(self):
+        (t,) = parse_entry(
+            "Recalled C Lane Pederson from Chicago (AHL) and traded him to Vancouver.", PATTERNS
+        )
+        assert t["partner"] == "VAN" and players(t["sent"]) == [("Lane Pederson", "C")]
+        (t,) = parse_entry(
+            "Recalled C Rem Pitlick from Wilkes-Barre/Scranton (AHL) loan and traded him to Chicago "
+            "in exchange for a 2026 seventh-round pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "CHI" and picks(t["received"]) == [(2026, 7)]
+        (t,) = parse_entry(
+            "Announced D Greg Pateryn was traded to Minnesota for D Ian Cole.", PATTERNS
+        )
+        assert t["partner"] == "MIN"
+        assert players(t["sent"]) == [("Greg Pateryn", "D")] and players(t["received"]) == [
+            ("Ian Cole", "D")
+        ]
+
+    def test_in_the_trade_aside(self):
+        (t,) = parse_entry(
+            "Acquired D Brian Lashoff from Detroit in the trade, who will remain with Grand Rapids "
+            "Griffins (AHL).",
+            PATTERNS,
+        )
+        assert t["partner"] == "DET" and players(t["received"]) == [("Brian Lashoff", "D")]
+        assert t["sent"] == []
+
+    def test_other_ways_of_naming_the_partner(self):
+        (t,) = parse_entry(
+            "Acquired D Mikko Lehtonen in trade for G Veini Vehvilainen from Toronto.", PATTERNS
+        )
+        assert t["partner"] == "TOR" and players(t["received"]) == [("Mikko Lehtonen", "D")]
+        assert players(t["sent"]) == [("Veini Vehvilainen", "G")]
+        (t,) = parse_entry(
+            "Acquired F Tyler Toffoli in a trade with Calgary in exchange for F Yegor Sharangovich "
+            "and a third-round pick in the 2023 draft.",
+            PATTERNS,
+        )
+        assert t["partner"] == "CGY" and picks(t["sent"]) == [(2023, 3)]
+        (t,) = parse_entry(
+            "Acquired C Bo Harvath fom Vancouver for LW Anthony Beauvillier, C Aatu Raty and a "
+            "conditional 2023 first round pick.",
+            PATTERNS,
+        )
+        assert t["partner"] == "VAN" and players(t["received"]) == [("Bo Harvath", "C")]
+
+    def test_waiver_claims_and_other_teams_moves_are_not_trades(self):
+        assert parse_entry("Acquired D Sami Vatanen off waivers from New Jersey.", PATTERNS) == []
+        (t,) = parse_entry(
+            "Traded F Givani Smith to Florida in exchange for D Michael Del Zotto then traded him "
+            "to Anaheim in exchange for F Danny O'Regan and subsequently assigned him to Grand "
+            "Rapids (AHL).",
+            PATTERNS,
+        )
+        assert t["partner"] == "FLA" and players(t["received"]) == [("Michael Del Zotto", "D")]
+
+    def test_more_pick_phrasing(self):
+        assert numbered(parse_assets("the No. 7 pick in the 2022 NHL Draft")) == [(2022, None, 7)]
+        assert numbered(
+            parse_assets("the 27th, 34th and 45th overall picks in the same draft")
+        ) == [(None, None, 27), (None, None, 34), (None, None, 45)]
+        assert numbered(parse_assets("Arizona's 2022 32nd overall pick")) == [(2022, None, 32)]
+        assert picks(parse_assets("a third-round 2024 pick and a second-round 2025 pick")) == [
+            (2024, 3),
+            (2025, 2),
+        ]
+        assert picks(parse_assets("sixth-round 2023 draft pick")) == [(2023, 6)]
+        (p,) = parse_assets("an undisclosed conditional pick")
+        assert (p["round"], p["conditional"]) == (None, True)
+        assert picks(parse_assets("a conditional 2018 draft choice")) == [(2018, None)]
+        assert picks(parse_assets("a 2024 pick")) == [(2024, None)]
+        assert picks(parse_assets("fith-round picks")) == [(None, 5)]
+        assert parse_assets("future considertations") == [{"type": "future_considerations"}]

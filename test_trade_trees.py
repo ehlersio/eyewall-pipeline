@@ -68,7 +68,7 @@ DRAFT = [
 
 
 def build(entries, draft_rows=DRAFT, players=None):
-    return tt.build(entries, PATTERNS, players or {}, draft_rows)
+    return tt.build(entries, PATTERNS, tt.PlayerIndex(players or []), draft_rows)
 
 
 class TestPairing:
@@ -217,7 +217,30 @@ class TestLinks:
         assert r3["next_trade_id"] == by_source[11]
 
     def test_player_ids_only_when_the_name_is_unambiguous(self):
-        players = {"masonmarchment": [8478975], "someonedup": [1, 2]}
+        players = [(8478975, "Mason Marchment", "Marchment")]
         _, assets = build(MARCHMENT, players=players)
         (m,) = [a for a in assets if a["player_name"] == "Mason Marchment"]
         assert m["player_id"] == 8478975 and m["player_key"] == "masonmarchment"
+
+
+INDEX_ROWS = [
+    (8479365, "Alexander Kerfoot", "Kerfoot"),
+    (8478975, "Mason Marchment", "Marchment"),
+    (8477500, "Sebastian Aho", "Aho"),  # two NHL players share this name
+    (8480222, "Sebastian Aho", "Aho"),
+    (8471000, "Jordan Staal", "Staal"),
+    (8471001, "Jared Staal", "Staal"),
+]
+
+
+class TestPlayerIndex:
+    def test_exact_name_when_it_belongs_to_one_player(self):
+        index = tt.PlayerIndex(INDEX_ROWS)
+        assert index.lookup("Mason Marchment") == 8478975
+        assert index.lookup("Sebastian Aho") is None  # never guessed between two
+
+    def test_first_name_prefix_on_the_same_last_name(self):
+        index = tt.PlayerIndex(INDEX_ROWS)
+        assert index.lookup("Alex Kerfoot") == 8479365
+        assert index.lookup("J Staal") is None  # too short to tell Jordan from Jared
+        assert index.lookup("Unknown Prospect") is None

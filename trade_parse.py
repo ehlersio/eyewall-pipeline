@@ -38,6 +38,14 @@ The 2015-2024 backfill added older phrasing, handled the same way:
 - Asides folded into the trade sentence ("and assigned him to Albany
   (AHL)", "as compensation for the Oilers' hiring of coach Todd McLellan",
   "who was traded to Pittsburgh for ...") are dropped, not parsed as assets.
+- Wording slips: a missing "for" ("from Edmonton a 2015 second-round
+  pick"), a team name inside an asset list ("for Ottawa G Matt Murray" --
+  in that "Traded A for TEAM B" form the posting team got A), "in trade for
+  X from Toronto", "in a trade with Calgary", trades tacked onto another
+  move ("and traded him to Vancouver", "Announced D X was traded to ..."),
+  typos ("fom", "Canadians", "fith", "considertations"). Waiver claims
+  tagged as trades ("off waivers") and another team's follow-on move
+  ("... then traded him to Anaheim") are skipped.
 
 Nothing is guessed. A phrase that isn't recognizably a player, pick, rights,
 cash or future considerations comes back as an 'unknown' asset with its raw
@@ -50,7 +58,7 @@ import re
 
 ORDINALS = {
     "first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "thrid": 3,
-    "fourth": 4, "4th": 4, "fifth": 5, "5th": 5, "sixth": 6, "six": 6, "6th": 6,
+    "fourth": 4, "4th": 4, "fifth": 5, "fith": 5, "5th": 5, "sixth": 6, "six": 6, "6th": 6,
     "seventh": 7, "7th": 7,
 }  # fmt: skip
 COUNTS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "undisclosed": 1}
@@ -58,7 +66,9 @@ _POS = r"(?:C|LW|RW|L|R|D|G|F|W)(?:/(?:C|LW|RW|L|R|D|G|F|W))*"
 PLURAL_POS = {"Cs": "C", "Ds": "D", "Fs": "F", "Gs": "G", "Ws": "W", "LWs": "LW", "RWs": "RW"}
 _NAME = r"[A-Z][\w'.\-]*(?:\s+(?:(?:de|van|der|von|la|le|du|di|da|del)\s+)*[A-Z][\w'.\-]*)+"
 
-_ROUND_WORD = r"(?:first|second|third|thrid|fourth|fifth|sixth|six|seventh|[1-7](?:st|nd|rd|th))"
+_ROUND_WORD = (
+    r"(?:first|second|third|thrid|fourth|fifth|fith|sixth|six|seventh|[1-7](?:st|nd|rd|th))"
+)
 # ESPN's own overall pick numbers: "(No. 66)", "(#15)", "(No. 45 and 52)"
 _PICK_NO = r"\((?:no\.|#)\s*\d{1,3}(?:\s*(?:,|and)\s*\d{1,3})*\)"
 # One round in a pick phrase, with its own year / pick number when given:
@@ -74,6 +84,8 @@ PICK_RE = re.compile(
     rf"(?:(?P<year1>{_YEARS})\s+)?"
     r"(?:(?P<cond2>conditional)\s+)?"
     rf"(?P<rounds>{_ROUND_TOKEN}(?:\s*(?:,|and|&)\s*(?:an?\s+)?{_ROUND_TOKEN})*)"
+    # the year can follow the round: "a third-round 2024 pick"
+    r"(?:\s+(?P<year3>\d{4})(?=\s+(?:nhl\s+|entry\s+)?(?:draft|picks?|selections?|choices?)\b))?"
     r"(?:\s+(?:nhl\s+)?(?:entry\s+)?(?:draft\s+)?(?:picks?|selections?|choices?)"
     r"|\s+(?:nhl\s+)?entry\s+draft)?"
     r"(?:\s*\((?P<paren>[^)]*)\))?"
@@ -88,22 +100,31 @@ _ROUND_TOKEN_RE = re.compile(
     rf"(?:\s*(?P<no>{_PICK_NO}))?",
     re.I,
 )
-# "the 77th pick in this year's draft", "the 38th and 89th picks in this
-# year's draft", "the 47th pick in the NHL draft" -- an overall number, no round
+# An overall number, no round: "the 77th pick in this year's draft", "the
+# 38th and 89th picks in this year's draft", "the No. 7 pick in the 2022 NHL
+# Draft", "the 27th, 34th and 45th overall picks in the same draft",
+# "Arizona's 2022 32nd overall pick"
+_OVERALL_NUM = r"(?:no\.\s*\d{1,3}|\d{1,3}(?:st|nd|rd|th))"
 OVERALL_PICK_RE = re.compile(
-    r"(?:the\s+)?(?P<nums>\d{1,3}(?:st|nd|rd|th)(?:\s*(?:,|and)\s*(?:the\s+)?\d{1,3}(?:st|nd|rd|th))*)"
-    r"\s+(?:overall\s+)?picks?\s+in\s+(?:this\s+year's|the(?:\s+(?P<year>\d{4}))?(?:\s+nhl)?)\s+draft",
+    r"(?:the\s+|(?-i:[A-Z][a-z.]+(?:\s[A-Z][a-z.]+)?)'s\s+)?(?:(?P<year1>\d{4})\s+)?"
+    rf"(?P<nums>\b{_OVERALL_NUM}(?:\s*(?:,|and)\s*(?:the\s+)?{_OVERALL_NUM})*)"
+    r"\s+(?:overall\s+)?(?:picks?|selections?)"
+    r"(?:\s+in\s+(?:this\s+year's\s+|the\s+same\s+|the\s+)?(?:(?P<year>\d{4})\s+)?(?:nhl\s+)?draft)?",
     re.I,
 )
+# No round: "two draft picks", "a 2018 conditional draft pick", "a 2024
+# pick", "an undisclosed conditional pick", "a conditional 2018 draft choice"
 VAGUE_PICK_RE = re.compile(
-    r"(?:\b(?P<count>an?|one|two|three|four|\d|undisclosed)\s+)?(?:(?P<cond1>conditional)\s+)?"
-    r"(?:(?P<year>\d{4}(?:\s+(?:and|or)\s+\d{4})?)\s+)?(?:(?P<cond2>conditional)\s+)?draft\s+picks?",
+    r"(?:\b(?P<count>(?:an?\s+)?undisclosed|an?|one|two|three|four|\d)\s+)?"
+    r"(?:(?P<cond1>conditional)\s+)?"
+    r"(?:(?P<year>\d{4}(?:\s+(?:and|or)\s+\d{4})?)\s+)?(?:(?P<cond2>conditional)\s+)?"
+    r"(?:nhl\s+)?(?:entry\s+)?(?:draft\s+)?\b(?:picks?|selections?|choices?)\b",
     re.I,
 )
 RIGHTS_RE = re.compile(
     rf"the\s+rights\s+to\s+(?:unsigned\s+(?:draft\s+pick|prospect)\s+)?(?:(?P<pos>{_POS})\s+)?(?P<name>{_NAME})"
 )
-FUTURE_RE = re.compile(r"future\s+considerations", re.I)
+FUTURE_RE = re.compile(r"future\s+consider\w*", re.I)  # "considertations" too
 CASH_RE = re.compile(r"\bcash(?:\s+considerations)?\b", re.I)
 
 # A trade clause starts at a trade verb and ends where a new sentence starts
@@ -133,6 +154,12 @@ _CLUTTER_RE = re.compile(
     r"|,?\s*who\s+was\s+traded\s+to\s+.*$"
     r"|,?\s+and\s+signed\s+.*$"
     r"|\s+as\s+compensation\s+for\s+.*$"
+    r"|,?\s+in\s+the\s+trade\b"
+    r"|,?\s*who\s+will\s+remain\s+with\s+.*$"
+    # another team's follow-on move ("... D Michael Del Zotto then traded him
+    # to Anaheim ..." in Detroit's entry is Florida's trade, not Detroit's)
+    r"|\s+then\s+traded\s+him\b.*$"
+    r"|\s+and\s+subsequently\b.*$"
     r"|\s+next\s+year\b"
     r"|\.\s+(?:The|This|He|They|If)\b.*$"
 )
@@ -140,6 +167,37 @@ THREE_TEAM_RE = re.compile(
     r",?\s*(?:as part of|in)\s+an?\s+(?:three|four)-team\s+trade\s+with\s+(?P<teams>.+?)(?=\s+(?:from|for|in exchange)\b|[,.]|$)",
     re.I,
 )
+
+
+# Typos seen in the feed that break matching ("Acquired C Bo Harvath fom
+# Vancouver ...").
+_TEAM_TYPOS = [
+    (re.compile(r"\bCanadians\b"), "Canadiens"),
+    (re.compile(r"\bCarolin\b"), "Carolina"),
+    (re.compile(r"\bfom\b"), "from"),
+]
+# Other ways ESPN names the partner, rewritten to the usual form: "Acquired D
+# Mikko Lehtonen in trade for G Veini Vehvilainen from Toronto." -> "... from
+# Toronto for ..."; "Acquired F Tyler Toffoli in a trade with Calgary in
+# exchange for ..." -> "... from Calgary in exchange for ...".
+_IN_TRADE_FOR_RE = re.compile(
+    r"^(?P<in>.+?)\s+in\s+trade\s+for\s+(?P<out>.+?)\s+from\s+(?P<team>.+)$"
+)
+_IN_TRADE_WITH_RE = re.compile(r"\s+in\s+(?:a\s+)?trade\s+with\s+")
+# A trade tacked onto another move with a pronoun: "Recalled C Lane Pederson
+# from Chicago (AHL) and traded him to Vancouver." -- rewritten to "Recalled
+# ... . Traded C Lane Pederson to Vancouver." so it splits like any trade.
+_PRONOUN_TRADE_RE = re.compile(  # `who`: the nearest player named before it
+    rf"(?P<who>(?:{_POS})\s+{_NAME})(?P<mid>(?:(?!\b(?:{_POS})\s+[A-Z])[^.])*?)"
+    r"\s+and\s+traded\s+(?:him\s+)?to\s+"
+)
+# "Announced D Greg Pateryn was traded to Minnesota for D Ian Cole."
+_ANNOUNCED_TRADE_RE = re.compile(
+    rf"\bAnnounced\s+(?P<who>(?:{_POS})\s+{_NAME})\s+was\s+traded\s+to\s+"
+)
+# A position right after a team name inside an asset list: "for Minnesota C
+# Nick Bonino", "for Ottawa G Matt Murray".
+_LEADS_WITH_PLAYER_RE = re.compile(rf"^(?:{_POS}|Cs|Ds|Fs|Gs|Ws)\s+[A-Z]")
 
 
 def normalize_year(text):
@@ -198,7 +256,7 @@ def _pick_assets(m):
         )
         for t in _ROUND_TOKEN_RE.finditer(m.group("rounds"))
     ]
-    years = _years(m.group("year1")) or _years(m.group("year2"))
+    years = _years(m.group("year1")) or _years(m.group("year3")) or _years(m.group("year2"))
     conditional = bool(m.group("cond1") or m.group("cond2"))
     parens = " ".join(p for p in (m.group("paren"), m.group("paren2")) if p)
     tail_numbers = _pick_numbers(parens)
@@ -234,11 +292,11 @@ def _pick_assets(m):
 def _overall_assets(m):
     """'the 38th and 89th picks in this year's draft' -> two picks with only
     an overall number (and a year when one is stated)."""
-    year = int(m.group("year")) if m.group("year") else None
+    year = m.group("year") or m.group("year1")
     raw = m.group(0).strip()
     return [
-        _pick(raw, None, year, False, int(n))
-        for n in re.findall(r"(\d{1,3})(?:st|nd|rd|th)", m.group("nums"))
+        _pick(raw, None, int(year) if year else None, False, int(n))
+        for n in re.findall(r"\d{1,3}", m.group("nums"))
     ]
 
 
@@ -334,12 +392,18 @@ def split_trade_clauses(description):
     sentence that starts a different move), with its verb. 'Sent' counts as
     a trade only with 'in exchange for' -- otherwise it's an assignment."""
     text = (description or "").replace("\u2019", "'")
+    text = _ANNOUNCED_TRADE_RE.sub(lambda m: f"Traded {m.group('who')} to ", text)
+    text = _PRONOUN_TRADE_RE.sub(
+        lambda m: f"{m.group('who')}{m.group('mid')}. Traded {m.group('who')} to ", text
+    )
     out = []
     for m in TRADE_START_RE.finditer(text):
         end = NEXT_MOVE_RE.search(text, m.end())
         clause = text[m.end() : end.start() if end else len(text)].strip().rstrip(".").strip()
         verb = m.group("verb")
         if verb == "Sent" and "in exchange for" not in clause:
+            continue
+        if re.search(r"\boff\s+waivers\b", clause, re.I):  # a waiver claim, not a trade
             continue
         # "Aquired" / "Acquire" (typos) and the older "Received" all mean Acquired
         if verb == "Received" or verb.lower().startswith(("acq", "aq")):
@@ -378,11 +442,51 @@ _OUT_RE = re.compile(  # (?<!rights): "the rights to G Anders Nilsson to Buffalo
 _NO_TEAM_RE = re.compile(r"^(?P<in>.+?)\s+(?:in\s+exchange\s+for|for)\s+(?P<out>.+)$")
 
 
+def _team_and_rest(text, team_patterns):
+    """The team named earliest in `text` and whatever follows its name:
+    'Edmonton a 2015 second-round draft pick' -> ('EDM', 'a 2015 second-round
+    draft pick') -- ESPN leaving out "for". (None, '') if no team is named."""
+    best = None
+    for abbr, rx in team_patterns:
+        m = rx.search(text or "")
+        if m and (best is None or m.start() < best[1]):
+            best = (abbr, m.start(), m.end())
+    if not best:
+        return None, ""
+    return best[0], text[best[2] :].strip(" ,")
+
+
+def _strip_team_prefix(text, team_patterns):
+    """'Minnesota C Nick Bonino and ...' -> 'C Nick Bonino and ...' -- only
+    when a position follows the team name, so a player named Dallas stays."""
+    for _, rx in team_patterns:
+        m = rx.match(text or "")
+        if m and _LEADS_WITH_PLAYER_RE.match(text[m.end() :].lstrip()):
+            return text[m.end() :].lstrip()
+    return text
+
+
+def _leading_team(text, team_patterns):
+    """The team named at the very start of an asset list when a position
+    follows it ('Minnesota C Nick Bonino ...' -> 'MIN'), else None."""
+    for abbr, rx in team_patterns:
+        m = rx.match(text or "")
+        if m and _LEADS_WITH_PLAYER_RE.match(text[m.end() :].lstrip()):
+            return abbr
+    return None
+
+
 def parse_clause(clause, team_patterns, counterparties=()):
     """One clause from split_trade_clauses() -> {partner, via, received,
     sent, raw}. partner is the other team (abbr) or None if it can't be
     told; via lists extra teams named in a three- or four-team trade."""
     text = _CLUTTER_RE.sub("", clause["text"]).strip().rstrip(",").strip()
+    for rx, fixed in _TEAM_TYPOS:
+        text = rx.sub(fixed, text)
+    m = _IN_TRADE_FOR_RE.match(text)
+    if m:
+        text = f"{m.group('in')} from {m.group('team')} for {m.group('out')}"
+    text = _IN_TRADE_WITH_RE.sub(" from ", text)
     via = []
     three = THREE_TEAM_RE.search(text)
     if three:
@@ -399,12 +503,10 @@ def parse_clause(clause, team_patterns, counterparties=()):
     partner, received, sent = None, "", ""
     if clause["verb"] == "Acquired":
         m = _ACQ_RE.match(text)
-        if m and match_team(m.group("team"), team_patterns):
-            partner, received, sent = (
-                match_team(m.group("team"), team_patterns),
-                m.group("in"),
-                m.group("out") or "",
-            )
+        team, rest = _team_and_rest(m.group("team"), team_patterns) if m else (None, "")
+        if team:
+            # no "for" at all: whatever follows the team's name is what went out
+            partner, received, sent = team, m.group("in"), m.group("out") or rest
         else:
             m = _NO_TEAM_RE.match(text)
             received, sent = (m.group("in"), m.group("out")) if m else (text, "")
@@ -419,14 +521,22 @@ def parse_clause(clause, team_patterns, counterparties=()):
                     break
     else:
         m = _OUT_RE.match(text)
-        if m and match_team(m.group("team"), team_patterns):
-            partner, sent, received = (
-                match_team(m.group("team"), team_patterns),
-                m.group("out"),
-                m.group("in") or "",
-            )
+        team, rest = _team_and_rest(m.group("team"), team_patterns) if m else (None, "")
+        if team:
+            partner, sent, received = team, m.group("out"), m.group("in") or rest
         else:
-            sent = text
+            # No "to": "Traded C Luke Kunin and a 2020 draft pick for Minnesota
+            # C Nick Bonino and two 2020 draft picks." (Nashville) / "Traded C
+            # Jonathan Gruden and a 2020 second-round draft pick for Ottawa G
+            # Matt Murray." (Pittsburgh). In both real entries the posting team
+            # got the first list and gave the second -- Kunin and Gruden
+            # arrived, Bonino and Murray left -- with the partner named first.
+            m = _NO_TEAM_RE.match(text)
+            lead = _leading_team(m.group("out"), team_patterns) if m else None
+            if lead:
+                partner, received, sent = lead, m.group("in"), m.group("out")
+            else:
+                sent = text
 
     others = [c for c in counterparties if c not in via]
     if partner is None and len(others) == 1:
@@ -434,8 +544,8 @@ def parse_clause(clause, team_patterns, counterparties=()):
     return {
         "partner": partner,
         "via": via,
-        "received": parse_assets(received),
-        "sent": parse_assets(sent),
+        "received": parse_assets(_strip_team_prefix(received, team_patterns)),
+        "sent": parse_assets(_strip_team_prefix(sent, team_patterns)),
         "raw": clause["text"],
     }
 
