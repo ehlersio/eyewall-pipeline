@@ -665,6 +665,14 @@
           "position": "LW",
           "team_id": null,
           "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "first_name": "Split",
+          "last_name": "Row",
+          "player_id": 6682,
+          "position": "D",
+          "team_id": 323,
+          "updated_at": "2026-01-15T17:00:00+00:00"
         }
       ],
       "table": "ahl_players"
@@ -686,6 +694,22 @@
           "sh_goals": 0,
           "shots": 0,
           "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "goals": 1,
+          "gp": 12,
+          "pim": 0,
+          "player_id": 6682,
+          "plus_minus": 0,
+          "points": 0,
+          "pp_goals": 0,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "sh_goals": 0,
+          "shots": 0,
+          "team_id": 323,
           "updated_at": "2026-01-15T17:00:00+00:00"
         },
         {

@@ -1,7 +1,8 @@
 """
 test_hockeytech_characterization.py -- characterization ("golden master")
-tests for the AHL and ECHL pipeline modules, written before merging each
-ahl_*/echl_* pair into one shared implementation.
+tests for the AHL and ECHL pipeline modules. Written before each
+ahl_*/echl_* pair was merged into one shared hockeytech_* module, and kept
+as the guard on that shared code.
 
 Each case runs a module's real entry point for BOTH leagues against the same
 fake HockeyTech/RSS responses and a fake Supabase client, and compares what
@@ -46,6 +47,20 @@ import echl_news
 import echl_penalty_shots
 import echl_shot_events
 import echl_stats
+import hockeytech_game_boxscore
+import hockeytech_live_refresh
+import hockeytech_news
+import hockeytech_penalty_shots
+import hockeytech_shot_events
+import hockeytech_stats
+
+SUPABASE_MODULES = (
+    hockeytech_stats,
+    hockeytech_game_boxscore,
+    hockeytech_shot_events,
+    hockeytech_penalty_shots,
+    hockeytech_live_refresh,
+)
 
 GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "hockeytech"
 
@@ -137,6 +152,10 @@ def skaters(L):
          "team_name": L.name_a, "games_played": "40", "goals": "15", "assists": "20",
          "points": "35", "plus_minus": "8", "penalty_minutes": "12", "shots": "110",
          "power_play_goals": "5", "short_handed_goals": "1"},
+        # team_code and team_name disagree: AHL resolves the team by code
+        # (team_b), ECHL by name (team_a).
+        {"player_id": "6682", "name": "Split Row", "position": "D", "team_code": L.code_b,
+         "team_name": L.name_a, "games_played": "12", "goals": "1"},
         {"player_id": "6690", "name": "Madonna", "position": "LW", "team_code": "XXX",
          "team_name": "Nowhere", "games_played": "", "goals": None},
         {"name": "Missing Id"},
@@ -394,12 +413,14 @@ class Harness:
         monkeypatch.setattr(requests, "get", self.get)
         monkeypatch.setattr(urllib.request, "urlopen", self.urlopen)
         monkeypatch.setattr(time, "sleep", lambda _s: None)
-        for mod in (L.stats, L.boxscore, L.shots, L.penalty, L.live):
+        # The ahl_*/echl_* modules are thin wrappers; the I/O lives in the
+        # shared hockeytech_* modules, so that's where the patches go.
+        for mod in SUPABASE_MODULES:
             monkeypatch.setattr(mod, "create_client", lambda _url, _key: FakeSupabase(self))
-        for mod in (L.stats, L.boxscore, L.shots, L.penalty):
+        for mod in SUPABASE_MODULES[:-1]:  # all but live_refresh
             monkeypatch.setattr(mod, "datetime", FixedDatetime)
         # Both come from .env locally but not in CI -- pin them.
-        monkeypatch.setattr(L.news, "WORKER_URL", "https://worker.test")
+        monkeypatch.setattr(hockeytech_news, "WORKER_URL", "https://worker.test")
         for var in ("AHL_SEASON", "ECHL_SEASON"):
             monkeypatch.delenv(var, raising=False)
 
