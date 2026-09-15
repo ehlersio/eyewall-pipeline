@@ -18,13 +18,14 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from pipeline_common import FetchError
+from season_lookup import get_nhl_season
 
 load_dotenv()
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 
 NHL_BASE = "https://api-web.nhle.com/v1"
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = get_nhl_season()  # live-resolved; falls back to the NHL_SEASON env var
 REQUEST_DELAY = 0.5  # seconds between NHL API calls — stay well under rate limits
 
 # ---------------------------------------------------------------------------
