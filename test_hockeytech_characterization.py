@@ -147,9 +147,15 @@ def worker_config(L):
 
 def roster(L):
     return [
+        # A player with two stints on this team lists twice (seen live in AHL
+        # season 90: Hunter Johannes on LV, Danton Heinen on CLE, Tyson Feist
+        # on BAK). The earlier stint names the team he left for.
+        {"player_id": "6681", "first_name": "Alex", "last_name": "Skater", "position": "LW",
+         "shoots": "L", "height": "6-1", "weight": "190", "birthdate": "2001-03-04",
+         "homeplace": "Toronto, ON", "tp_jersey_number": "91", "latest_team_id": str(L.team_b)},
         {"player_id": "6681", "first_name": "Alex", "last_name": "Skater", "position": "C",
          "shoots": "L", "height": "6-1", "weight": "190", "birthdate": "2001-03-04",
-         "homeplace": "Toronto, ON", "tp_jersey_number": "19",
+         "homeplace": "Toronto, ON", "tp_jersey_number": "19", "latest_team_id": str(L.team_a),
          "draft_status": "Prince George Cougars (WHL) (College) 2019"},
         {"player_id": "7001", "first_name": "Gus", "last_name": "Keeper", "position": "G",
          "shoots": "", "height": "6'2", "weight": "n/a", "birthdate": "",
