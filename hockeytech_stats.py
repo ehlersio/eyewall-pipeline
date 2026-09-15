@@ -8,16 +8,16 @@ Structurally mirrors pwhl_stats.py (same vendor, same statviewfeed
 `sections[].data[].row` shape), with real field/param differences called
 out below -- see docs/hockeytech-ahl-api-notes.md for the investigation.
 
-The current season comes from the Worker's /config/seasons through
-season_lookup.py, as for pwhl_stats.py/nhl_stats.py. The type of an
-arbitrary season_id (resolve_season_type) and a season's date window still
-come from HockeyTech's own `seasons` feed -- the Worker has no AHL/ECHL
-equivalent of /config/seasons/pwhl-types.
+Seasons come from the Worker through season_lookup.py, never HockeyTech's
+own seasons feed: the current season from /config/seasons (as for
+pwhl_stats.py/nhl_stats.py), and any season's type and start/end dates
+(resolve_season_type, _season_day_window) from
+/config/seasons/{league}-seasons.
 
 Response structure:
     feed=statviewfeed views (players, teams) use PWHL's
     sections[].data[].row shape -- extract_rows() is pwhl_stats.py's helper.
-    feed=modulekit views (roster, teamsbyseason, seasons, scorebar) nest
+    feed=modulekit views (roster, teamsbyseason, scorebar) nest
     everything under a top-level "SiteKit" key instead.
 """
 
@@ -34,7 +34,7 @@ from supabase import create_client
 
 from hockeytech_leagues import HOCKEYTECH_BASE, League
 from pipeline_common import FetchError, hockeytech_statview_get
-from season_lookup import get_hockeytech_season
+from season_lookup import get_hockeytech_season, get_hockeytech_seasons
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -129,27 +129,6 @@ def _modulekit_get(lg: League, view: str, params: dict, retries: int = 3) -> dic
     raise FetchError(f"HT modulekit/{view}: failed after {retries} attempts ({last_err})")
 
 
-def _season_type_from_name(season_name: str, playoff: str, career: str) -> str:
-    """The seasons feed has no single flag separating preseason/all-star/
-    showcase the way PWHL's hardcoded SEASON_TYPE_MAP does -- derive it from
-    the season's own name, falling back to the career/playoff flags."""
-    name_lower = (season_name or "").lower()
-    if playoff == "1" or "playoffs" in name_lower:
-        return "playoffs"
-    if "preseason" in name_lower:
-        return "preseason"
-    if "all-star" in name_lower:
-        return "allstar"
-    if career == "1":
-        return "regular"
-    return "other"
-
-
-def _fetch_seasons(lg: League) -> list[dict]:
-    data = _modulekit_get(lg, "seasons", {})
-    return data.get("Seasons", [])
-
-
 def resolve_current_season(lg: League) -> dict:
     """Returns {"season_id": int, "season_type": str} for the current season,
     from the Worker's /config/seasons (see season_lookup.get_hockeytech_season)
@@ -167,20 +146,20 @@ def resolve_current_season(lg: League) -> dict:
 
 def resolve_season_type(lg: League, season_id: str) -> str:
     """season_type for an arbitrary (not necessarily current) season_id,
-    e.g. one passed on the command line. Falls back to "regular" only if the
-    season genuinely can't be found -- and logs it rather than guessing
-    silently."""
-    try:
-        seasons = _fetch_seasons(lg)
-    except FetchError as e:
-        log.warning(f"  Could not resolve season type for {season_id}: {e}")
+    e.g. one passed on the command line, from the Worker's season list
+    (season_lookup.get_hockeytech_seasons). Falls back to "regular" only if
+    the list is unavailable or the season genuinely isn't in it -- and logs
+    it rather than guessing silently."""
+    seasons = get_hockeytech_seasons(lg.key)
+    if seasons is None:
+        log.warning(
+            f"  Could not resolve season type for {season_id}: Worker season list unavailable"
+        )
         return "regular"
     for s in seasons:
-        if str(s.get("season_id")) == str(season_id):
-            return _season_type_from_name(
-                s.get("season_name", ""), s.get("playoff", "0"), s.get("career", "0")
-            )
-    log.warning(f"  season_id {season_id} not found in live seasons feed, assuming regular")
+        if str(s.get("seasonId")) == str(season_id):
+            return s.get("seasonType") or "regular"
+    log.warning(f"  season_id {season_id} not found in the Worker's season list, assuming regular")
     return "regular"
 
 
@@ -599,16 +578,15 @@ def _season_day_window(lg: League, season_id: str) -> tuple[int, int]:
     `limit` truncates before reaching a recent season (a 5000-game pull
     returned only seasons 1-69, zero season-90 games).
     """
-    try:
-        seasons = _fetch_seasons(lg)
-    except FetchError:
+    seasons = get_hockeytech_seasons(lg.key)
+    if seasons is None:
         return 400, 1
     for s in seasons:
-        if str(s.get("season_id")) == str(season_id):
+        if str(s.get("seasonId")) == str(season_id):
             try:
-                start = datetime.fromisoformat(s["start_date"]).date()
-                end = datetime.fromisoformat(s["end_date"]).date()
-            except (KeyError, ValueError):
+                start = datetime.fromisoformat(s["startDate"]).date()
+                end = datetime.fromisoformat(s["endDate"]).date()
+            except (KeyError, TypeError, ValueError):
                 return 400, 1
             today = datetime.now(UTC).date()
             days_back = max((today - start).days + 3, 3)

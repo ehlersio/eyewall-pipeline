@@ -120,16 +120,18 @@ def person(pid, first="First", last="Last"):
     return {"id": str(pid), "firstName": first, "lastName": last}
 
 
-def seasons(L):
+def worker_seasons(L):
+    """The Worker's /config/seasons/{league}-seasons (seasons.js
+    getAllAHLSeasons/getAllECHLSeasons, from HockeyTech's seasons feed)."""
     return [
-        {"season_id": str(L.regular), "season_name": "2025-26 Regular Season", "career": "1",
-         "playoff": "0", "start_date": "2025-10-10", "end_date": "2026-04-19"},
-        {"season_id": str(L.playoffs), "season_name": "2026 Playoffs", "career": "1",
-         "playoff": "1", "start_date": "2026-04-22", "end_date": "2026-06-20"},
-        {"season_id": str(L.next_season), "season_name": "2026-27 Regular Season", "career": "1",
-         "playoff": "0", "start_date": "2026-10-02", "end_date": "2027-04-18"},
-        {"season_id": "5", "season_name": "2026 All-Star Challenge", "career": "0",
-         "playoff": "0", "start_date": "2026-02-01", "end_date": "2026-02-02"},
+        {"seasonId": L.regular, "seasonName": "2025-26 Regular Season", "seasonType": "regular",
+         "startYear": 2025, "startDate": "2025-10-10", "endDate": "2026-04-19"},
+        {"seasonId": L.playoffs, "seasonName": "2026 Playoffs", "seasonType": "playoffs",
+         "startYear": 2026, "startDate": "2026-04-22", "endDate": "2026-06-20"},
+        {"seasonId": L.next_season, "seasonName": "2026-27 Regular Season", "seasonType": "regular",
+         "startYear": 2026, "startDate": "2026-10-02", "endDate": "2027-04-18"},
+        {"seasonId": 5, "seasonName": "2026 All-Star Challenge", "seasonType": "allstar",
+         "startYear": 2026, "startDate": "2026-02-01", "endDate": "2026-02-02"},
     ]  # fmt: skip
 
 
@@ -439,6 +441,7 @@ class Harness:
         monkeypatch.setattr(season_lookup, "WORKER_BASE", "https://worker.test")
         monkeypatch.setattr(season_lookup, "_cache", None)
         monkeypatch.setattr(season_lookup, "_season_types_cache", None)
+        monkeypatch.setattr(season_lookup, "_hockeytech_seasons_cache", {})
         for var in ("AHL_SEASON", "ECHL_SEASON"):
             monkeypatch.delenv(var, raising=False)
 
@@ -454,15 +457,13 @@ class Harness:
         )
         if url.endswith("/config/seasons"):
             return FakeResponse(503) if self.fail_worker else ok_json(worker_config(self.L))
+        if url.endswith(f"/config/seasons/{self.L.key}-seasons"):
+            return FakeResponse(503) if self.fail_seasons else ok_json(worker_seasons(self.L))
         return self.route(params)
 
     def route(self, p):
         L, feed, view = self.L, p.get("feed"), p.get("view")
         if feed == "modulekit":
-            if view == "seasons":
-                if self.fail_seasons:
-                    return FakeResponse(503)
-                return ok_json({"SiteKit": {"Seasons": seasons(L)}})
             if view == "roster":
                 team_id = str(p.get("team_id"))
                 if team_id == str(L.team_a):
@@ -567,8 +568,8 @@ def test_stats_run_explicit_playoff_season(monkeypatch, L):
 
 @pytest.mark.parametrize("L", LEAGUES)
 def test_stats_season_resolution_when_seasons_feed_is_down(monkeypatch, L):
-    # Both sources down: the Worker (current season) and HockeyTech's
-    # seasons feed (season type, date window).
+    # Both Worker season routes down: /config/seasons (current season) and
+    # /config/seasons/{league}-seasons (season type, date window).
     h = Harness(monkeypatch, L, fail_seasons=True, fail_worker=True)
     result = {
         "current": L.stats.resolve_current_season(),

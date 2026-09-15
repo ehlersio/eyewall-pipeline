@@ -22,9 +22,11 @@ def reset_cache():
     reset that too."""
     season_lookup._cache = None
     season_lookup._season_types_cache = None
+    season_lookup._hockeytech_seasons_cache = {}
     yield
     season_lookup._cache = None
     season_lookup._season_types_cache = None
+    season_lookup._hockeytech_seasons_cache = {}
 
 
 def _mock_response(json_data, ok=True, status=200):
@@ -193,6 +195,68 @@ class TestGetHockeytechSeason:
         season_lookup.get_hockeytech_season("ahl", 90)
         season_lookup.get_hockeytech_season("echl", 73)
         assert len(calls) == 1
+
+
+AHL_SEASONS = [
+    {"seasonId": 92, "seasonName": "2026 Calder Cup Playoffs", "seasonType": "playoffs",
+     "startYear": 2026, "startDate": "2026-04-20", "endDate": "2026-06-20"},
+    {"seasonId": 90, "seasonName": "2025-26 Regular Season", "seasonType": "regular",
+     "startYear": 2025, "startDate": "2025-10-10", "endDate": "2026-04-19"},
+]  # fmt: skip
+
+
+class TestGetHockeytechSeasons:
+    """get_hockeytech_seasons() reads /config/seasons/{league}-seasons for
+    hockeytech_stats' season types and game-log date windows."""
+
+    def test_returns_the_workers_list_for_the_league(self, monkeypatch):
+        calls = []
+
+        def fake_get(url, **_kwargs):
+            calls.append(url)
+            return _mock_response(AHL_SEASONS)
+
+        monkeypatch.setattr(season_lookup.requests, "get", fake_get)
+        assert season_lookup.get_hockeytech_seasons("ahl") == AHL_SEASONS
+        assert calls == [f"{season_lookup.WORKER_BASE}/config/seasons/ahl-seasons"]
+
+    def test_caches_each_league_separately(self, monkeypatch):
+        calls = []
+
+        def fake_get(url, **_kwargs):
+            calls.append(url)
+            return _mock_response(AHL_SEASONS)
+
+        monkeypatch.setattr(season_lookup.requests, "get", fake_get)
+        season_lookup.get_hockeytech_seasons("ahl")
+        season_lookup.get_hockeytech_seasons("echl")
+        season_lookup.get_hockeytech_seasons("ahl")
+        season_lookup.get_hockeytech_seasons("echl")
+        assert [u.rsplit("/", 1)[1] for u in calls] == ["ahl-seasons", "echl-seasons"]
+
+    def test_returns_none_and_does_not_retry_when_worker_unreachable(self, monkeypatch):
+        calls = []
+
+        def fake_get(*_args, **_kwargs):
+            calls.append(1)
+            raise Exception("network down")
+
+        monkeypatch.setattr(season_lookup.requests, "get", fake_get)
+        assert season_lookup.get_hockeytech_seasons("ahl") is None
+        assert season_lookup.get_hockeytech_seasons("ahl") is None
+        assert len(calls) == 1
+
+    def test_returns_none_on_non_ok_status(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests, "get", lambda *a, **k: _mock_response({}, ok=False, status=502)
+        )
+        assert season_lookup.get_hockeytech_seasons("echl") is None
+
+    def test_returns_none_when_the_response_is_not_a_list(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests, "get", lambda *a, **k: _mock_response({"error": "nope"})
+        )
+        assert season_lookup.get_hockeytech_seasons("ahl") is None
 
 
 class TestGetSeasonType:
