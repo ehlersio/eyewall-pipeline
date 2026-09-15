@@ -3,16 +3,9 @@
   "reads": [],
   "requests": [
     {
-      "params": {
-        "client_code": "ahl",
-        "feed": "modulekit",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "site_id": "3",
-        "view": "seasons"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
+      "params": {},
+      "referer": null,
+      "url": "https://worker.test/config/seasons/ahl-seasons"
     },
     {
       "params": {
@@ -578,18 +571,6 @@
         "sort": "points",
         "special": "true",
         "view": "teams"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "modulekit",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "site_id": "3",
-        "view": "seasons"
       },
       "referer": "https://theahl.com/",
       "url": "https://lscluster.hockeytech.com/feed/index.php"

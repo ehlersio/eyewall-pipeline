@@ -21,6 +21,7 @@ TIMEOUT_SECONDS = 10
 
 _cache = None  # populated on first call, reused for the rest of this process
 _season_types_cache: dict | None = None  # same pattern, separate endpoint — see get_season_type()
+_hockeytech_seasons_cache: dict = {}  # league -> season list, or _FETCH_FAILED — see get_hockeytech_seasons()
 
 # Sentinels distinct from both None (unfetched) and {} (a genuinely empty but
 # valid response) — mark "already tried this process, the Worker was down."
@@ -119,6 +120,38 @@ def get_hockeytech_season(league: str, default_season_id: int) -> dict:
         return {"season_id": int(entry["seasonId"]), "season_type": entry["seasonType"]}
     except (KeyError, TypeError, ValueError):
         return fallback
+
+
+def get_hockeytech_seasons(league: str) -> list[dict] | None:
+    """Every season the Worker lists for "ahl" or "echl", current and
+    historical, from GET /config/seasons/{league}-seasons:
+    [{'seasonId', 'seasonName', 'seasonType', 'startYear', 'startDate',
+    'endDate'}]. The Worker derives seasonType from HockeyTech's own seasons
+    feed (seasons.js), the same answer the frontend gets.
+
+    None if the Worker is unreachable or returns something that isn't a
+    list -- callers decide what that means (hockeytech_stats assumes a
+    regular season and a wide date window). Cached per league for the rest
+    of the process, a failure included, so a run doesn't retry a Worker
+    that's already down.
+    """
+    cached = _hockeytech_seasons_cache.get(league)
+    if cached is _FETCH_FAILED:
+        return None
+    if cached is not None:
+        return cached
+    try:
+        r = requests.get(f"{WORKER_BASE}/config/seasons/{league}-seasons", timeout=TIMEOUT_SECONDS)
+        r.raise_for_status()
+        seasons = r.json()
+        if not isinstance(seasons, list):
+            raise ValueError(f"expected a list, got {type(seasons).__name__}")
+    except Exception as e:
+        print(f"  WARNING: season_lookup could not load {league} seasons from Worker ({e})")
+        _hockeytech_seasons_cache[league] = _FETCH_FAILED
+        return None
+    _hockeytech_seasons_cache[league] = seasons
+    return seasons
 
 
 def _fetch_season_types() -> dict:
