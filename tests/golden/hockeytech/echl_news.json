@@ -1,0 +1,42 @@
+{
+  "posts": [
+    {
+      "articles": [
+        {
+          "bg": "#1a1a1a",
+          "excerpt": "First &amp; story",
+          "id": "hockeywriters-echl-4c0bcd8134030d04",
+          "imageUrl": "https://img.test/one.jpg",
+          "publishedAt": "2026-01-14T12:00:00+00:00",
+          "source": "hockeywriters-echl",
+          "sourceName": "The Hockey Writers",
+          "title": "Headline one",
+          "url": "https://thehockeywriters.com/category/echl/feed/one"
+        },
+        {
+          "bg": "#1a1a1a",
+          "excerpt": "Second story",
+          "id": "hockeywriters-echl-29c44ba33c327179",
+          "imageUrl": null,
+          "publishedAt": null,
+          "source": "hockeywriters-echl",
+          "sourceName": "The Hockey Writers",
+          "title": "Headline two",
+          "url": "https://thehockeywriters.com/category/echl/feed/two"
+        }
+      ],
+      "method": "POST",
+      "url": "https://worker.test/echl/news/ingest"
+    }
+  ],
+  "reads": [],
+  "requests": [
+    {
+      "url": "https://thehockeywriters.com/category/echl/feed/"
+    },
+    {
+      "url": "https://www.oursportscentral.com/feeds/l18.xml"
+    }
+  ],
+  "writes": []
+}

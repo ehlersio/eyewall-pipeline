@@ -1,0 +1,58 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "100",
+        "numberofdaysahead": "1",
+        "numberofdaysback": "1",
+        "site_id": "0",
+        "view": "scorebar"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "game_id",
+      "rows": [
+        {
+          "away_score": 0,
+          "game_id": 1010,
+          "game_state": "7:00PM",
+          "game_status_code": 1,
+          "home_score": 0
+        },
+        {
+          "away_score": 0,
+          "game_id": 999,
+          "game_state": "",
+          "game_status_code": null,
+          "home_score": 0
+        },
+        {
+          "away_score": 1,
+          "game_id": 1011,
+          "game_state": "2nd",
+          "game_status_code": null,
+          "home_score": 1
+        },
+        {
+          "away_score": 2,
+          "game_id": 1001,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 4
+        }
+      ],
+      "table": "echl_game_log"
+    }
+  ]
+}

@@ -1,0 +1,825 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "site_id": "3",
+        "view": "seasons"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "307",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "309",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "313",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "316",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "319",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "321",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "323",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "323",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "323",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "324",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "327",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "328",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "330",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "335",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "372",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "373",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "380",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "384",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "389",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "390",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "402",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "403",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "404",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "405",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "411",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "412",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "413",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "415",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "419",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "437",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "440",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "444",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "445",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "457",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "team_id": "317",
+        "view": "roster"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "200",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "conference_id": "-1",
+        "context": "overall",
+        "division_id": "-1",
+        "feed": "statviewfeed",
+        "groupTeamsBy": "division",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "special": "false",
+        "view": "teams"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "conference_id": "-1",
+        "context": "overall",
+        "division_id": "-1",
+        "feed": "statviewfeed",
+        "groupTeamsBy": "division",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "special": "true",
+        "view": "teams"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "site_id": "3",
+        "view": "seasons"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "numberofdaysahead": "159",
+        "numberofdaysback": "3",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "scorebar"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "birth_date": "2001-03-04",
+          "birth_place": "Toronto, ON",
+          "first_name": "Alex",
+          "height_inches": 73,
+          "jersey_number": 19,
+          "last_name": "Skater",
+          "player_id": 6681,
+          "position": "C",
+          "shoots": "L",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": 190
+        },
+        {
+          "birth_date": null,
+          "birth_place": "Oslo, NO",
+          "first_name": "Gus",
+          "height_inches": null,
+          "jersey_number": null,
+          "last_name": "Keeper",
+          "player_id": 7001,
+          "position": "G",
+          "shoots": "",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": null
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "first_name": "Alex",
+          "last_name": "Skater",
+          "player_id": 6681,
+          "position": "C",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "first_name": "Madonna",
+          "last_name": "",
+          "player_id": 6690,
+          "position": "LW",
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "player_id,team_id,season_id,season_type",
+      "rows": [
+        {
+          "assists": 0,
+          "goals": 0,
+          "gp": 0,
+          "pim": 0,
+          "player_id": 6690,
+          "plus_minus": 0,
+          "points": 0,
+          "pp_goals": 0,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "sh_goals": 0,
+          "shots": 0,
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 20,
+          "goals": 15,
+          "gp": 40,
+          "pim": 12,
+          "player_id": 6681,
+          "plus_minus": 8,
+          "points": 35,
+          "pp_goals": 5,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "sh_goals": 1,
+          "shots": 110,
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_player_seasons"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "first_name": "Backup",
+          "last_name": "",
+          "player_id": 7002,
+          "position": "G",
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "first_name": "Gus",
+          "last_name": "Keeper",
+          "player_id": 7001,
+          "position": "G",
+          "team_id": 323,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "player_id,team_id,season_id,season_type",
+      "rows": [
+        {
+          "gaa": 2.61,
+          "goals_against": 80,
+          "gp": 30,
+          "losses": 9,
+          "ot_losses": 4,
+          "player_id": 7001,
+          "saves": 820,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "shots_against": 900,
+          "shutouts": 2,
+          "sv_pct": 0.911,
+          "team_id": 323,
+          "toi": "1800:00",
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 17
+        },
+        {
+          "gaa": null,
+          "goals_against": 0,
+          "gp": 0,
+          "losses": 0,
+          "ot_losses": 0,
+          "player_id": 7002,
+          "saves": 0,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "shots_against": 0,
+          "shutouts": 0,
+          "sv_pct": null,
+          "team_id": null,
+          "toi": null,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 0
+        }
+      ],
+      "table": "ahl_goalie_seasons"
+    },
+    {
+      "on_conflict": "team_id,season_id,season_type",
+      "rows": [
+        {
+          "goals_against": 0,
+          "goals_for": 0,
+          "gp": 40,
+          "losses": 17,
+          "ot_losses": 4,
+          "pk_goals_against": 0,
+          "pk_pct": null,
+          "points": 41,
+          "pp_goals": 0,
+          "pp_opportunities": 0,
+          "pp_pct": null,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "sh_goals_against": 0,
+          "sh_goals_for": 0,
+          "shootout_losses": 0,
+          "team_id": 323,
+          "times_shorthanded": 0,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 18
+        },
+        {
+          "goals_against": 105,
+          "goals_for": 130,
+          "gp": 40,
+          "losses": 12,
+          "ot_losses": 3,
+          "pk_goals_against": 20,
+          "pk_pct": 0.83,
+          "points": 52,
+          "pp_goals": 30,
+          "pp_opportunities": 140,
+          "pp_pct": 0.215,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "sh_goals_against": 2,
+          "sh_goals_for": 3,
+          "shootout_losses": 1,
+          "team_id": 335,
+          "times_shorthanded": 120,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 24
+        }
+      ],
+      "table": "ahl_team_seasons"
+    }
+  ]
+}

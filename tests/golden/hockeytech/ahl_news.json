@@ -1,0 +1,67 @@
+{
+  "posts": [
+    {
+      "articles": [
+        {
+          "bg": "#003876",
+          "excerpt": "First &amp; story",
+          "id": "official-ahl-167a5316044c3cfb",
+          "imageUrl": "https://img.test/one.jpg",
+          "publishedAt": "2026-01-14T12:00:00+00:00",
+          "source": "official-ahl",
+          "sourceName": "TheAHL.com",
+          "title": "Headline one",
+          "url": "https://theahl.com/feed/one"
+        },
+        {
+          "bg": "#1a1a1a",
+          "excerpt": "First &amp; story",
+          "id": "hockeywriters-ahl-951fb90e17384ad0",
+          "imageUrl": "https://img.test/one.jpg",
+          "publishedAt": "2026-01-14T12:00:00+00:00",
+          "source": "hockeywriters-ahl",
+          "sourceName": "The Hockey Writers",
+          "title": "Headline one",
+          "url": "https://thehockeywriters.com/category/ahl/feed/one"
+        },
+        {
+          "bg": "#003876",
+          "excerpt": "Second story",
+          "id": "official-ahl-a3d6f58a1c52d1ca",
+          "imageUrl": null,
+          "publishedAt": null,
+          "source": "official-ahl",
+          "sourceName": "TheAHL.com",
+          "title": "Headline two",
+          "url": "https://theahl.com/feed/two"
+        },
+        {
+          "bg": "#1a1a1a",
+          "excerpt": "Second story",
+          "id": "hockeywriters-ahl-90f7de0e4e71b6d2",
+          "imageUrl": null,
+          "publishedAt": null,
+          "source": "hockeywriters-ahl",
+          "sourceName": "The Hockey Writers",
+          "title": "Headline two",
+          "url": "https://thehockeywriters.com/category/ahl/feed/two"
+        }
+      ],
+      "method": "POST",
+      "url": "https://worker.test/ahl/news/ingest"
+    }
+  ],
+  "reads": [],
+  "requests": [
+    {
+      "url": "https://theahl.com/feed"
+    },
+    {
+      "url": "https://thehockeywriters.com/category/ahl/feed/"
+    },
+    {
+      "url": "https://www.oursportscentral.com/feeds/l17.xml"
+    }
+  ],
+  "writes": []
+}
