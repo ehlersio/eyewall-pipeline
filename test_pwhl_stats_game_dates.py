@@ -43,3 +43,10 @@ def test_game_date_year_matches_the_printed_weekday(season_id, printed, expected
 def test_unparseable_dates_return_none():
     assert _parse_game_date("", "8") is None
     assert _parse_game_date("TBD", "8") is None
+
+
+def test_leap_day():
+    # Parsing "Feb 29" without a year used to fail (strptime assumes 1900,
+    # not a leap year), so a Feb 29 game got no date. Season 1 is 2023-24,
+    # and 2024-02-29 was a Thursday.
+    assert _parse_game_date("Thu, Feb 29", "1") == "2024-02-29"
