@@ -8,7 +8,7 @@ AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and were added as
 
 ### 1. Install Python dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt  # dev file: pinned pytest + ruff, same as CI
 ```
 
 Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`, `python-dotenv`, `pdfplumber`

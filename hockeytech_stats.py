@@ -245,13 +245,16 @@ def _one_row_per_player(roster: list, team_id: str) -> list[dict]:
     return list(by_player.values())
 
 
-def fetch_roster(lg: League, sb, season_id: str) -> None:
+def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -> None:
     """Fetch every team's roster and upsert to {league}_players.
 
     Unlike pwhl_stats.py's fetch_roster(), this is a single flat list per
     team (no Forwards/Defenders/Goalies sections -- position comes off each
     row), and this view's season param is `season_id`, not `season` (sending
     `season` silently returns an empty roster, not an error).
+
+    In a playoff season only the playoff teams have a roster, so an empty one
+    there is expected and logged at info, not as a warning.
     """
     log.info("Fetching rosters...")
 
@@ -264,7 +267,10 @@ def fetch_roster(lg: League, sb, season_id: str) -> None:
 
         roster = data.get("Roster", [])
         if not roster or not isinstance(roster, list) or not roster[0]:
-            log.warning(f"  Empty roster for {team_code}")
+            if season_type == "playoffs":
+                log.info(f"  No playoff roster for {team_code}")
+            else:
+                log.warning(f"  Empty roster for {team_code}")
             continue
         roster = _one_row_per_player(roster, team_id)
 
@@ -697,7 +703,7 @@ def run(lg: League, season_id: str | None = None) -> None:
 
     log.info(f"=== {lg.label} stats run: season_id={season_id} season_type={season_type} ===")
 
-    fetch_roster(lg, sb, season_id)
+    fetch_roster(lg, sb, season_id, season_type)
     fetch_skater_stats(lg, sb, season_id, season_type)
     fetch_goalie_stats(lg, sb, season_id, season_type)
     fetch_team_stats(lg, sb, season_id, season_type)

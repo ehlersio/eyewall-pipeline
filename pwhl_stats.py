@@ -601,9 +601,12 @@ def _parse_game_date(date_with_day: str, season_id: str) -> str | None:
     try:
         from datetime import datetime as _dt
 
-        parsed = _dt.strptime(date_str, "%b %d")
-        year = start_year if parsed.month >= 9 else start_year + 1
-        return _dt(year, parsed.month, parsed.day).strftime("%Y-%m-%d")
+        # Pick the year from the month first, then parse the full date with
+        # it: strptime without a year assumes 1900, which rejects Feb 29
+        # (and is deprecated from Python 3.15).
+        month = _dt.strptime(date_str.split()[0], "%b").month
+        year = start_year if month >= 9 else start_year + 1
+        return _dt.strptime(f"{date_str} {year}", "%b %d %Y").strftime("%Y-%m-%d")
     except ValueError:
         return None
 

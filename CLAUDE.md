@@ -55,11 +55,15 @@ pip show supabase
 
 This should report `Version: 2.31.0` (or whatever `requirements.txt` currently pins). If it reports something older (e.g. `2.3.4`), the venv is either not activated or out of sync — stop and flag this before proceeding, rather than silently running against a stale/global interpreter. Do not assume a passing or failing test result reflects the real dependency state without this check first — a stale environment can produce misleading import errors that look like code bugs but are actually local environment drift (this happened once already, in Session 42).
 
-If the venv needs activating:
+CI runs Python 3.11 (`.python-version`) with `requirements.txt` plus the pinned test/lint tools in `requirements-dev.txt`. Build the venv from the same versions so local results match CI:
 
 ```
-.venv\Scripts\Activate.ps1
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
 ```
+
+If the venv needs activating: `source .venv/bin/activate` (macOS/Linux) or `.venv\Scripts\Activate.ps1` (Windows). `ruff --version` should match the pin in `requirements-dev.txt`; a globally installed ruff of a different version can format differently than CI.
 
 If it's active but out of sync with `requirements.txt`, ask before running `pip install -r requirements.txt` rather than assuming it's safe to just sync silently.
 

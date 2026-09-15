@@ -15,6 +15,7 @@ import sys
 from collections import defaultdict
 
 from db import NHL_SEASON, get_client
+from pipeline_common import select_all
 
 
 def _time_to_seconds(t: str | None) -> int:
@@ -31,14 +32,16 @@ def main():
     sb = get_client()
     season = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
 
-    r = (
-        sb.table("game_scoring")
-        .select("game_id, team, scorer_id, period, time_in_period")
-        .eq("season", season)
-        .neq("period", 5)  # exclude shootout, matches milestones.py convention
-        .execute()
+    # Paged: a season has ~9,000 goals, past Supabase's 1,000-row cap.
+    goals = select_all(
+        lambda: (
+            sb.table("game_scoring")
+            .select("id, game_id, team, scorer_id, period, time_in_period")
+            .eq("season", season)
+            .neq("period", 5)  # exclude shootout, matches milestones.py convention
+        ),
+        order="id",
     )
-    goals = r.data or []
     if not goals:
         print(f"No goals found for season={season}")
         return
