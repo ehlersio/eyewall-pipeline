@@ -15,10 +15,9 @@ regenerate blindly. After an intended change:
     UPDATE_GOLDEN=1 pytest test_hockeytech_characterization.py
 
 Game 1002's HockeyTech responses are deliberately plain JSON (no JSONP
-wrapper) with a "(" inside a value. AHL's box-score/shot/penalty-shot
-fetchers strip a JSONP wrapper by slicing from the first "(" to the last
-")", which corrupts that response; ECHL's only strip a real wrapper. The
-golden files record that difference as current behavior.
+wrapper) with a "(" inside a value. The box-score/shot/penalty-shot
+fetchers must only strip a real wrapper; AHL's used to slice from the first
+"(" to the last ")", which corrupted this response and skipped the game.
 """
 
 import json

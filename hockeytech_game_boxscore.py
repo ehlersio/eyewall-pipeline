@@ -81,7 +81,7 @@ def _hockeytech_get(lg: League, view: str, game_id: int):
                 log.warning(f"    {view} {game_id} status {r.status_code}")
                 last_err = f"status {r.status_code}"
                 continue
-            data = json.loads(strip_jsonp(lg, r.text.strip()))
+            data = json.loads(strip_jsonp(r.text.strip()))
             if isinstance(data, dict) and "error" in data:
                 log.warning(f"    {view} {game_id} error: {data['error']}")
                 return None
