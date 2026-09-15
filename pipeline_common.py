@@ -93,3 +93,36 @@ def hockeytech_statview_get(
         if attempt < retries - 1:
             time.sleep(2**attempt)
     raise FetchError(f"HT {p.get('view')}: failed after {retries} attempts ({last_err})")
+
+
+def select_all(
+    build, order: str = "game_id", page_size: int = 1000, max_pages: int = 1000
+) -> list[dict]:
+    """Every row a Supabase query matches, not just the first page.
+
+    PostgREST returns at most the project's row cap (1,000 today, 999 at one
+    point -- see moneypuck.py) per request, and a bare .execute() silently
+    truncates anything past it. That capped the per-game pipelines' "which
+    games are completed / already processed / skipped" lookups, leaving
+    later games never ingested and making every run re-ingest games it had
+    already done (2026-09). This pages with .range() over a stable .order()
+    until a page comes back empty, so it's right whatever the cap is.
+
+    `build` returns a fresh query builder on each call (builders are
+    mutable), e.g.
+        select_all(lambda: sb.table("ahl_game_log").select("game_id").eq("season_id", 90))
+
+    Raises RuntimeError after `max_pages` non-empty pages (a million rows at
+    the default) rather than looping forever on a builder that ignores
+    .range() -- no season's table is anywhere near that.
+    """
+    rows, offset = [], 0
+    for _ in range(max_pages):
+        page = build().order(order).range(offset, offset + page_size - 1).execute().data or []
+        if not page:
+            return rows
+        rows.extend(page)
+        offset += len(page)
+    raise RuntimeError(
+        f"select_all: still getting rows after {max_pages} pages -- is .range() ignored?"
+    )

@@ -31,7 +31,7 @@ from supabase import create_client
 
 import hockeytech_stats
 from hockeytech_leagues import HOCKEYTECH_BASE, League, strip_jsonp
-from pipeline_common import FetchError
+from pipeline_common import FetchError, select_all
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -275,34 +275,38 @@ def ingest_game(lg: League, sb, gid: int, season_id: str, season_type: str) -> t
 
 
 def get_completed_games(lg: League, sb, season_id: str) -> list:
-    result = (
-        sb.table(f"{lg.key}_game_log")
-        .select("game_id")
-        .eq("season_id", int(season_id))
-        .eq("game_state", "Final")
-        .execute()
+    return select_all(
+        lambda: (
+            sb.table(f"{lg.key}_game_log")
+            .select("game_id")
+            .eq("season_id", int(season_id))
+            .eq("game_state", "Final")
+        )
     )
-    return result.data or []
 
 
 def get_skipped_games(lg: League, sb) -> set:
-    result = (
-        sb.table(f"{lg.key}_skipped_games")
-        .select("game_id")
-        .eq("pipeline", _pipeline(lg))
-        .execute()
-    )
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: (
+                sb.table(f"{lg.key}_skipped_games").select("game_id").eq("pipeline", _pipeline(lg))
+            )
+        )
+    }
 
 
 def get_processed_games(lg: League, sb, season_id: str) -> set:
-    result = (
-        sb.table(f"{lg.key}_skater_game_box")
-        .select("game_id")
-        .eq("season_id", int(season_id))
-        .execute()
-    )
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: (
+                sb.table(f"{lg.key}_skater_game_box")
+                .select("game_id")
+                .eq("season_id", int(season_id))
+            )
+        )
+    }
 
 
 def run(lg: League, season_id: str | None = None) -> None:

@@ -25,6 +25,64 @@
             "Final"
           ],
           {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_game_log"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id,home_team_id,away_team_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            73
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "game_state",
+            "Final"
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            5,
+            1004
+          ],
+          {}
         ]
       ],
       "table": "echl_game_log"
@@ -45,6 +103,56 @@
             "echl_shot_events"
           ],
           {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_skipped_games"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "pipeline",
+            "echl_shot_events"
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            1,
+            1000
+          ],
+          {}
         ]
       ],
       "table": "echl_skipped_games"
@@ -63,6 +171,56 @@
           [
             "season_id",
             73
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_shot_events"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            73
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            1,
+            1000
           ],
           {}
         ]

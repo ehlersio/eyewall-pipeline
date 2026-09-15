@@ -48,7 +48,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError
+from pipeline_common import FetchError, select_all
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -234,26 +234,32 @@ def extract_penalty_shots(game_summary: dict) -> list[dict]:
 
 
 def get_completed_games(sb, season_id: str) -> list:
-    result = (
-        sb.table("pwhl_game_log")
-        .select("game_id")
-        .eq("season_id", int(season_id))
-        .eq("game_state", "Final")
-        .execute()
+    return select_all(
+        lambda: (
+            sb.table("pwhl_game_log")
+            .select("game_id")
+            .eq("season_id", int(season_id))
+            .eq("game_state", "Final")
+        )
     )
-    return result.data or []
 
 
 def get_skipped_games(sb) -> set:
-    result = sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", PIPELINE).execute()
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", PIPELINE)
+        )
+    }
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    result = (
-        sb.table("pwhl_penalty_shots").select("game_id").eq("season_id", int(season_id)).execute()
-    )
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: sb.table("pwhl_penalty_shots").select("game_id").eq("season_id", int(season_id))
+        )
+    }
 
 
 def mark_skipped(sb, game_id: int, reason: str) -> None:
