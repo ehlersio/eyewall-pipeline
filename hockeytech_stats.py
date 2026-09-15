@@ -227,6 +227,24 @@ def _parse_height_inches(height_str) -> int | None:
     return feet * 12 + inches
 
 
+def _one_row_per_player(roster: list, team_id: str) -> list[dict]:
+    """One roster row per player_id. A player with two stints on the same team
+    in a season is listed once per stint (seen live in AHL season 90: Hunter
+    Johannes on LV, Danton Heinen on CLE, Tyson Feist on BAK), and sending
+    both in one {league}_players upsert fails the whole batch ("ON CONFLICT
+    DO UPDATE command cannot affect row a second time"). Keeps the current
+    stint's row -- latest_team_id is this team -- else the last one listed."""
+    by_player: dict = {}
+    for row in roster:
+        if not isinstance(row, dict) or not row.get("player_id"):
+            continue
+        kept = by_player.get(row["player_id"])
+        current = str(row.get("latest_team_id")) == str(team_id)
+        if kept is None or current or str(kept.get("latest_team_id")) != str(team_id):
+            by_player[row["player_id"]] = row
+    return list(by_player.values())
+
+
 def fetch_roster(lg: League, sb, season_id: str) -> None:
     """Fetch every team's roster and upsert to {league}_players.
 
@@ -248,6 +266,7 @@ def fetch_roster(lg: League, sb, season_id: str) -> None:
         if not roster or not isinstance(roster, list) or not roster[0]:
             log.warning(f"  Empty roster for {team_code}")
             continue
+        roster = _one_row_per_player(roster, team_id)
 
         players_to_upsert = []
         for row in roster:
@@ -316,7 +335,9 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
                 "context": "overall",
                 "position": "skaters",
                 "rookie": "false",
-                "limit": "1000",
+                # The feed returns at most `limit` rows, and a season has
+                # more than 1,000 skaters (AHL 2025-26: 1,234; ECHL: 1,195).
+                "limit": "5000",
                 "sort": "points",
             },
         )
@@ -395,7 +416,8 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
                 "context": "overall",
                 "position": "goalies",
                 "rookie": "false",
-                "limit": "200",
+                # Well above a season's goalie count (2025-26: 135 AHL, 126 ECHL).
+                "limit": "1000",
                 "sort": "wins",
             },
         )
