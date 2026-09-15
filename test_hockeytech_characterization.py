@@ -137,6 +137,10 @@ def skaters(L):
          "team_name": L.name_a, "games_played": "40", "goals": "15", "assists": "20",
          "points": "35", "plus_minus": "8", "penalty_minutes": "12", "shots": "110",
          "power_play_goals": "5", "short_handed_goals": "1"},
+        # team_code and team_name disagree: AHL resolves the team by code
+        # (team_b), ECHL by name (team_a).
+        {"player_id": "6682", "name": "Split Row", "position": "D", "team_code": L.code_b,
+         "team_name": L.name_a, "games_played": "12", "goals": "1"},
         {"player_id": "6690", "name": "Madonna", "position": "LW", "team_code": "XXX",
          "team_name": "Nowhere", "games_played": "", "goals": None},
         {"name": "Missing Id"},
