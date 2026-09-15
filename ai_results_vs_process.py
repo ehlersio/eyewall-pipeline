@@ -23,7 +23,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -32,11 +31,12 @@ from ai_context import get_results_vs_process_context
 from ai_persona import build_results_vs_process_prompt, get_system_prompt
 from ai_scouting import ALL_TEAMS, LOCALES, generate
 from db import get_client
+from season_lookup import get_nhl_season
 
-# NOTE: kept as a local string constant, same reasoning as ai_scouting.py's
-# NHL_SEASON -- this is the argparse --season default, and argparse doesn't
-# coerce `default=`, only explicit CLI input.
-NHL_SEASON = os.environ.get("NHL_SEASON", "20252026")
+# NOTE: a string, same reasoning as ai_scouting.py's NHL_SEASON -- this is
+# the argparse --season default, and argparse doesn't coerce `default=`,
+# only explicit CLI input. Live-resolved like db.NHL_SEASON.
+NHL_SEASON = str(get_nhl_season())
 
 NARRATIVE_TYPE = "results_vs_process"
 

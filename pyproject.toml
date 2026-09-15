@@ -41,6 +41,12 @@ exclude = [
 [tool.ruff.lint.isort]
 known-first-party = ["db"]  # treat db.py as a first-party import
 
+[tool.pytest.ini_options]
+# test_*.py only. pytest's default also collects *_test.py, which picks up
+# ai_test.py/ai_test_summary.py -- manual scripts that call a local Ollama
+# server at import time, so a bare `pytest` died during collection.
+python_files = ["test_*.py"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

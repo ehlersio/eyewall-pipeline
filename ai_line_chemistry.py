@@ -27,7 +27,6 @@ Usage:
 """
 
 import argparse
-import os
 import time
 from datetime import UTC, datetime
 
@@ -36,11 +35,12 @@ from ai_persona import build_line_chemistry_prompt, get_system_prompt
 from ai_scouting import LOCALES, generate
 from db import get_client
 from line_combinations import ALL_TEAMS
+from season_lookup import get_nhl_season
 
-# NOTE: kept as a local string constant, same reasoning as ai_scouting.py's
-# NHL_SEASON -- this is the argparse --season default, and argparse doesn't
-# coerce `default=`, only explicit CLI input.
-NHL_SEASON = os.environ.get("NHL_SEASON", "20252026")
+# NOTE: a string, same reasoning as ai_scouting.py's NHL_SEASON -- this is
+# the argparse --season default, and argparse doesn't coerce `default=`,
+# only explicit CLI input. Live-resolved like db.NHL_SEASON.
+NHL_SEASON = str(get_nhl_season())
 
 NARRATIVE_TYPE = "line_chemistry"
 

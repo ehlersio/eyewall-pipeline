@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -24,6 +23,7 @@ from ai_client import generate
 from ai_context import _fmt_toi, get_goalie_context, get_player_context
 from ai_persona import build_player_scouting_prompt, get_system_prompt
 from db import get_client
+from season_lookup import get_nhl_season
 
 # French/English localization, Track B Phase B1. Every DB read/write below
 # takes a locale so an 'en' and 'fr' blurb can coexist for the same
@@ -33,12 +33,13 @@ from db import get_client
 # as before.
 LOCALES = ("en", "fr")
 
-# NOTE: kept as a local string constant rather than importing db.NHL_SEASON
-# (which is int-typed) — this is used as the argparse --season default
-# below, and argparse doesn't coerce `default=`, only explicit CLI input.
-# Importing the int would make the default type inconsistent with what
-# --season <value> produces on the command line.
-NHL_SEASON = os.environ.get("NHL_SEASON", "20252026")
+# NOTE: a string, not db.NHL_SEASON's int — this is used as the argparse
+# --season default below, and argparse doesn't coerce `default=`, only
+# explicit CLI input. Importing the int would make the default type
+# inconsistent with what --season <value> produces on the command line.
+# Live-resolved (same source as db.NHL_SEASON, falls back to the NHL_SEASON
+# env var) so it follows the season flip without a manual secret change.
+NHL_SEASON = str(get_nhl_season())
 
 supabase = get_client()
 

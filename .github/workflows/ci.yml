@@ -1,0 +1,39 @@
+name: CI
+
+# Lint + unit tests on every PR. The nightly workflows only run ruff (and
+# only on their schedule), so before this nothing ran the pytest suite
+# outside a local machine.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest==9.1.1 ruff==0.15.20
+
+      - name: Lint (Ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Unit tests (pytest)
+        # db.py reads these at import time. Tests mock every Supabase call,
+        # so placeholders are enough -- no real secrets in PR runs.
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_KEY: placeholder
+        run: pytest -q

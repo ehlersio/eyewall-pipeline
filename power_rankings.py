@@ -34,12 +34,13 @@ from dotenv import load_dotenv
 from supabase import ClientOptions, create_client
 
 from ai_client import generate
+from season_lookup import get_nhl_season
 
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
+NHL_SEASON = get_nhl_season()  # live-resolved; falls back to the NHL_SEASON env var
 
 ALL_TEAMS = [
     "ANA",
