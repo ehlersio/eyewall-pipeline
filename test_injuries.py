@@ -25,10 +25,11 @@ from injuries import (
 )
 
 
-def _fake_client(players_by_team):
+def _fake_client(players_by_team, stored_rows=0):
     """Fake Supabase client: players_by_team = {"CAR": [{"id":1,"name":"Eric Robinson"}, ...]}.
     Tracks delete/insert calls on player_injuries and upsert calls on
-    player_injury_history for assertions."""
+    player_injury_history for assertions. `stored_rows` is what a count
+    read of player_injuries reports, for the feed-collapse guard."""
     client = MagicMock()
     inserted = []
     upserts = []
@@ -63,7 +64,9 @@ def _fake_client(players_by_team):
             q.delete.side_effect = delete
             q.gte.side_effect = gte
             q.insert.side_effect = insert
-            q.execute.return_value = MagicMock(data=None)
+            q.select.side_effect = lambda *_a, **_k: q
+            q.limit.side_effect = lambda *_a, **_k: q
+            q.execute.return_value = MagicMock(data=None, count=stored_rows)
         elif name == "player_injury_history":
 
             def upsert(rows, on_conflict=None):
@@ -274,3 +277,47 @@ class TestBuildHistoryRows:
         history = build_history_rows(rows, "2026-09-12")
         assert [(r["team"], r["status"]) for r in history] == [("CAR", "out"), ("BOS", "out")]
         assert all(r["snapshot_date"] == "2026-09-12" for r in history)
+
+
+class TestFeedCollapseGuard:
+    """ESPN's feed returned zero teams on 2026-09-15 and the run wiped all 86
+    stored rows, blanking every team's injury report. A collapse now leaves
+    the stored rows alone."""
+
+    @patch("injuries.fetch_espn_injuries", return_value=[])
+    def test_an_empty_feed_keeps_the_stored_rows_and_writes_no_snapshot(self, _mock_fetch):
+        client = _fake_client({}, stored_rows=86)
+        with patch("injuries.get_client", return_value=client):
+            result = run(dry_run=False)
+
+        assert result is None
+        assert client._state["deleted"] is False
+        assert client._inserted == []
+        assert client._upserts == []
+
+    @patch("injuries.fetch_espn_injuries", return_value=ESPN_PAYLOAD_TWO_TEAMS)
+    def test_a_near_empty_feed_is_a_collapse_too(self, _mock_fetch):
+        # 2 rows against 86 stored -- the same failure with one straggler
+        # left in the feed, which is what ESPN actually served the next day.
+        client = _fake_client({"CAR": [{"id": 8480762, "name": "Eric Robinson"}]}, stored_rows=86)
+        with patch("injuries.get_client", return_value=client):
+            assert run(dry_run=False) is None
+        assert client._state["deleted"] is False
+
+    @patch("injuries.fetch_espn_injuries", return_value=ESPN_PAYLOAD_TWO_TEAMS)
+    def test_normal_churn_still_writes(self, _mock_fetch):
+        # 2 rows against 4 stored is ordinary movement, not a collapse.
+        client = _fake_client({"CAR": [{"id": 8480762, "name": "Eric Robinson"}]}, stored_rows=4)
+        with patch("injuries.get_client", return_value=client):
+            assert run(dry_run=False) == 2
+        assert client._state["deleted"] is True
+        assert len(client._inserted) == 2
+
+    @patch("injuries.fetch_espn_injuries", return_value=[])
+    def test_an_empty_table_is_not_protected(self, _mock_fetch):
+        # First run on a fresh table, or a genuinely empty league-wide
+        # report: nothing to protect, so the write proceeds as before.
+        client = _fake_client({}, stored_rows=0)
+        with patch("injuries.get_client", return_value=client):
+            assert run(dry_run=False) == 0
+        assert client._state["deleted"] is True

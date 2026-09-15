@@ -56,6 +56,17 @@ import requests
 from db import get_client
 
 ESPN_INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries"
+
+# ESPN's feed emptied itself once (2026-09-15: 0 teams, where the night
+# before had 86 rows across 27 teams, and its per-team endpoints returned
+# nothing either). run()'s delete-then-insert took that at face value and
+# wiped the table, so every team's injury report went blank in the app.
+# A feed that collapses to a small fraction of what's already stored is
+# treated as broken rather than as "everyone got healthy": the existing
+# rows stay, and no history snapshot is written for that day. Real
+# day-to-day churn is nothing like this (86 -> 70 -> 86 over that week).
+FEED_COLLAPSE_RATIO = 0.25  # new rows below this share of stored rows == bad feed
+FEED_COLLAPSE_MIN_STORED = 20  # ...but only once there's a real table to protect
 # No custom User-Agent here, unlike every other third-party fetch in this
 # codebase (nhl_stats.py/moneypuck.py etc. all send an honest identifying
 # UA). Confirmed live: ESPN's endpoint returns 403 for this module's own
@@ -270,6 +281,16 @@ def run(dry_run=False):
     print(f"  {len(rows)} injury rows ({len(unmatched)} unmatched to a player_id)")
     for u in unmatched:
         print(f"  WARN: no players-table match for {u}")
+
+    stored = (
+        client.table("player_injuries").select("id", count="exact").limit(1).execute().count or 0
+    )
+    if stored >= FEED_COLLAPSE_MIN_STORED and len(rows) < stored * FEED_COLLAPSE_RATIO:
+        print(
+            f"  WARN: ESPN returned {len(rows)} rows against {stored} stored -- "
+            "treating this as a broken feed, keeping the existing rows and writing no snapshot"
+        )
+        return None
 
     snap = snapshot_date()
     history = build_history_rows(rows, snap)
