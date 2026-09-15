@@ -335,7 +335,9 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
                 "context": "overall",
                 "position": "skaters",
                 "rookie": "false",
-                "limit": "1000",
+                # The feed returns at most `limit` rows, and a season has
+                # more than 1,000 skaters (AHL 2025-26: 1,234; ECHL: 1,195).
+                "limit": "5000",
                 "sort": "points",
             },
         )
@@ -414,7 +416,8 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
                 "context": "overall",
                 "position": "goalies",
                 "rookie": "false",
-                "limit": "200",
+                # Well above a season's goalie count (2025-26: 135 AHL, 126 ECHL).
+                "limit": "1000",
                 "sort": "wins",
             },
         )
