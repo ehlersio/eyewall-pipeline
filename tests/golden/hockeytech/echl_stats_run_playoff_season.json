@@ -1,0 +1,783 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "site_id": "0",
+        "view": "seasons"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "74",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "66",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "10",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "107",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "5",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "8",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "60",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "108",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "52",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "11",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "65",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "79",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "50",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "68",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "82",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "114",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "76",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "61",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "70",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "17",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "102",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "18",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "106",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "21",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "113",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "99",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "99",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "99",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "71",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "25",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "72",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "76",
+        "site_id": "0",
+        "team_id": "77",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "1000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "76",
+        "site_id": "0",
+        "sort": "points",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "200",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "76",
+        "site_id": "0",
+        "sort": "wins",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "conference_id": "-1",
+        "context": "overall",
+        "division_id": "-1",
+        "feed": "statviewfeed",
+        "groupTeamsBy": "division",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "season": "76",
+        "site_id": "0",
+        "sort": "points",
+        "special": "false",
+        "view": "teams"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "conference_id": "-1",
+        "context": "overall",
+        "division_id": "-1",
+        "feed": "statviewfeed",
+        "groupTeamsBy": "division",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "season": "76",
+        "site_id": "0",
+        "sort": "points",
+        "special": "true",
+        "view": "teams"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "site_id": "0",
+        "view": "seasons"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "5000",
+        "numberofdaysahead": "159",
+        "numberofdaysback": "3",
+        "season_id": "76",
+        "site_id": "0",
+        "view": "scorebar"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "birth_date": "2001-03-04",
+          "birth_place": "Toronto, ON",
+          "first_name": "Alex",
+          "height_inches": 73,
+          "jersey_number": 19,
+          "last_name": "Skater",
+          "player_id": 6681,
+          "position": "C",
+          "shoots": "L",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": 190
+        },
+        {
+          "birth_date": null,
+          "birth_place": "Oslo, NO",
+          "first_name": "Gus",
+          "height_inches": null,
+          "jersey_number": null,
+          "last_name": "Keeper",
+          "player_id": 7001,
+          "position": "G",
+          "shoots": "",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": null
+        }
+      ],
+      "table": "echl_players"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "first_name": "Alex",
+          "last_name": "Skater",
+          "player_id": 6681,
+          "position": "C",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "first_name": "Madonna",
+          "last_name": "",
+          "player_id": 6690,
+          "position": "LW",
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_players"
+    },
+    {
+      "on_conflict": "player_id,team_id,season_id,season_type",
+      "rows": [
+        {
+          "assists": 0,
+          "goals": 0,
+          "gp": 0,
+          "pim": 0,
+          "player_id": 6690,
+          "plus_minus": 0,
+          "points": 0,
+          "pp_goals": 0,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "sh_goals": 0,
+          "shots": 0,
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 20,
+          "goals": 15,
+          "gp": 40,
+          "pim": 12,
+          "player_id": 6681,
+          "plus_minus": 8,
+          "points": 35,
+          "pp_goals": 5,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "sh_goals": 1,
+          "shots": 110,
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_player_seasons"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "first_name": "Backup",
+          "last_name": "",
+          "player_id": 7002,
+          "position": "G",
+          "team_id": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "first_name": "Gus",
+          "last_name": "Keeper",
+          "player_id": 7001,
+          "position": "G",
+          "team_id": 99,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_players"
+    },
+    {
+      "on_conflict": "player_id,team_id,season_id,season_type",
+      "rows": [
+        {
+          "gaa": 2.61,
+          "goals_against": 80,
+          "gp": 30,
+          "losses": 9,
+          "ot_losses": 4,
+          "player_id": 7001,
+          "saves": 820,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "shots_against": 900,
+          "shutouts": 2,
+          "sv_pct": 0.911,
+          "team_id": 99,
+          "toi": "1800:00",
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 17
+        },
+        {
+          "gaa": null,
+          "goals_against": 0,
+          "gp": 0,
+          "losses": 0,
+          "ot_losses": 0,
+          "player_id": 7002,
+          "saves": 0,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "shots_against": 0,
+          "shutouts": 0,
+          "sv_pct": null,
+          "team_id": null,
+          "toi": null,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 0
+        }
+      ],
+      "table": "echl_goalie_seasons"
+    },
+    {
+      "on_conflict": "team_id,season_id,season_type",
+      "rows": [
+        {
+          "goals_against": 0,
+          "goals_for": 0,
+          "gp": 40,
+          "losses": 17,
+          "ot_losses": 4,
+          "pk_goals_against": 0,
+          "pk_pct": null,
+          "points": 41,
+          "pp_goals": 0,
+          "pp_opportunities": 0,
+          "pp_pct": null,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "sh_goals_against": 0,
+          "sh_goals_for": 0,
+          "shootout_losses": 0,
+          "team_id": 99,
+          "times_shorthanded": 0,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 18
+        },
+        {
+          "goals_against": 105,
+          "goals_for": 130,
+          "gp": 40,
+          "losses": 12,
+          "ot_losses": 3,
+          "pk_goals_against": 20,
+          "pk_pct": 0.83,
+          "points": 52,
+          "pp_goals": 30,
+          "pp_opportunities": 140,
+          "pp_pct": 0.215,
+          "season_id": 76,
+          "season_type": "playoffs",
+          "sh_goals_against": 2,
+          "sh_goals_for": 3,
+          "shootout_losses": 1,
+          "team_id": 8,
+          "times_shorthanded": 120,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 24
+        }
+      ],
+      "table": "echl_team_seasons"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "100",
+        "numberofdaysahead": "1",
+        "numberofdaysback": "1",
+        "site_id": "0",
+        "view": "scorebar"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": []
+}

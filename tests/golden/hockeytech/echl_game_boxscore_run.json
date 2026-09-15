@@ -1,0 +1,450 @@
+{
+  "posts": [],
+  "reads": [
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            73
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "game_state",
+            "Final"
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_game_log"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "pipeline",
+            "echl_game_boxscore"
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_skipped_games"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            73
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_skater_game_box"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6681,
+              6682,
+              6701,
+              7001,
+              7003
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_players"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6681,
+              6682,
+              6701,
+              7001,
+              7003
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_players"
+    }
+  ],
+  "requests": [
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "site_id": "0",
+        "view": "seasons"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "statviewfeed",
+        "game_id": "1001",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "statviewfeed",
+        "game_id": "1002",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "statviewfeed",
+        "game_id": "1006",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 6682,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 6701,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7001,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7003,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_players"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1001,
+          "goals": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 6682,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": null,
+          "position_raw": "XX",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1001,
+          "goals": 1,
+          "jersey_number": 11,
+          "penalty_minutes": 0,
+          "player_id": 6701,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": "F",
+          "position_raw": "RW",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 99,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 1,
+          "game_id": 1001,
+          "goals": 2,
+          "jersey_number": 19,
+          "penalty_minutes": 2,
+          "player_id": 6681,
+          "plus_minus": 2,
+          "points": 3,
+          "position_group": "F",
+          "position_raw": "C",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 5,
+          "starting": true,
+          "status": "",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_skater_game_box"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1001,
+          "goals": 0,
+          "goals_against": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 7001,
+          "points": 0,
+          "saves": 0,
+          "season_id": 73,
+          "season_type": "regular",
+          "shots_against": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 99,
+          "toi_seconds": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1001,
+          "goals": 0,
+          "goals_against": 2,
+          "jersey_number": 31,
+          "penalty_minutes": 0,
+          "player_id": 7003,
+          "points": 0,
+          "saves": 28,
+          "season_id": 73,
+          "season_type": "regular",
+          "shots_against": 30,
+          "starting": true,
+          "status": "",
+          "team_id": 8,
+          "toi_seconds": 3589,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_goalie_game_box"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 6682,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 6701,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7001,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7003,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_players"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 6682,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": null,
+          "position_raw": "XX",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 1,
+          "jersey_number": 11,
+          "penalty_minutes": 0,
+          "player_id": 6701,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": "F",
+          "position_raw": "RW",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 99,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 1,
+          "game_id": 1002,
+          "goals": 2,
+          "jersey_number": 19,
+          "penalty_minutes": 2,
+          "player_id": 6681,
+          "plus_minus": 2,
+          "points": 3,
+          "position_group": "F",
+          "position_raw": "C",
+          "season_id": 73,
+          "season_type": "regular",
+          "shots": 5,
+          "starting": true,
+          "status": "",
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_skater_game_box"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 0,
+          "goals_against": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 7001,
+          "points": 0,
+          "saves": 0,
+          "season_id": 73,
+          "season_type": "regular",
+          "shots_against": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 99,
+          "toi_seconds": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 0,
+          "goals_against": 2,
+          "jersey_number": 31,
+          "penalty_minutes": 0,
+          "player_id": 7003,
+          "points": 0,
+          "saves": 28,
+          "season_id": 73,
+          "season_type": "regular",
+          "shots_against": 30,
+          "starting": true,
+          "status": "",
+          "team_id": 8,
+          "toi_seconds": 3589,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_goalie_game_box"
+    },
+    {
+      "on_conflict": "game_id,pipeline",
+      "rows": [
+        {
+          "game_id": 1006,
+          "pipeline": "echl_game_boxscore",
+          "reason": "no_gamesummary",
+          "skipped_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "echl_skipped_games"
+    }
+  ]
+}
