@@ -17,6 +17,7 @@ from ai_context import build_game_summary_context
 from ai_persona import build_game_card_prompt, build_game_summary_prompt, get_system_prompt
 from ai_scouting import LOCALES
 from db import NHL_SEASON, get_client
+from pipeline_common import select_all
 
 supabase = get_client()
 
@@ -64,15 +65,16 @@ def save_summary(
 
 
 def get_completed_games(season: int) -> list:
-    """Returns all completed games from game_log for the season."""
-    rows = (
-        supabase.table("game_log")
-        .select("game_id, season, home_team, away_team, game_date, game_type")
-        .eq("season", season)
-        .order("game_date", desc=False)
-        .execute()
-        .data
+    """Returns all completed games from game_log for the season, by date."""
+    # Paged: game_log has two rows per game, well past Supabase's 1,000-row cap.
+    rows = select_all(
+        lambda: (
+            supabase.table("game_log")
+            .select("game_id, season, home_team, away_team, game_date, game_type")
+            .eq("season", season)
+        )
     )
+    rows.sort(key=lambda r: r["game_date"])
     # Deduplicate — game_log has one row per team per game
     seen = set()
     games = []

@@ -15,7 +15,7 @@ from collections import defaultdict
 import requests
 
 from db import NHL_SEASON, get_client, upsert
-from pipeline_common import FetchError
+from pipeline_common import FetchError, select_all
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -359,6 +359,11 @@ def fetch_schedule(team: str, season: int) -> list:
     return data.get("games", [])
 
 
+def _known_player_ids(client) -> set:
+    """Every player id already in `players` (paged -- it's past 1,000 rows)."""
+    return {r["id"] for r in select_all(lambda: client.table("players").select("id"), order="id")}
+
+
 def run(season: int = NHL_SEASON):
     client = get_client()
     print(f"\n=== NHL Stats Pipeline — Season {season} ===")
@@ -420,7 +425,7 @@ def run(season: int = NHL_SEASON):
                 }
             )
         # Ensure all players exist — fetch names from NHL API for any missing
-        known_ids = {r["id"] for r in client.table("players").select("id").execute().data}
+        known_ids = _known_player_ids(client)
         missing_ids = [s["playerId"] for s in summary if s["playerId"] not in known_ids]
         if missing_ids:
             print(f"  Fetching names for {len(missing_ids)} unlisted players...")
