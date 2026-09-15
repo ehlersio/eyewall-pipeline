@@ -95,6 +95,32 @@ def get_pwhl_season() -> dict:
         return fallback
 
 
+def get_hockeytech_season(league: str, default_season_id: int) -> dict:
+    """Returns {'season_id': int, 'season_type': str} for "ahl" or "echl".
+
+    The Worker resolves it (seasons.js resolveAHLSeason/resolveECHLSeason:
+    the most recent career="1" season that has already started, not simply
+    the max season_id, with a manual KV override). Falls back to the
+    {LEAGUE}_SEASON env var, then default_season_id, as a regular season if
+    the Worker is unreachable or has no entry for the league. Uses `or`, as
+    get_pwhl_season() does, so an empty-string secret doesn't crash int().
+    """
+    fallback = {
+        "season_id": int(os.environ.get(f"{league.upper()}_SEASON") or default_season_id),
+        "season_type": "regular",
+    }
+    try:
+        config = _fetch_config()
+    except FetchError as e:
+        print(f"  WARNING: {e} — using env var fallback")
+        return fallback
+    try:
+        entry = config[league]
+        return {"season_id": int(entry["seasonId"]), "season_type": entry["seasonType"]}
+    except (KeyError, TypeError, ValueError):
+        return fallback
+
+
 def _fetch_season_types() -> dict:
     """Fetches the full PWHL season_id -> season_type map from the Worker's
     /config/seasons/pwhl-types endpoint. Cached for the rest of this

@@ -120,16 +120,9 @@
   ],
   "requests": [
     {
-      "params": {
-        "client_code": "echl",
-        "feed": "modulekit",
-        "key": "2c2b89ea7345cae8",
-        "lang": "en",
-        "site_id": "0",
-        "view": "seasons"
-      },
-      "referer": "https://echl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
+      "params": {},
+      "referer": null,
+      "url": "https://worker.test/config/seasons"
     },
     {
       "params": {

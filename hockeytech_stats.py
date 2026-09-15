@@ -8,9 +8,11 @@ Structurally mirrors pwhl_stats.py (same vendor, same statviewfeed
 `sections[].data[].row` shape), with real field/param differences called
 out below -- see docs/hockeytech-ahl-api-notes.md for the investigation.
 
-Season resolution queries HockeyTech's own live `seasons` feed directly,
-with a {LABEL}_SEASON env var fallback -- not season_lookup.py's
-Worker-backed pattern that pwhl_stats.py/nhl_stats.py use.
+The current season comes from the Worker's /config/seasons through
+season_lookup.py, as for pwhl_stats.py/nhl_stats.py. The type of an
+arbitrary season_id (resolve_season_type) and a season's date window still
+come from HockeyTech's own `seasons` feed -- the Worker has no AHL/ECHL
+equivalent of /config/seasons/pwhl-types.
 
 Response structure:
     feed=statviewfeed views (players, teams) use PWHL's
@@ -32,6 +34,7 @@ from supabase import create_client
 
 from hockeytech_leagues import HOCKEYTECH_BASE, League
 from pipeline_common import FetchError, hockeytech_statview_get
+from season_lookup import get_hockeytech_season
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -148,40 +151,18 @@ def _fetch_seasons(lg: League) -> list[dict]:
 
 
 def resolve_current_season(lg: League) -> dict:
-    """Returns {"season_id": int, "season_type": str}, live-resolved from
-    HockeyTech's seasons feed, falling back to the {LABEL}_SEASON env var
-    (default: the league's most recent season with real data) if the feed is
-    unreachable.
+    """Returns {"season_id": int, "season_type": str} for the current season,
+    from the Worker's /config/seasons (see season_lookup.get_hockeytech_season)
+    -- the same answer the frontend gets. Falls back to the {LABEL}_SEASON
+    env var, then lg.fallback_season, if the Worker is unreachable.
 
-    Picks the most recent career="1" season whose start_date has already
-    passed -- NOT simply the max season_id. The feed's highest career=1
-    season (e.g. AHL 94, "2026-27 Regular Season") can start in the future
-    and have zero games; taking it naively is the mistake
+    The Worker picks the most recent career="1" season whose start_date has
+    already passed -- NOT simply the max season_id. The feed's highest
+    career=1 season (e.g. AHL 94, "2026-27 Regular Season") can start in the
+    future and have zero games; taking it naively is the mistake
     docs/hockeytech-api-notes.md's "Season discrepancy" section documents.
     """
-    fallback = {
-        "season_id": int(os.environ.get(f"{lg.label}_SEASON") or str(lg.fallback_season)),
-        "season_type": "regular",
-    }
-    try:
-        seasons = _fetch_seasons(lg)
-    except FetchError as e:
-        log.warning(f"  Could not resolve live {lg.label} season, using fallback: {e}")
-        return fallback
-
-    today = datetime.now(UTC).date().isoformat()
-    started_career_seasons = [
-        s for s in seasons if s.get("career") == "1" and (s.get("start_date") or "9999") <= today
-    ]
-    if not started_career_seasons:
-        return fallback
-    latest = max(started_career_seasons, key=lambda s: int(s["season_id"]))
-    return {
-        "season_id": int(latest["season_id"]),
-        "season_type": _season_type_from_name(
-            latest.get("season_name", ""), latest.get("playoff", "0"), latest.get("career", "0")
-        ),
-    }
+    return get_hockeytech_season(lg.key, lg.fallback_season)
 
 
 def resolve_season_type(lg: League, season_id: str) -> str:
