@@ -94,6 +94,32 @@
         ]
       ],
       "table": "ahl_players"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6681,
+              6682,
+              6701,
+              7001,
+              7003
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_players"
     }
   ],
   "requests": [
@@ -114,32 +140,6 @@
         "client_code": "ahl",
         "feed": "statviewfeed",
         "game_id": "1001",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameSummary"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameSummary"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
         "key": "ccb91f29d6744675",
         "lang": "en",
         "league_id": "",
@@ -286,6 +286,135 @@
         {
           "assists": 0,
           "game_id": 1001,
+          "goals": 0,
+          "goals_against": 2,
+          "jersey_number": 31,
+          "penalty_minutes": 0,
+          "player_id": 7003,
+          "points": 0,
+          "saves": 28,
+          "season_id": 90,
+          "season_type": "regular",
+          "shots_against": 30,
+          "starting": true,
+          "status": "",
+          "team_id": 335,
+          "toi_seconds": 3589,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_goalie_game_box"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 6682,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 6701,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7001,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7003,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 6682,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": null,
+          "position_raw": "XX",
+          "season_id": 90,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 1,
+          "jersey_number": 11,
+          "penalty_minutes": 0,
+          "player_id": 6701,
+          "plus_minus": 0,
+          "points": 0,
+          "position_group": "F",
+          "position_raw": "RW",
+          "season_id": 90,
+          "season_type": "regular",
+          "shots": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 323,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 1,
+          "game_id": 1002,
+          "goals": 2,
+          "jersey_number": 19,
+          "penalty_minutes": 2,
+          "player_id": 6681,
+          "plus_minus": 2,
+          "points": 3,
+          "position_group": "F",
+          "position_raw": "C",
+          "season_id": 90,
+          "season_type": "regular",
+          "shots": 5,
+          "starting": true,
+          "status": "",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_skater_game_box"
+    },
+    {
+      "on_conflict": "game_id,player_id",
+      "rows": [
+        {
+          "assists": 0,
+          "game_id": 1002,
+          "goals": 0,
+          "goals_against": 0,
+          "jersey_number": null,
+          "penalty_minutes": 0,
+          "player_id": 7001,
+          "points": 0,
+          "saves": 0,
+          "season_id": 90,
+          "season_type": "regular",
+          "shots_against": 0,
+          "starting": false,
+          "status": "",
+          "team_id": 323,
+          "toi_seconds": null,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 0,
+          "game_id": 1002,
           "goals": 0,
           "goals_against": 2,
           "jersey_number": 31,

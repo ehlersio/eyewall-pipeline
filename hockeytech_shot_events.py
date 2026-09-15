@@ -126,7 +126,7 @@ def fetch_pbp(lg: League, game_id: int, retries: int = 3) -> list | None:
                 log.warning(f"    PBP {game_id} status {r.status_code}")
                 last_err = f"status {r.status_code}"
             else:
-                data = json.loads(strip_jsonp(lg, r.text.strip()))
+                data = json.loads(strip_jsonp(r.text.strip()))
                 if isinstance(data, dict) and "error" in data:
                     log.warning(f"    PBP {game_id} error: {data['error']}")
                     return None

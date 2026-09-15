@@ -94,6 +94,28 @@
         ]
       ],
       "table": "ahl_players"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6710
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_players"
     }
   ],
   "requests": [
@@ -114,32 +136,6 @@
         "client_code": "ahl",
         "feed": "statviewfeed",
         "game_id": "1001",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameCenterPlayByPlay"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameCenterPlayByPlay"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
         "key": "ccb91f29d6744675",
         "lang": "en",
         "league_id": "",
@@ -308,6 +304,49 @@
           "x_raw": 120,
           "y_norm": 14.17,
           "y_raw": 200
+        }
+      ],
+      "table": "ahl_shot_events"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 6710,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "game_id,event_type,period_id,time_seconds,team_id,shooter_id,x_raw,y_raw",
+      "rows": [
+        {
+          "assist1_id": null,
+          "assist2_id": null,
+          "event_type": "goal",
+          "game_goal_id": 777,
+          "game_id": 1002,
+          "goalie_id": null,
+          "is_empty_net": false,
+          "is_game_winning_goal": false,
+          "is_home": false,
+          "is_insurance_goal": false,
+          "is_penalty_shot": false,
+          "is_power_play": false,
+          "is_short_handed": false,
+          "period_id": 2,
+          "quality": 5,
+          "season_id": 90,
+          "season_type": "regular",
+          "shooter_id": 6710,
+          "shot_type": "",
+          "team_id": 323,
+          "time_seconds": 480,
+          "x_norm": 0.0,
+          "x_raw": 300,
+          "y_norm": 0.0,
+          "y_raw": 150
         }
       ],
       "table": "ahl_shot_events"

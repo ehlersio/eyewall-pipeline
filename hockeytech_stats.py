@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from hockeytech_leagues import HOCKEYTECH_BASE, League
-from pipeline_common import FetchError
+from pipeline_common import FetchError, hockeytech_statview_get
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -208,35 +208,14 @@ def resolve_season_type(lg: League, season_id: str) -> str:
 
 def ht_get(lg: League, params: dict, retries: int = 3) -> list | dict:
     """Hit the HockeyTech statviewfeed endpoint and return the parsed
-    response. Raises FetchError after exhausting `retries` attempts. Same as
-    pwhl_stats.py's helper except for the league's auth params."""
-    p = {
-        "feed": "statviewfeed",
+    response. Raises FetchError after exhausting `retries` attempts."""
+    auth = {
         "key": lg.hockeytech_key,
         "client_code": lg.key,
         "site_id": lg.site_id,
         "league_id": lg.league_id,
-        "lang": "en",
     }
-    p.update(params)
-
-    last_err = None
-    for attempt in range(retries):
-        try:
-            r = requests.get(HOCKEYTECH_BASE, params=p, headers=lg.headers, timeout=20)
-            if r.status_code == 200:
-                text = r.text.strip()
-                if "(" in text:
-                    text = text[text.index("(") + 1 : text.rindex(")")]
-                return json.loads(text)
-            log.warning(f"HT {p.get('view')} status {r.status_code} (attempt {attempt + 1})")
-            last_err = f"status {r.status_code}"
-        except Exception as e:
-            log.warning(f"HT {p.get('view')} error: {e} (attempt {attempt + 1})")
-            last_err = str(e)
-        if attempt < retries - 1:
-            time.sleep(2**attempt)
-    raise FetchError(f"HT {p.get('view')}: failed after {retries} attempts ({last_err})")
+    return hockeytech_statview_get(HOCKEYTECH_BASE, auth, params, lg.headers, retries)
 
 
 def extract_rows(data: list | dict) -> list[dict]:

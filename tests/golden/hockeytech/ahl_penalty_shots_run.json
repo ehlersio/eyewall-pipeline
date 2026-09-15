@@ -92,6 +92,29 @@
         ]
       ],
       "table": "ahl_players"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6710,
+              7003
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_players"
     }
   ],
   "requests": [
@@ -112,32 +135,6 @@
         "client_code": "ahl",
         "feed": "statviewfeed",
         "game_id": "1001",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameCenterPlayByPlay"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "",
-        "view": "gameCenterPlayByPlay"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "game_id": "1002",
         "key": "ccb91f29d6744675",
         "lang": "en",
         "league_id": "",
@@ -212,6 +209,37 @@
           "season_type": "regular",
           "team_id": 323,
           "time_seconds": 60
+        }
+      ],
+      "table": "ahl_penalty_shots"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 6710,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "player_id": 7003,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        }
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "on_conflict": "game_id,team_id,player_id,period_id,time_seconds",
+      "rows": [
+        {
+          "game_id": 1002,
+          "goalie_id": 7003,
+          "is_goal": false,
+          "period_id": 2,
+          "player_id": 6710,
+          "season_id": 90,
+          "season_type": "regular",
+          "team_id": 323,
+          "time_seconds": 540
         }
       ],
       "table": "ahl_penalty_shots"

@@ -71,7 +71,6 @@ Response structure note:
     Roster is nested under roster[0]['sections'] with sections for Forwards/Defenders/Goalies.
 """
 
-import json
 import logging
 import os
 import re
@@ -79,11 +78,10 @@ import sys
 import time
 from datetime import UTC, datetime
 
-import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError
+from pipeline_common import FetchError, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
 from season_lookup import get_pwhl_season, get_season_type
@@ -199,36 +197,13 @@ SECTION_POSITION_MAP = {
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 
 
+HT_AUTH = {"key": HOCKEYTECH_KEY, "client_code": CLIENT_CODE, "site_id": "0", "league_id": "1"}
+
+
 def ht_get(params: dict, retries: int = 3) -> list | dict:
     """Hit the HockeyTech statviewfeed endpoint and return parsed response.
     Raises FetchError after exhausting `retries` attempts."""
-    p = {
-        "feed": "statviewfeed",
-        "key": HOCKEYTECH_KEY,
-        "client_code": CLIENT_CODE,
-        "site_id": "0",
-        "league_id": "1",
-        "lang": "en",
-    }
-    p.update(params)
-
-    last_err = None
-    for attempt in range(retries):
-        try:
-            r = requests.get(HOCKEYTECH_BASE, params=p, headers=HEADERS, timeout=20)
-            if r.status_code == 200:
-                text = r.text.strip()
-                if "(" in text:
-                    text = text[text.index("(") + 1 : text.rindex(")")]
-                return json.loads(text)
-            log.warning(f"HT {p.get('view')} status {r.status_code} (attempt {attempt + 1})")
-            last_err = f"status {r.status_code}"
-        except Exception as e:
-            log.warning(f"HT {p.get('view')} error: {e} (attempt {attempt + 1})")
-            last_err = str(e)
-        if attempt < retries - 1:
-            time.sleep(2**attempt)
-    raise FetchError(f"HT {p.get('view')}: failed after {retries} attempts ({last_err})")
+    return hockeytech_statview_get(HOCKEYTECH_BASE, HT_AUTH, params, HEADERS, retries)
 
 
 def extract_rows(data: list | dict) -> list[dict]:

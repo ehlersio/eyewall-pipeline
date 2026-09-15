@@ -36,12 +36,6 @@ class League:
     # ECHL's `players` (skaters) view carries team_name, not team_code; when
     # set, fetch_skater_stats() resolves team_id by name instead.
     team_id_by_name: dict | None = None
-    # Strip a JSONP wrapper from per-game responses only when the response
-    # actually is one. Off for AHL, which slices from the first "(" to the
-    # last ")" -- that corrupts a plain-JSON response containing a "(".
-    # Pinned by the characterization tests; turning it on for AHL is a
-    # deliberate behavior change of its own.
-    strict_jsonp: bool = False
 
     @cached_property
     def code_to_team_id(self) -> dict:
@@ -56,13 +50,15 @@ class League:
         }
 
 
-def strip_jsonp(lg: League, text: str) -> str:
-    """Unwrap a JSONP-wrapped per-game response (see League.strict_jsonp)."""
-    if lg.strict_jsonp:
-        return text[1:-1] if text.startswith("(") and text.endswith(")") else text
-    if "(" in text:
-        return text[text.index("(") + 1 : text.rindex(")")]
-    return text
+def strip_jsonp(text: str) -> str:
+    """Unwrap a per-game response only if it actually is JSONP-wrapped.
+
+    AHL used to slice from the first "(" to the last ")" whatever the
+    response looked like, which corrupts plain JSON containing a "(" -- the
+    same bug that broke AHL rosters in _modulekit_get() (README, "the
+    roster-fetch mystery"). ECHL always did it this way.
+    """
+    return text[1:-1] if text.startswith("(") and text.endswith(")") else text
 
 
 # ── AHL ───────────────────────────────────────────────────────────────────────
@@ -262,5 +258,4 @@ ECHL = League(
         "Wichita Thunder": "72",
         "Worcester Railers": "77",
     },
-    strict_jsonp=True,
 )
