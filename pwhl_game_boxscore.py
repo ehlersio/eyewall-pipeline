@@ -50,7 +50,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError
+from pipeline_common import FetchError, select_all
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -359,26 +359,34 @@ def ingest_game(sb, gid: int, season_id: str, season_type: str) -> tuple[int, in
 
 
 def get_completed_games(sb, season_id: str) -> list:
-    result = (
-        sb.table("pwhl_game_log")
-        .select("game_id")
-        .eq("season_id", int(season_id))
-        .eq("game_state", "Final")
-        .execute()
+    return select_all(
+        lambda: (
+            sb.table("pwhl_game_log")
+            .select("game_id")
+            .eq("season_id", int(season_id))
+            .eq("game_state", "Final")
+        )
     )
-    return result.data or []
 
 
 def get_skipped_games(sb, pipeline: str) -> set:
-    result = sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", pipeline).execute()
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", pipeline)
+        )
+    }
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    result = (
-        sb.table("pwhl_skater_game_box").select("game_id").eq("season_id", int(season_id)).execute()
-    )
-    return {r["game_id"] for r in (result.data or [])}
+    return {
+        r["game_id"]
+        for r in select_all(
+            lambda: (
+                sb.table("pwhl_skater_game_box").select("game_id").eq("season_id", int(season_id))
+            )
+        )
+    }
 
 
 def run(season_id: str | None = None) -> None:

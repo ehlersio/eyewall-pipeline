@@ -115,12 +115,26 @@ def _make_requests_get(pwhl_season=None, season_types=None):
 def _chain_mock(data=None):
     """A chainable Supabase query-builder mock: every builder method
     returns itself, and .execute() returns a MagicMock with a .data
-    attribute set to whatever fixture data is passed in."""
+    attribute set to whatever fixture data is passed in -- sliced by
+    .range() like PostgREST, so paged reads (pipeline_common.select_all)
+    see the rows once and then an empty page."""
     m = MagicMock()
-    for method in ("select", "eq", "limit", "in_", "delete", "upsert"):
+    rows = data if data is not None else []
+    pending = {}
+    for method in ("select", "eq", "limit", "in_", "delete", "upsert", "order"):
         getattr(m, method).return_value = m
     m.insert.return_value = m
-    m.execute.return_value = MagicMock(data=data if data is not None else [])
+
+    def _range(start, end):
+        pending["range"] = (start, end)
+        return m
+
+    def _execute():
+        rng = pending.pop("range", None)
+        return MagicMock(data=rows[rng[0] : rng[1] + 1] if rng else rows)
+
+    m.range.side_effect = _range
+    m.execute.side_effect = _execute
     return m
 
 

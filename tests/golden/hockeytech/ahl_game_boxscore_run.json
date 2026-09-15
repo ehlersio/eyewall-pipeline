@@ -25,6 +25,64 @@
             "Final"
           ],
           {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_game_log"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            90
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "game_state",
+            "Final"
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            5,
+            1004
+          ],
+          {}
         ]
       ],
       "table": "ahl_game_log"
@@ -45,6 +103,56 @@
             "ahl_game_boxscore"
           ],
           {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_skipped_games"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "pipeline",
+            "ahl_game_boxscore"
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            1,
+            1000
+          ],
+          {}
         ]
       ],
       "table": "ahl_skipped_games"
@@ -63,6 +171,56 @@
           [
             "season_id",
             90
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            0,
+            999
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_skater_game_box"
+    },
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            90
+          ],
+          {}
+        ],
+        [
+          "order",
+          [
+            "game_id"
+          ],
+          {}
+        ],
+        [
+          "range",
+          [
+            1,
+            1000
           ],
           {}
         ]

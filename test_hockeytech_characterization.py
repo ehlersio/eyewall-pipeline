@@ -402,7 +402,12 @@ class FakeQuery:
         ops = [[name, [_normalize(a) for a in args], kwargs] for name, args, kwargs in self._ops]
         self._harness.reads.append({"table": self._table, "ops": ops})
         eq = {args[0]: args[1] for name, args, _ in self._ops if name == "eq"}
-        return SimpleNamespace(data=self._harness.select(self._table, eq))
+        data = self._harness.select(self._table, eq)
+        # Honour .range() like PostgREST, so paged reads (select_all) end.
+        rng = next((args for name, args, _ in self._ops if name == "range"), None)
+        if rng:
+            data = data[rng[0] : rng[1] + 1]
+        return SimpleNamespace(data=data)
 
 
 class FakeSupabase:
