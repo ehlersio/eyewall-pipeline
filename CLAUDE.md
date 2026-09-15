@@ -108,6 +108,7 @@ Zero rows back = clean (confirmed 2026-07, right after the `player_narratives` f
 - `pwhl_stats.py` — `PWHL_SEASON` live-resolved; `TEAM_ID_MAP`/`CITY_TEAM_MAP` have expansion entries; `SEASON_YEAR_MAP`/`SEASON_TYPE_MAP` auto-fill current season via `setdefault`
 - `pwhl_salaries.py` — `SEASON_LABEL` live-derived; `TEAM_NAME_MAP` + regex fallback have expansion entries
 - `moneypuck.py` — `MP_URL` derived from `NHL_SEASON` instead of a separately hardcoded year
+- `hockeytech_stats.py` (AHL/ECHL, and every `ahl_*`/`echl_*` module through it) — `resolve_current_season()` reads the Worker's `ahl`/`echl` entries via `get_hockeytech_season()` (2026-09). `resolve_season_type()` still reads HockeyTech's `seasons` feed directly: the Worker has no AHL/ECHL types route.
 - `pwhl_pbp_events.py` — `PWHL_SEASON` live-resolved and `SEASON_TYPE_MAP` filled via `setdefault`, same pattern as `pwhl_stats.py` (closed the gap noted in Session 35–36; was previously reading `PWHL_SEASON` env var directly). Follow-up fix: `run()`'s single-game (`--game`) debug mode was leaking the sweep-level `season_id`/`season_type` (i.e. `PWHL_SEASON`, the regular-season-preferring value) onto rows for games from other season types. Now reads the game's own `season_id` off its `pwhl_game_log` row instead. Regression-covered in `test_pwhl_pbp_events_season.py`.
 
 ## Arbitrary season_id → season_type lookup (`get_season_type()`, Session 37)

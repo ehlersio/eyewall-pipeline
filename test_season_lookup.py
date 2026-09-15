@@ -134,6 +134,67 @@ class TestCaching:
         assert call_count["n"] == 1
 
 
+HT_CONFIG = {
+    "nhl": {"seasonId": "20262027"},
+    "pwhl": {"seasonId": 8, "seasonType": "regular", "startYear": 2025},
+    "ahl": {"seasonId": 92, "seasonType": "playoffs", "source": "live"},
+    "echl": {"seasonId": 76, "seasonType": "playoffs", "source": "live"},
+}
+
+
+class TestGetHockeytechSeason:
+    def test_returns_live_value_for_each_league(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup.requests, "get", lambda *a, **k: _mock_response(HT_CONFIG)
+        )
+        assert season_lookup.get_hockeytech_season("ahl", 90) == {
+            "season_id": 92,
+            "season_type": "playoffs",
+        }
+        assert season_lookup.get_hockeytech_season("echl", 73) == {
+            "season_id": 76,
+            "season_type": "playoffs",
+        }
+
+    def test_falls_back_to_env_var_on_network_failure(self, monkeypatch):
+        monkeypatch.setenv("AHL_SEASON", "91")
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_hockeytech_season("ahl", 90) == {
+            "season_id": 91,
+            "season_type": "regular",
+        }
+
+    def test_empty_env_var_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("ECHL_SEASON", "")
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_hockeytech_season("echl", 73)["season_id"] == 73
+
+    def test_falls_back_when_league_missing_from_response(self, monkeypatch):
+        monkeypatch.delenv("AHL_SEASON", raising=False)
+        monkeypatch.setattr(
+            season_lookup.requests,
+            "get",
+            lambda *a, **k: _mock_response({"nhl": {}, "pwhl": {}, "ahl": {"seasonId": "x"}}),
+        )
+        assert season_lookup.get_hockeytech_season("ahl", 90) == {
+            "season_id": 90,
+            "season_type": "regular",
+        }
+        assert season_lookup.get_hockeytech_season("echl", 73)["season_id"] == 73
+
+    def test_shares_one_fetch_with_the_other_leagues(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            season_lookup.requests,
+            "get",
+            lambda url, **k: calls.append(url) or _mock_response(HT_CONFIG),
+        )
+        season_lookup.get_pwhl_season()
+        season_lookup.get_hockeytech_season("ahl", 90)
+        season_lookup.get_hockeytech_season("echl", 73)
+        assert len(calls) == 1
+
+
 class TestGetSeasonType:
     """get_season_type() backs the Session 37 follow-up fix: pipeline
     modules were silently defaulting an unrecognized season_id to

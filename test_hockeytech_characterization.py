@@ -52,6 +52,7 @@ import hockeytech_news
 import hockeytech_penalty_shots
 import hockeytech_shot_events
 import hockeytech_stats
+import season_lookup
 
 SUPABASE_MODULES = (
     hockeytech_stats,
@@ -130,6 +131,16 @@ def seasons(L):
         {"season_id": "5", "season_name": "2026 All-Star Challenge", "career": "0",
          "playoff": "0", "start_date": "2026-02-01", "end_date": "2026-02-02"},
     ]  # fmt: skip
+
+
+def worker_config(L):
+    """The Worker's /config/seasons: the regular season, the one that has
+    started by NOW (same pick as seasons.js's resolveAHLSeason)."""
+    return {
+        "nhl": {"seasonId": "20252026"},
+        "pwhl": {"seasonId": 8, "seasonType": "regular", "startYear": 2025},
+        L.key: {"seasonId": L.regular, "seasonType": "regular", "source": "live"},
+    }
 
 
 def roster(L):
@@ -403,10 +414,13 @@ class FakeSupabase:
 class Harness:
     """Patches every I/O boundary the modules use and records what they do."""
 
-    def __init__(self, monkeypatch, L, *, fail_seasons=False, fail_scorebar=False):
+    def __init__(
+        self, monkeypatch, L, *, fail_seasons=False, fail_scorebar=False, fail_worker=False
+    ):
         self.L = L
         self.fail_seasons = fail_seasons
         self.fail_scorebar = fail_scorebar
+        self.fail_worker = fail_worker
         self.requests, self.reads, self.writes, self.posts = [], [], [], []
 
         monkeypatch.setattr(requests, "get", self.get)
@@ -420,6 +434,11 @@ class Harness:
             monkeypatch.setattr(mod, "datetime", FixedDatetime)
         # Both come from .env locally but not in CI -- pin them.
         monkeypatch.setattr(hockeytech_news, "WORKER_URL", "https://worker.test")
+        # The current season comes from the Worker's /config/seasons, cached
+        # per process -- start every case with an empty cache.
+        monkeypatch.setattr(season_lookup, "WORKER_BASE", "https://worker.test")
+        monkeypatch.setattr(season_lookup, "_cache", None)
+        monkeypatch.setattr(season_lookup, "_season_types_cache", None)
         for var in ("AHL_SEASON", "ECHL_SEASON"):
             monkeypatch.delenv(var, raising=False)
 
@@ -433,6 +452,8 @@ class Harness:
                 "referer": (headers or {}).get("Referer"),
             }
         )
+        if url.endswith("/config/seasons"):
+            return FakeResponse(503) if self.fail_worker else ok_json(worker_config(self.L))
         return self.route(params)
 
     def route(self, p):
@@ -546,7 +567,9 @@ def test_stats_run_explicit_playoff_season(monkeypatch, L):
 
 @pytest.mark.parametrize("L", LEAGUES)
 def test_stats_season_resolution_when_seasons_feed_is_down(monkeypatch, L):
-    h = Harness(monkeypatch, L, fail_seasons=True)
+    # Both sources down: the Worker (current season) and HockeyTech's
+    # seasons feed (season type, date window).
+    h = Harness(monkeypatch, L, fail_seasons=True, fail_worker=True)
     result = {
         "current": L.stats.resolve_current_season(),
         "playoff_type": L.stats.resolve_season_type(str(L.playoffs)),
