@@ -74,7 +74,7 @@ W, H = 1080, 1350  # 4:5 portrait, Instagram's tallest feed ratio
 ASSETS = Path(__file__).parent / "assets"
 OUT_DIR = Path(__file__).parent / "social_out"
 
-GRAPH = "https://graph.facebook.com/v23.0"
+GRAPH = "https://graph.facebook.com/v25.0"
 SITE_URL = "eyewallanalytics.com"
 BUCKET = "social"
 CONTAINER_POLL_SECONDS = 3
