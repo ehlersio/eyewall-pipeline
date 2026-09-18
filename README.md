@@ -28,6 +28,10 @@ PRIMARY_TEAM_ABBR=CAR
 OPENROUTER_API_KEY=your_openrouter_api_key
 WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
 POLL_SECRET=your_worker_poll_secret
+# Optional -- only social_posts.py uses these; without them it renders but doesn't publish
+META_PAGE_TOKEN=your_facebook_page_access_token
+IG_USER_ID=your_instagram_business_account_id
+FB_PAGE_ID=your_facebook_page_id
 ```
 
 **`NHL_SEASON`/`PWHL_SEASON` are now fallbacks, not the primary source.** Both are live-resolved from the Worker's `/config/seasons` endpoint via `season_lookup.py` — see [Live Season Resolution](#live-season-resolution) below. These env vars only matter if the Worker is unreachable when the pipeline starts.
@@ -372,6 +376,30 @@ python prediction_scorecard.py --backtest        # + write the three backtest ro
 ```
 
 Requires `docs/session_prediction_scorecard.sql` to be run in Supabase first (creates both tables + RLS policies).
+
+### `social_posts.py` (2026-09)
+
+Automatic posts to Instagram and the EyeWall Facebook Page, run by `.github/workflows/social-posts.yml` (not `run.py`):
+
+| Post | When (UTC, backup an hour later) | Source |
+|---|---|---|
+| `rankings` -- 32-team power rankings, movement vs. a week earlier (2 slides) | Mon 15:00 | `power_rankings_narratives` |
+| `winners` -- each game's projected winner + win probability | daily 15:30, skipped with no games | `game_win_probs` |
+| `recap` -- last Mon-Sun graded: record, most confident hits and misses (up to 3 slides) | Mon 18:00 | `game_win_probs` vs `game_log` |
+
+Cards are 1080x1350 JPEGs drawn with Pillow in the site's palette and Barlow fonts (`assets/fonts/`, OFL). They're uploaded to the public Supabase Storage bucket `social`, since both platforms fetch images by URL, and then published through the Graph API. Instagram gets a single image or a carousel. Facebook gets a photo post, or several unpublished photo uploads attached to one feed post. Every attempt is written to `social_posts`, one row per platform. A `(platform, post key)` pair (post key = `<kind>-<ET date>`) that's already published is never posted again. That makes the backup crons safe: if one platform failed, the backup retries only that one. Facebook captions swap Instagram's "link in bio" for a real `eyewallanalytics.com` link.
+
+Each post checks its data before it goes out. `rankings` needs all 32 teams ranked today. `winners` needs this morning's `game_win_probs` (the row the recap later grades) and leaves off games that have already started. `recap` needs graded games. Data that isn't ready exits 1, and the backup run tries again. A day with nothing to post (no games, offseason, or rankings not generated yet) exits 0.
+
+One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. Instagram posts go through the Business account linked to the Page. A Page token made from a long-lived user token doesn't expire, so nothing refreshes it. The token needs `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic` and `instagram_content_publish`.
+
+```bash
+python social_posts.py winners --dry-run                           # render to social_out/, no upload/post
+python social_posts.py recap --dry-run --date 2026-10-19           # as if run that day (ET)
+gh workflow run social-posts.yml -f kind=rankings -f dry_run=true  # images come back as a run artifact
+```
+
+Requires `docs/session_social_posts.sql` to be run in Supabase first (the `social_posts` table + the `social` bucket), and GitHub secrets `META_PAGE_TOKEN`, `IG_USER_ID` and `FB_PAGE_ID`. A platform without its id isn't published to.
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).

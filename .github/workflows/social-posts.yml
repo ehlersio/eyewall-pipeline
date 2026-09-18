@@ -1,0 +1,94 @@
+name: Social Posts
+
+# Automatic Instagram + Facebook Page posts (social_posts.py):
+#   rankings  Mondays      -- weekly power rankings
+#   winners   daily        -- projected winners, skipped on days with no games
+#   recap     Mondays      -- last week's projected winners, graded
+#
+# Times are UTC and sit well after the nightly pipeline, which is scheduled
+# for 07:00 UTC but in practice has been starting 12:00-13:30 UTC and taking
+# ~10 minutes. Each post has a backup run an hour later: if the first run
+# found stale data (exit 1) the backup tries again, and if the first run
+# already published, the backup sees it in social_posts and does nothing
+# (a platform that failed is retried on its own).
+#   rankings  15:00 / 16:00 Mon  (11am / noon EDT; 10am / 11am EST)
+#   winners   15:30 / 16:30 daily (before the earliest matinee puck drops;
+#             games already under way are left off the card anyway)
+#   recap     18:00 / 19:00 Mon  (2pm / 3pm EDT)
+
+on:
+  schedule:
+    - cron: '0 15 * * 1'
+    - cron: '0 16 * * 1'
+    - cron: '30 15 * * *'
+    - cron: '30 16 * * *'
+    - cron: '0 18 * * 1'
+    - cron: '0 19 * * 1'
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Which post'
+        required: true
+        type: choice
+        options: [winners, rankings, recap]
+      dry_run:
+        description: 'Render only (images kept as a run artifact), no upload or post'
+        type: boolean
+        default: true
+
+concurrency:
+  group: social-posts
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pick the post for this trigger
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_KIND: ${{ inputs.kind }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          case "$SCHEDULE" in
+            '0 15 * * 1'|'0 16 * * 1')  kind=rankings ;;
+            '30 15 * * *'|'30 16 * * *') kind=winners ;;
+            '0 18 * * 1'|'0 19 * * 1')  kind=recap ;;
+            '') kind="$INPUT_KIND" ;;
+            *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
+          esac
+          flag=""
+          if [ "$INPUT_DRY_RUN" = "true" ]; then flag="--dry-run"; fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "flag=$flag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Post
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+        run: python social_posts.py ${{ steps.pick.outputs.kind }} ${{ steps.pick.outputs.flag }}
+
+      - name: Keep dry-run images
+        if: steps.pick.outputs.flag == '--dry-run'
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-${{ steps.pick.outputs.kind }}
+          path: social_out/
+          if-no-files-found: ignore
