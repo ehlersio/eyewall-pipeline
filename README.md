@@ -110,7 +110,7 @@ python echl_news.py                        # ECHL news -> Worker
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
+nhl_stats → injuries → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → projected_lines → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
 ```
 
 ### `nhl_stats.py`
@@ -188,6 +188,22 @@ Forward lines and D pairs inferred from shift + shot events, for all 32 teams (l
 - `backtest_line_projection.py` (results in `docs/line_projection_backtest_results.md`) tests next-game projections. It is told who dressed and projects how they're arranged. On 2025-26, "same as last game" gets 74.5% of forward linemate pairs, 64.3% of exact trios and 81.3% of D pairs. This module's season-to-date units get 50.9% / 32.7% / 61.9%. Recency beats every longer memory: the best half-life is 1 game.
 - `backtest_opening_night.py` (results in `docs/opening_night_backtest_results.md`) tests opening night. Preseason groupings, ranked by last season's NHL TOI, get 70.0% linemates, 58.5% exact trios and 79.7% D pairs across 64 openers. Last season's units, i.e. the prior-season blend above, get 38.6% / 18.4% / 47.4%.
 - Both share a per-season cache of per-game 5v5 summaries, `line_projection_cache/` (gitignored, about 3 minutes per season to build), and write gitignored JSON results.
+
+### `projected_lines.py` (2026-09)
+
+Each team's projected forward lines and D pairs for its **next** game, written to `projected_lines` (one set per team, replaced every run; requires `docs/projected_lines_create.sql`). `line_combinations.py` describes the season. This module answers "who plays with whom tonight".
+
+- **In-season** (`basis='last_game'`, playoff games included): last game's 5v5 pairings, ranked by recency-weighted 5v5 TOI. The lineup is last game's skaters, minus players the injury report lists as out, on injured reserve or suspended, and players no longer on the live roster. Each vacancy is filled from the live roster by recent games dressed, then NHL TOI.
+- **Preseason** (`basis='preseason'`, before a team's first regular-season game): pairings pooled over its preseason games, ranked by last season's NHL TOI. The lineup is the top 12 F / 6 D of the live roster by the `combo` rule.
+- **Neither**: no rows. The frontend hides the section.
+- **`filled_ids`** marks players who weren't in the basis lineup.
+- **Fail-safe**: if the live roster fetch fails, that team's previous rows are left in place.
+- **Accuracy** before the game (lineup not known), 2024-25 and 2025-26 (`backtest_projected_lines.py`, results in `docs/projected_lines_backtest_results.md`): in-season, 71–73% of forward linemate pairs and 75–79% of D pairs; opening night, 55% / 59%. The rules come from the two backtests described under `line_combinations.py` above.
+
+```
+python projected_lines.py --team CAR --dry-run   # compute and print, no writes
+python run.py projected_lines                    # all teams
+```
 
 ### `injuries.py`
 NHL injury status from ESPN's public (unofficial, undocumented) injuries feed — one league-wide call, all 32 teams, no per-team looping needed. Writes to `player_injuries`. Independent of every other pipeline stage; runs right after `nhl_stats` so player matching sees a fresh `players` table.

@@ -30,3 +30,6 @@ line_projection_backtest_results.json
 
 # backtest_opening_night.py -- run output (shares line_projection_cache/)
 opening_night_backtest_results.json
+
+# backtest_projected_lines.py -- run output (shares line_projection_cache/)
+projected_lines_backtest_results.json
