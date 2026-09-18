@@ -49,6 +49,16 @@ from itertools import combinations
 
 from db import get_client
 from line_combinations import ALL_TEAMS
+from projected_lines import (  # noqa: F401 -- re-exported for backtest_opening_night.py
+    FWD,
+    MIN_5V5_SECS,
+    pair_w,
+    partition,
+    rank,
+    split_classes,
+    summarize_game,
+    to_w,
+)
 from scratches import fetch_keyset
 
 CACHE_DIR = "line_projection_cache"
@@ -60,9 +70,7 @@ MAX_LOOKBACK = 60  # games; weight at 60 games back is negligible for any tuned 
 EARLY_GAMES = 5  # "first N games of the season" subset
 TIE_BREAK = 1e-3  # scale of older history inside the `last` model
 FETCH_CHUNKS, FETCH_WORKERS = 48, 8
-MIN_5V5_SECS = 1200  # team-games with less are unusable (broken shift data) and skipped
 
-FWD = {"C", "L", "R", "LW", "RW", "F"}
 TEAMS = sorted(set(ALL_TEAMS) | {"ARI"})  # ARI: pre-2024-25 history (now UTA)
 
 client = get_client()
@@ -117,54 +125,6 @@ def fetch_season_shifts(season):
         for part in ex.map(scan, bounds):
             rows.extend(part)
     return rows
-
-
-def summarize_game(shifts, positions):
-    """One game's shifts (both teams) -> per team:
-    {"toi": {pid: 5v5 secs}, "pairs": {"a-b": 5v5 secs}, "dressed": [pids]}.
-    Pairs are same-class only (F-F, D-D); goalies are dropped."""
-    events = []  # (t, +1/-1, team, pid)
-    teams = set()
-    dressed = defaultdict(set)
-    for s in shifts:
-        pos = positions.get(s["player_id"])
-        if pos is None:
-            continue
-        teams.add(s["team"])
-        if pos == "G":
-            continue
-        dressed[s["team"]].add(s["player_id"])
-        events.append((s["start_secs"], 1, s["team"], s["player_id"]))
-        events.append((s["end_secs"], -1, s["team"], s["player_id"]))
-    if len(teams) != 2:
-        return None
-    # ends before starts at the same second: a change at t isn't an overlap
-    events.sort(key=lambda e: (e[0], e[1]))
-
-    on = {t: set() for t in teams}
-    toi = {t: defaultdict(float) for t in teams}
-    pairs = {t: defaultdict(float) for t in teams}
-    prev_t = None
-    for t, delta, team, pid in events:
-        if prev_t is not None and t > prev_t:
-            dur = t - prev_t
-            if all(len(on[x]) == 5 for x in teams):
-                for x in teams:
-                    ps = sorted(on[x])
-                    for p in ps:
-                        toi[x][p] += dur
-                    for a, b in combinations(ps, 2):
-                        if (positions[a] == "D") == (positions[b] == "D"):
-                            pairs[x][f"{a}-{b}"] += dur
-        prev_t = t
-        if delta == 1:
-            on[team].add(pid)
-        else:
-            on[team].discard(pid)
-    return {
-        x: {"toi": dict(toi[x]), "pairs": dict(pairs[x]), "dressed": sorted(dressed[x])}
-        for x in teams
-    }
 
 
 def load_season(season, positions):
@@ -224,46 +184,6 @@ def load_schedule():
 
 
 # ── Partition + ranking ───────────────────────────────────────────────────────
-
-
-def pair_w(w, a, b):
-    return w.get((a, b) if a < b else (b, a), 0.0)
-
-
-def partition(players, w, size):
-    """Greedy: repeatedly take the unit (trio or pair) of remaining players
-    with the largest summed pair weight. Leftovers (an 11th forward, 7th D)
-    are dropped. Ties resolve by sorted player id, so it's deterministic."""
-    left = sorted(players)
-    units = []
-    while len(left) >= size:
-        best, best_s = None, -1.0
-        for u in combinations(left, size):
-            s = sum(pair_w(w, a, b) for a, b in combinations(u, 2))
-            if s > best_s:
-                best, best_s = u, s
-        units.append(frozenset(best))
-        left = [p for p in left if p not in best]
-    return units
-
-
-def rank(units, toi):
-    """Order units by mean member TOI, highest first (Line 1 / D1)."""
-    return sorted(units, key=lambda u: -sum(toi.get(p, 0.0) for p in u) / len(u))
-
-
-def split_classes(players, positions):
-    f = [p for p in players if positions.get(p) in FWD]
-    d = [p for p in players if positions.get(p) == "D"]
-    return f, d
-
-
-def to_w(pairs_str):
-    out = {}
-    for k, v in pairs_str.items():
-        a, b = (int(x) for x in k.split("-"))
-        out[(a, b) if a < b else (b, a)] = v
-    return out
 
 
 # ── Models ────────────────────────────────────────────────────────────────────

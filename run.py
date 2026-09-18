@@ -37,7 +37,10 @@ Nightly run order (important — modules depend on each other):
   playoff_odds_game_impacts. injury_impact runs right after moneypuck --
   man-games and WAR lost to injury per team (needs game_log, today's
   injury snapshot, shift_data's shift_events and moneypuck's fresh WAR)
-  -> injury_games_lost / team_injury_impact.
+  -> injury_games_lost / team_injury_impact. projected_lines runs right
+  after line_combinations -- next-game projected lines per team (needs
+  shift_data, game_log, the injury snapshot and player_seasons) ->
+  projected_lines.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -69,6 +72,7 @@ Usage:
   python run.py rapm             # RAPM regression only
   python run.py elo              # Team Elo rating recompute only
   python run.py moneypuck        # MoneyPuck WAR + percentiles only
+  python run.py projected_lines  # Next-game projected lines, every team
   python run.py validate         # Internal RAPM sanity checks
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
   python run.py ai               # AI pipeline only (summaries + scouting + narratives)
@@ -194,6 +198,7 @@ def run_all():
     import playoff_race
     import power_rankings
     import prediction_scorecard
+    import projected_lines
     import rapm
     import scratches
     import shift_data
@@ -244,6 +249,9 @@ def run_all():
     stage("injury_impact", injury_impact.run)  # needs game_log, injury snapshot, shifts, fresh WAR
 
     stage("line_combinations", line_combinations.run)  # must run after shift_data + shot_events
+    stage(
+        "projected_lines", projected_lines.run
+    )  # needs shift_data, game_log, injuries, player_seasons
     stage("special_teams", special_teams.run)  # must run after shift_data
     stage("power_rankings", power_rankings.run)  # must run after moneypuck (needs fresh WAR + xGF%)
 
@@ -376,6 +384,10 @@ if __name__ == "__main__":
         import line_combinations
 
         line_combinations.run(*([season] if season else []))
+    elif arg == "projected_lines":
+        import projected_lines
+
+        projected_lines.run(*([season] if season else []))
     elif arg == "special":
         import special_teams
 
