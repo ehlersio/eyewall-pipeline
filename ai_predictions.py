@@ -7,6 +7,11 @@ Usage:
     python ai_predictions.py 20242025               # specific season
     python ai_predictions.py --game 2025030415      # single game
     python ai_predictions.py --game 2025030415 --force  # regenerate even if exists
+    python ai_predictions.py --locale fr            # only French (default: en and fr)
+
+Each game gets one row per locale in game_predictions (keyed on game_id +
+locale, docs/session_locale_predictions.sql) -- same Track B pattern as
+ai_summaries.py / ai_scouting.py.
 """
 
 import argparse
@@ -16,7 +21,8 @@ from datetime import UTC, datetime
 
 from ai_client import generate
 from ai_context import build_matchup_context, build_prediction_context
-from ai_persona import STICKS_SYSTEM_PROMPT, build_matchup_prompt, build_prediction_prompt
+from ai_persona import build_matchup_prompt, build_prediction_prompt, get_system_prompt
+from ai_scouting import LOCALES
 from db import get_client
 from pipeline_common import nhl_get
 
@@ -75,11 +81,12 @@ def get_upcoming_games() -> list:
 # ---------------------------------------------------------------------------
 
 
-def already_generated(game_id: int) -> bool:
+def already_generated(game_id: int, locale: str = "en") -> bool:
     result = (
         supabase.table("game_predictions")
         .select("id", count="exact")
         .eq("game_id", game_id)
+        .eq("locale", locale)
         .limit(1)
         .execute()
     )
@@ -94,6 +101,7 @@ def save_prediction(
     prediction_text: str,
     game_date: str,
     matchup_text: str = None,
+    locale: str = "en",
 ):
     supabase.table("game_predictions").upsert(
         {
@@ -103,9 +111,10 @@ def save_prediction(
             "away_team": away_team,
             "prediction_text": prediction_text,
             "matchup_text": matchup_text,
+            "locale": locale,
             "generated_at": "now()",
         },
-        on_conflict="game_id",
+        on_conflict="game_id,locale",
     ).execute()
 
 
@@ -114,10 +123,10 @@ def save_prediction(
 # ---------------------------------------------------------------------------
 
 
-def process_game(game: dict, force: bool = False) -> bool:
+def process_game(game: dict, force: bool = False, locale: str = "en") -> bool:
     """
-    Generates and saves a prediction for a single upcoming game.
-    Returns True on success.
+    Generates and saves a prediction for a single upcoming game in one
+    locale. Returns True on success.
     """
     game_id = game["game_id"]
     home_team = game["home_team"]
@@ -128,49 +137,57 @@ def process_game(game: dict, force: bool = False) -> bool:
     start_year = int(str(game_id)[:4])
     season = start_year * 10000 + (start_year + 1)
 
-    if not force and already_generated(game_id):
-        print(f"  {game_id} — already generated, skipping")
+    if not force and already_generated(game_id, locale):
+        print(f"  {game_id} ({locale}) — already generated, skipping")
         return True
 
-    print(f"  {game_id} — building context for {away_team} @ {home_team}...")
+    print(f"  {game_id} ({locale}) — building context for {away_team} @ {home_team}...")
     try:
         ctx = build_prediction_context(home_team, away_team)
     except Exception as e:
-        print(f"  {game_id} — context error: {e}")
+        print(f"  {game_id} ({locale}) — context error: {e}")
         return False
 
     # Skip if we have no player data for either team
     if not ctx.get("home_players") and not ctx.get("away_players"):
-        print(f"  {game_id} — no player data for either team, skipping")
+        print(f"  {game_id} ({locale}) — no player data for either team, skipping")
         return False
 
     prompt = build_prediction_prompt(ctx)
+    system = get_system_prompt(locale)
 
-    print(f"  {game_id} — generating prediction...")
-    prediction = generate(prompt, system=STICKS_SYSTEM_PROMPT)
+    print(f"  {game_id} ({locale}) — generating prediction...")
+    prediction = generate(prompt, system=system)
 
     if not prediction:
-        print(f"  {game_id} — generation failed")
+        print(f"  {game_id} ({locale}) — generation failed")
         return False
 
     # Generate line/player matchup analysis in a second call
-    print(f"  {game_id} — building matchup context...")
+    print(f"  {game_id} ({locale}) — building matchup context...")
     try:
         matchup_ctx = build_matchup_context(home_team, away_team)
         matchup_prompt = build_matchup_prompt(matchup_ctx)
-        print(f"  {game_id} — generating matchup analysis...")
-        matchup = generate(matchup_prompt, system=STICKS_SYSTEM_PROMPT)
+        print(f"  {game_id} ({locale}) — generating matchup analysis...")
+        matchup = generate(matchup_prompt, system=system)
         if not matchup:
-            print(f"  {game_id} — matchup generation failed, saving prediction only")
+            print(f"  {game_id} ({locale}) — matchup generation failed, saving prediction only")
     except Exception as e:
-        print(f"  {game_id} — matchup context error: {e}")
+        print(f"  {game_id} ({locale}) — matchup context error: {e}")
         matchup = None
 
     save_prediction(
-        game_id, season, home_team, away_team, prediction, game_date, matchup_text=matchup
+        game_id,
+        season,
+        home_team,
+        away_team,
+        prediction,
+        game_date,
+        matchup_text=matchup,
+        locale=locale,
     )
     print(
-        f"  {game_id} — saved ({len(prediction)} chars prediction, {len(matchup) if matchup else 0} chars matchup)"
+        f"  {game_id} ({locale}) — saved ({len(prediction)} chars prediction, {len(matchup) if matchup else 0} chars matchup)"
     )
     return True
 
@@ -192,7 +209,14 @@ def main():
     parser.add_argument(
         "--force", action="store_true", help="Regenerate even if prediction already exists"
     )
+    parser.add_argument(
+        "--locale",
+        choices=LOCALES,
+        default=None,
+        help="Generate only this locale (default: both en and fr)",
+    )
     args = parser.parse_args()
+    locales = [args.locale] if args.locale else list(LOCALES)
 
     # Single game mode — requires --home and --away since game isn't in game_log yet
     if args.game:
@@ -207,7 +231,8 @@ def main():
             "game_date": datetime.now(UTC).date().isoformat(),
             "game_type": 2,
         }
-        process_game(game, force=args.force)
+        for locale in locales:
+            process_game(game, force=args.force, locale=locale)
         return
 
     # Full upcoming games mode
@@ -224,14 +249,12 @@ def main():
 
     for i, game in enumerate(games, 1):
         print(f"[{i}/{len(games)}] {game['game_date']} — {game['away_team']} @ {game['home_team']}")
-        success = process_game(game, force=args.force)
-
-        if success:
-            generated += 1
-        else:
-            failed += 1
-
-        time.sleep(REQUEST_DELAY)
+        for locale in locales:
+            if process_game(game, force=args.force, locale=locale):
+                generated += 1
+            else:
+                failed += 1
+            time.sleep(REQUEST_DELAY)
 
     print(f"\nDone. Generated: {generated} | Failed: {failed}")
 
