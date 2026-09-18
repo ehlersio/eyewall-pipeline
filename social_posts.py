@@ -49,6 +49,7 @@ Usage:
   python social_posts.py recap
   python social_posts.py winners --dry-run      # render to social_out/, no upload/post
   python social_posts.py recap --date 2026-10-19  # as if run that day (ET)
+  python social_posts.py check                    # read-only credentials check, posts nothing
 
 Tables: docs/session_social_posts.sql.
 """
@@ -871,6 +872,72 @@ def post_recap(client, season, today, dry_run):
 POSTS = {"rankings": post_rankings, "winners": post_winners, "recap": post_recap}
 
 
+def graph_get(path, token, **params):
+    res = httpx.get(f"{GRAPH}/{path}", params={**params, "access_token": token}, timeout=30)
+    if res.status_code >= 400:
+        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
+    return res.json()
+
+
+def check_credentials():
+    """Read-only: can the token reach the Page and the Instagram account?
+    Posts nothing. Returns an exit code."""
+    token = os.environ.get("META_PAGE_TOKEN")
+    page_id, ig_id = os.environ.get("FB_PAGE_ID"), os.environ.get("IG_USER_ID")
+    missing = [
+        name
+        for name, v in (("META_PAGE_TOKEN", token), ("FB_PAGE_ID", page_id), ("IG_USER_ID", ig_id))
+        if not v
+    ]
+    if missing:
+        print(f"  Not set: {', '.join(missing)}")
+        return 1
+    # (label, read-only call, -> id that must match or None, -> detail to show)
+    checks = [
+        # A Page token's /me is the Page itself.
+        (
+            "token is for FB_PAGE_ID",
+            lambda: graph_get("me", token, fields="id,name"),
+            lambda r: (r.get("id"), page_id),
+            lambda r: r.get("name"),
+        ),
+        (
+            "IG_USER_ID is linked to the Page",
+            lambda: graph_get(page_id, token, fields="instagram_business_account"),
+            lambda r: ((r.get("instagram_business_account") or {}).get("id"), ig_id),
+            lambda r: None,
+        ),
+        # Needs instagram_content_publish -- the closest read-only proof
+        # that Instagram publishing is allowed.
+        (
+            "Instagram publishing permission",
+            lambda: graph_get(f"{ig_id}/content_publishing_limit", token, fields="quota_usage"),
+            lambda r: None,
+            lambda r: f"{(r.get('data') or [{}])[0].get('quota_usage', 0)} posts in the last 24h",
+        ),
+    ]
+    ok = True
+    for label, call, match, detail in checks:
+        try:
+            res = call()
+        except (RuntimeError, httpx.HTTPError) as e:
+            print(f"  FAIL  {label}: {e}")
+            ok = False
+            continue
+        pair = match(res)
+        if pair and pair[0] != pair[1]:
+            print(f"  FAIL  {label}: got {pair[0] or 'nothing'}")
+            ok = False
+            continue
+        extra = detail(res)
+        print(f"  ok    {label}" + (f" ({extra})" if extra else ""))
+    print(
+        "  Facebook posting (pages_manage_posts) can't be proven without posting;"
+        " the first real post will confirm it."
+    )
+    return 0 if ok else 1
+
+
 def run(kind, day=None, season=None, dry_run=False):
     day = day or et_today()
     season = season or NHL_SEASON
@@ -884,9 +951,12 @@ def run(kind, day=None, season=None, dry_run=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="EyeWall social posts")
-    parser.add_argument("kind", choices=sorted(POSTS))
+    parser.add_argument("kind", choices=[*sorted(POSTS), "check"])
     parser.add_argument("--date", type=date.fromisoformat, default=None, help="ET date to run as")
     parser.add_argument("--season", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true", help="Render locally; no upload/post")
     args = parser.parse_args()
+    if args.kind == "check":
+        print("\n--- Social: credentials check (read-only) ---")
+        sys.exit(check_credentials())
     sys.exit(run(args.kind, day=args.date, season=args.season, dry_run=args.dry_run))

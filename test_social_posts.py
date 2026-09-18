@@ -365,3 +365,52 @@ class TestGates:
         _, kind, key, images, caption, _ = ship.call_args.args
         assert (kind, key, len(images)) == ("recap", "recap-2026-10-20", 3)
         assert "1 of 2 projected winners won" in caption
+
+
+class TestCredentialsCheck:
+    def responses(self, **over):
+        good = {
+            "me": {"id": "pg", "name": "EyeWall Analytics"},
+            "pg": {"instagram_business_account": {"id": "u1"}, "id": "pg"},
+            "u1/content_publishing_limit": {"data": [{"quota_usage": 2}]},
+        }
+        good.update(over)
+
+        def get(path, token, **params):
+            res = good[path]
+            if isinstance(res, Exception):
+                raise res
+            return res
+
+        return get
+
+    def test_all_good(self, creds, capsys):
+        with patch.object(ig, "graph_get", side_effect=self.responses()):
+            assert ig.check_credentials() == 0
+        out = capsys.readouterr().out
+        assert "ok    token is for FB_PAGE_ID (EyeWall Analytics)" in out
+        assert "(2 posts in the last 24h)" in out
+        assert "FAIL" not in out
+
+    def test_wrong_linked_instagram_fails(self, creds, capsys):
+        other = {"instagram_business_account": {"id": "someone-else"}}
+        with patch.object(ig, "graph_get", side_effect=self.responses(pg=other)):
+            assert ig.check_credentials() == 1
+        assert "FAIL  IG_USER_ID is linked to the Page: got someone-else" in capsys.readouterr().out
+
+    def test_token_for_another_page_fails(self, creds):
+        with patch.object(ig, "graph_get", side_effect=self.responses(me={"id": "other"})):
+            assert ig.check_credentials() == 1
+
+    def test_missing_permission_fails(self, creds):
+        err = RuntimeError("(403) missing instagram_content_publish")
+        responses = self.responses(**{"u1/content_publishing_limit": err})
+        with patch.object(ig, "graph_get", side_effect=responses):
+            assert ig.check_credentials() == 1
+
+    def test_missing_secret_fails_without_calling(self, creds, monkeypatch, capsys):
+        monkeypatch.delenv("IG_USER_ID")
+        with patch.object(ig, "graph_get") as get:
+            assert ig.check_credentials() == 1
+        get.assert_not_called()
+        assert "Not set: IG_USER_ID" in capsys.readouterr().out

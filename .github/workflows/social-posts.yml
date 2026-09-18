@@ -27,10 +27,10 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: 'Which post'
+        description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap]
+        options: [winners, rankings, recap, check]
       dry_run:
         description: 'Render only (images kept as a run artifact), no upload or post'
         type: boolean
