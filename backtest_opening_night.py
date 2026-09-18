@@ -47,6 +47,7 @@ import json
 from collections import defaultdict
 
 import backtest_line_projection as blp
+from projected_lines import avg_source, usable, with_fallback
 from scratches import fetch_keyset
 
 RESULTS = "opening_night_backtest_results.json"
@@ -103,32 +104,6 @@ def load_slates(games):
     return slates
 
 
-def usable(g):
-    return g is not None and sum(g["toi"].values()) / 5 >= blp.MIN_5V5_SECS
-
-
-def avg_source(gs, half_life=None, last_only=False):
-    """gs: game summaries oldest -> newest. Per-game averages of pair weights
-    and player TOI, weighted 0.5 ** (games_ago / half_life) (equal weights if
-    None). TOI is averaged over the games each player dressed in."""
-    if last_only:
-        gs = gs[-1:]
-    w, toi, gp = defaultdict(float), defaultdict(float), defaultdict(float)
-    total = 0.0
-    for k, g in enumerate(reversed(gs)):
-        a = 1.0 if half_life is None else 0.5 ** (k / half_life)
-        total += a
-        for key, v in blp.to_w(g["pairs"]).items():
-            w[key] += a * v
-        for p, v in g["toi"].items():
-            toi[int(p)] += a * v
-        for p in g["dressed"]:
-            gp[p] += a
-    if not total:
-        return {}, {}
-    return {k: v / total for k, v in w.items()}, {p: toi[p] / gp[p] for p in toi if gp[p]}
-
-
 def league_toi(games, season):
     """player -> previous-season 5v5 TOI per game dressed, any team."""
     toi, gp = defaultdict(float), defaultdict(int)
@@ -143,12 +118,6 @@ def league_toi(games, season):
             for p in g["dressed"]:
                 gp[p] += 1
     return {p: toi[p] / gp[p] for p in toi if gp[p]}
-
-
-def with_fallback(toi, fallback):
-    out = dict(fallback)
-    out.update(toi)
-    return out
 
 
 def team_games(games, gids, team):
