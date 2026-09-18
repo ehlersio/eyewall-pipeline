@@ -397,6 +397,7 @@ One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. 
 python social_posts.py winners --dry-run                           # render to social_out/, no upload/post
 python social_posts.py recap --dry-run --date 2026-10-19           # as if run that day (ET)
 gh workflow run social-posts.yml -f kind=rankings -f dry_run=true  # images come back as a run artifact
+gh workflow run social-posts.yml -f kind=check                     # read-only: token, Page and Instagram link, publish permission
 ```
 
 Requires `docs/session_social_posts.sql` to be run in Supabase first (the `social_posts` table + the `social` bucket), and GitHub secrets `META_PAGE_TOKEN`, `IG_USER_ID` and `FB_PAGE_ID`. A platform without its id isn't published to.
