@@ -34,5 +34,5 @@ opening_night_backtest_results.json
 # backtest_projected_lines.py -- run output (shares line_projection_cache/)
 projected_lines_backtest_results.json
 
-# instagram_posts.py --dry-run output
+# social_posts.py --dry-run output
 social_out/

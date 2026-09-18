@@ -1,7 +1,8 @@
 """
-instagram_posts.py -- Automatic Instagram posts for @eyewallanalytics.
+social_posts.py -- Automatic posts to Instagram (@eyewallanalytics) and the
+EyeWall Facebook Page.
 
-Three posts, each a branded 1080x1350 card (or carousel) rendered here with
+Three posts, each a branded 1080x1350 card (or several) rendered here with
 Pillow from tables the nightly pipeline already fills:
 
   rankings  Mondays: this week's 32-team power rankings (power_rankings.py's
@@ -18,39 +19,43 @@ Pillow from tables the nightly pipeline already fills:
 Neutral probability language only -- no betting framing (no odds, lines or
 "picks"), and the AI is never named on these cards.
 
-How a post goes out (Instagram API with Instagram Login):
+How a post goes out (Graph API, one Facebook Login Page token for both):
   1. render JPEG(s) -- Instagram's publishing API only accepts JPEG
-  2. upload to the public Supabase Storage bucket `social` (Instagram fetches
-     the image from a public URL; it can't take an upload)
-  3. POST /{ig-user-id}/media per image (+ a CAROUSEL container for several),
-     wait for FINISHED, then POST /{ig-user-id}/media_publish
-  4. record it in `social_posts` -- a post_key that's already published is
-     never posted again, so the backup crons in instagram.yml are safe
+  2. upload to the public Supabase Storage bucket `social` (both platforms
+     fetch the image from a public URL)
+  3. Instagram: POST /{ig-user-id}/media per image (+ a CAROUSEL container
+     for several), wait for FINISHED, then POST /{ig-user-id}/media_publish.
+     Facebook: POST /{page-id}/photos for one image; for several, upload
+     each unpublished and attach them all to one POST /{page-id}/feed.
+  4. record each platform in `social_posts` -- a (platform, post_key) that's
+     already published is never posted again, so the backup crons in
+     social-posts.yml are safe, and a platform that failed is retried
+     without re-posting to the one that succeeded
 
 Each post refuses stale data rather than posting yesterday's numbers:
 rankings need a row generated today, winners need today's game_win_probs,
 recap needs graded games. Missing data exits non-zero (the backup cron
 retries later); a genuinely empty day (no games, offseason) exits 0.
 
-Credentials (GitHub secrets): IG_USER_ID and IG_ACCESS_TOKEN (a long-lived
-Instagram token, valid 60 days). The token is refreshed here every
-TOKEN_REFRESH_DAYS and the new one kept in `social_tokens`, so the secret
-only needs re-setting if a refresh chain ever breaks. Without credentials,
-posts are rendered and uploaded but not published (logged, exit 0).
+Credentials (GitHub secrets): META_PAGE_TOKEN -- a Page access token for the
+EyeWall Page, from a long-lived user token, so it doesn't expire -- plus
+IG_USER_ID (the Instagram account linked to that Page) and FB_PAGE_ID. A
+platform whose id or the token is missing is uploaded but not published
+(logged, exit 0).
 
 Usage:
-  python instagram_posts.py rankings
-  python instagram_posts.py winners
-  python instagram_posts.py recap
-  python instagram_posts.py winners --dry-run      # render to social_out/, no upload/post
-  python instagram_posts.py recap --date 2026-10-19  # as if run that day (ET)
+  python social_posts.py rankings
+  python social_posts.py winners
+  python social_posts.py recap
+  python social_posts.py winners --dry-run      # render to social_out/, no upload/post
+  python social_posts.py recap --date 2026-10-19  # as if run that day (ET)
 
-Tables: docs/session_instagram_posts.sql.
+Tables: docs/session_social_posts.sql.
 """
 
 import argparse
-import hashlib
 import io
+import json
 import os
 import sys
 import time
@@ -69,9 +74,9 @@ W, H = 1080, 1350  # 4:5 portrait, Instagram's tallest feed ratio
 ASSETS = Path(__file__).parent / "assets"
 OUT_DIR = Path(__file__).parent / "social_out"
 
-GRAPH = "https://graph.instagram.com/v23.0"
+GRAPH = "https://graph.facebook.com/v23.0"
+SITE_URL = "eyewallanalytics.com"
 BUCKET = "social"
-TOKEN_REFRESH_DAYS = 7
 CONTAINER_POLL_SECONDS = 3
 CONTAINER_POLL_TRIES = 40
 GAME_TYPES = (2, 3)  # regular season, playoffs
@@ -626,58 +631,13 @@ def caption_recap(s, span):
     return "\n".join(lines)
 
 
-# ── Instagram publishing ────────────────────────────────────────────────
-
-
-def token_fingerprint(token):
-    return hashlib.sha256(token.encode()).hexdigest()[:16]
-
-
-def get_access_token(client, env_token):
-    """The freshest long-lived token: the one kept in social_tokens, unless
-    the IG_ACCESS_TOKEN secret has been re-set since (fingerprint differs),
-    in which case the secret wins. Refreshed every TOKEN_REFRESH_DAYS."""
-    rows = (
-        client.table("social_tokens").select("*").eq("platform", "instagram").execute().data or []
-    )
-    row = rows[0] if rows else None
-    seed = token_fingerprint(env_token)
-    if row and row.get("seed_fingerprint") == seed:
-        token, refreshed = row["access_token"], datetime.fromisoformat(row["refreshed_at"])
-    else:
-        token, refreshed = env_token, None
-
-    if refreshed and datetime.now(UTC) - refreshed < timedelta(days=TOKEN_REFRESH_DAYS):
-        return token
-    try:
-        res = httpx.get(
-            "https://graph.instagram.com/refresh_access_token",
-            params={"grant_type": "ig_refresh_token", "access_token": token},
-            timeout=30,
-        )
-        res.raise_for_status()
-        token = res.json()["access_token"]
-    except (httpx.HTTPError, KeyError) as e:
-        # A token under 24h old can't be refreshed yet; keep using it.
-        print(f"  Token refresh skipped: {e}")
-        if refreshed:
-            return token
-    client.table("social_tokens").upsert(
-        {
-            "platform": "instagram",
-            "access_token": token,
-            "seed_fingerprint": seed,
-            "refreshed_at": datetime.now(UTC).isoformat(),
-        },
-        on_conflict="platform",
-    ).execute()
-    return token
+# ── Publishing ──────────────────────────────────────────────────────────
 
 
 def graph_post(path, token, **params):
     res = httpx.post(f"{GRAPH}/{path}", data={**params, "access_token": token}, timeout=60)
     if res.status_code >= 400:
-        raise RuntimeError(f"Instagram {path} failed ({res.status_code}): {res.text[:300]}")
+        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
     return res.json()
 
 
@@ -698,7 +658,7 @@ def wait_for_container(container_id, token):
     raise RuntimeError(f"Instagram container {container_id} not ready after polling")
 
 
-def publish(user_id, token, image_urls, caption):
+def publish_instagram(user_id, token, image_urls, caption):
     """Single image or carousel -> published media id."""
     if len(image_urls) == 1:
         creation = graph_post(f"{user_id}/media", token, image_url=image_urls[0], caption=caption)
@@ -720,33 +680,61 @@ def publish(user_id, token, image_urls, caption):
     return graph_post(f"{user_id}/media_publish", token, creation_id=creation["id"])["id"]
 
 
+def publish_facebook(page_id, token, image_urls, caption):
+    """Single photo post, or several photos uploaded unpublished and then
+    attached to one feed post -> post id."""
+    if len(image_urls) == 1:
+        res = graph_post(f"{page_id}/photos", token, url=image_urls[0], message=caption)
+        return res.get("post_id") or res["id"]
+    attached = {}
+    for i, url in enumerate(image_urls):
+        photo = graph_post(f"{page_id}/photos", token, url=url, published="false")
+        attached[f"attached_media[{i}]"] = json.dumps({"media_fbid": photo["id"]})
+    return graph_post(f"{page_id}/feed", token, message=caption, **attached)["id"]
+
+
+def platform_caption(platform, caption):
+    """Links aren't clickable in Instagram captions but are on Facebook."""
+    if platform == "facebook":
+        return caption.replace("link in bio", SITE_URL)
+    return caption
+
+
+# platform -> (env var for its account id, publisher)
+PLATFORMS = {
+    "instagram": ("IG_USER_ID", publish_instagram),
+    "facebook": ("FB_PAGE_ID", publish_facebook),
+}
+
+
 def upload_images(client, kind, post_key, jpegs):
     urls = []
     bucket = client.storage.from_(BUCKET)
     for i, data in enumerate(jpegs, 1):
-        path = f"instagram/{kind}/{post_key}-{i}.jpg"
+        path = f"{kind}/{post_key}-{i}.jpg"
         bucket.upload(path, data, {"content-type": "image/jpeg", "upsert": "true"})
         urls.append(bucket.get_public_url(path).rstrip("?"))
     return urls
 
 
-def already_posted(client, post_key):
+def published_platforms(client, post_key):
     rows = (
         client.table("social_posts")
-        .select("status")
-        .eq("platform", "instagram")
+        .select("platform,status")
         .eq("post_key", post_key)
         .execute()
         .data
         or []
     )
-    return bool(rows) and rows[0]["status"] == "published"
+    return {r["platform"] for r in rows if r["status"] == "published"}
 
 
-def record(client, kind, post_key, status, image_urls, caption, media_id=None, error=None):
+def record(
+    client, platform, kind, post_key, status, image_urls, caption, media_id=None, error=None
+):
     client.table("social_posts").upsert(
         {
-            "platform": "instagram",
+            "platform": platform,
             "kind": kind,
             "post_key": post_key,
             "status": status,
@@ -761,33 +749,43 @@ def record(client, kind, post_key, status, image_urls, caption, media_id=None, e
 
 
 def ship(client, kind, post_key, images, caption, dry_run):
-    """Render -> upload -> publish -> record. Returns an exit code."""
+    """Render -> upload -> publish to each platform not already published
+    -> record per platform. Returns an exit code (1 if any platform failed)."""
     jpegs = [to_jpeg(img) for img in images]
     if dry_run:
         OUT_DIR.mkdir(exist_ok=True)
         for i, data in enumerate(jpegs, 1):
             (OUT_DIR / f"{post_key}-{i}.jpg").write_bytes(data)
-        (OUT_DIR / f"{post_key}.txt").write_text(caption)
-        print(f"  DRY RUN: {len(jpegs)} image(s) + caption written to {OUT_DIR}/{post_key}-*")
+        for platform in PLATFORMS:
+            (OUT_DIR / f"{post_key}-{platform}.txt").write_text(platform_caption(platform, caption))
+        print(f"  DRY RUN: {len(jpegs)} image(s) + captions written to {OUT_DIR}/{post_key}-*")
         return 0
 
+    done = published_platforms(client, post_key)
     urls = upload_images(client, kind, post_key, jpegs)
     print(f"  Uploaded {len(urls)} image(s)")
-    user_id, env_token = os.environ.get("IG_USER_ID"), os.environ.get("IG_ACCESS_TOKEN")
-    if not user_id or not env_token:
-        print("  IG_USER_ID / IG_ACCESS_TOKEN not set -- rendered and uploaded, not published")
-        record(client, kind, post_key, "rendered", urls, caption)
-        return 0
-    try:
-        token = get_access_token(client, env_token)
-        media_id = publish(user_id, token, urls, caption)
-    except (RuntimeError, httpx.HTTPError) as e:
-        print(f"  Publish failed: {e}")
-        record(client, kind, post_key, "failed", urls, caption, error=str(e)[:1000])
-        return 1
-    record(client, kind, post_key, "published", urls, caption, media_id=media_id)
-    print(f"  Published to Instagram: {media_id}")
-    return 0
+    token = os.environ.get("META_PAGE_TOKEN")
+    code = 0
+    for platform, (id_var, publisher) in PLATFORMS.items():
+        if platform in done:
+            print(f"  {platform}: already published")
+            continue
+        text = platform_caption(platform, caption)
+        account_id = os.environ.get(id_var)
+        if not token or not account_id:
+            print(f"  {platform}: {id_var} / META_PAGE_TOKEN not set -- uploaded, not published")
+            record(client, platform, kind, post_key, "rendered", urls, text)
+            continue
+        try:
+            media_id = publisher(account_id, token, urls, text)
+        except (RuntimeError, httpx.HTTPError, KeyError) as e:
+            print(f"  {platform}: publish failed: {e}")
+            record(client, platform, kind, post_key, "failed", urls, text, error=str(e)[:1000])
+            code = 1
+            continue
+        record(client, platform, kind, post_key, "published", urls, text, media_id=media_id)
+        print(f"  {platform}: published {media_id}")
+    return code
 
 
 # ── Posts ───────────────────────────────────────────────────────────────
@@ -876,16 +874,16 @@ POSTS = {"rankings": post_rankings, "winners": post_winners, "recap": post_recap
 def run(kind, day=None, season=None, dry_run=False):
     day = day or et_today()
     season = season or NHL_SEASON
-    print(f"\n--- Instagram: {kind} ({day}, season {season}) ---")
+    print(f"\n--- Social: {kind} ({day}, season {season}) ---")
     client = get_client()
-    if not dry_run and already_posted(client, f"{kind}-{day.isoformat()}"):
-        print("  Already published -- nothing to do")
+    if not dry_run and published_platforms(client, f"{kind}-{day.isoformat()}") >= set(PLATFORMS):
+        print("  Already published everywhere -- nothing to do")
         return 0
     return POSTS[kind](client, season, day, dry_run)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="EyeWall Instagram posts")
+    parser = argparse.ArgumentParser(description="EyeWall social posts")
     parser.add_argument("kind", choices=sorted(POSTS))
     parser.add_argument("--date", type=date.fromisoformat, default=None, help="ET date to run as")
     parser.add_argument("--season", type=int, default=None)

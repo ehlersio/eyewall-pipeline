@@ -1,7 +1,7 @@
 """
-test_instagram_posts.py -- coverage for instagram_posts.py: ranking movement,
+test_social_posts.py -- coverage for social_posts.py: ranking movement,
 winners filtering, grading/recap, captions (incl. no betting language),
-rendering, token refresh, publishing, and the per-post gates. No network/DB.
+rendering, Instagram + Facebook publishing, and the per-post gates. No network/DB.
 """
 
 import io
@@ -15,7 +15,7 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 import pytest
 from PIL import Image
 
-import instagram_posts as ig
+import social_posts as ig
 
 NOW = datetime(2026, 10, 20, 15, 30, tzinfo=UTC)
 TODAY = date(2026, 10, 20)
@@ -168,87 +168,144 @@ def table_client(tables):
     return client
 
 
-class TestToken:
-    def test_fresh_stored_token_used_without_refresh(self):
-        env = "seed-token"
-        row = {
-            "access_token": "stored",
-            "seed_fingerprint": ig.token_fingerprint(env),
-            "refreshed_at": (NOW - timedelta(days=1)).isoformat(),
-        }
-        client = table_client({"social_tokens": [row]})
-        with (
-            patch.object(ig, "datetime", wraps=datetime) as dt,
-            patch.object(ig.httpx, "get") as get,
-        ):
-            dt.now.return_value = NOW
-            assert ig.get_access_token(client, env) == "stored"
-        get.assert_not_called()
-
-    def test_reset_secret_wins_and_is_refreshed(self):
-        row = {
-            "access_token": "stored",
-            "seed_fingerprint": ig.token_fingerprint("old-secret"),
-            "refreshed_at": NOW.isoformat(),
-        }
-        client = table_client({"social_tokens": [row]})
-        res = MagicMock()
-        res.json.return_value = {"access_token": "refreshed"}
-        with patch.object(ig.httpx, "get", return_value=res) as get:
-            assert ig.get_access_token(client, "new-secret") == "refreshed"
-        assert get.call_args.kwargs["params"]["access_token"] == "new-secret"
-
-
 class TestPublish:
-    def test_carousel_flow(self):
+    def test_instagram_carousel_flow(self):
         posts = iter([{"id": "c1"}, {"id": "c2"}, {"id": "car"}, {"id": "media9"}])
         with (
             patch.object(ig, "graph_post", side_effect=lambda *a, **k: next(posts)) as gp,
             patch.object(ig, "wait_for_container") as wait,
         ):
-            assert ig.publish("u1", "tok", ["a.jpg", "b.jpg"], "cap") == "media9"
+            assert ig.publish_instagram("u1", "tok", ["a.jpg", "b.jpg"], "cap") == "media9"
         carousel = gp.call_args_list[2]
         assert carousel.kwargs["media_type"] == "CAROUSEL"
         assert carousel.kwargs["children"] == "c1,c2"
         assert gp.call_args_list[3].kwargs == {"creation_id": "car"}
         assert [c.args[0] for c in wait.call_args_list] == ["c1", "c2", "car"]
 
-    def test_ship_without_credentials_records_rendered(self, monkeypatch):
-        monkeypatch.delenv("IG_USER_ID", raising=False)
-        monkeypatch.delenv("IG_ACCESS_TOKEN", raising=False)
-        img = Image.new("RGB", (10, 10))
-        with (
-            patch.object(ig, "upload_images", return_value=["u"]),
-            patch.object(ig, "record") as rec,
-            patch.object(ig, "publish") as pub,
-        ):
-            assert ig.ship(MagicMock(), "winners", "winners-x", [img], "cap", False) == 0
-        pub.assert_not_called()
-        assert rec.call_args.args[3] == "rendered"
+    def test_facebook_single_photo(self):
+        with patch.object(ig, "graph_post", return_value={"id": "p1", "post_id": "pg_p1"}) as gp:
+            assert ig.publish_facebook("pg", "tok", ["a.jpg"], "cap") == "pg_p1"
+        assert gp.call_args.args[0] == "pg/photos"
+        assert gp.call_args.kwargs == {"url": "a.jpg", "message": "cap"}
 
-    def test_ship_failure_exits_nonzero(self, monkeypatch):
-        monkeypatch.setenv("IG_USER_ID", "u1")
-        monkeypatch.setenv("IG_ACCESS_TOKEN", "tok")
-        img = Image.new("RGB", (10, 10))
-        with (
-            patch.object(ig, "upload_images", return_value=["u"]),
-            patch.object(ig, "get_access_token", return_value="tok"),
-            patch.object(ig, "publish", side_effect=RuntimeError("boom")),
-            patch.object(ig, "record") as rec,
-        ):
-            assert ig.ship(MagicMock(), "winners", "winners-x", [img], "cap", False) == 1
-        assert rec.call_args.args[3] == "failed"
+    def test_facebook_multi_photo_attaches_unpublished_uploads(self):
+        posts = iter([{"id": "f1"}, {"id": "f2"}, {"id": "pg_post"}])
+        with patch.object(ig, "graph_post", side_effect=lambda *a, **k: next(posts)) as gp:
+            assert ig.publish_facebook("pg", "tok", ["a.jpg", "b.jpg"], "cap") == "pg_post"
+        assert [c.kwargs["published"] for c in gp.call_args_list[:2]] == ["false", "false"]
+        feed = gp.call_args_list[2]
+        assert feed.args[0] == "pg/feed"
+        assert feed.kwargs["message"] == "cap"
+        assert feed.kwargs["attached_media[0]"] == '{"media_fbid": "f1"}'
+        assert feed.kwargs["attached_media[1]"] == '{"media_fbid": "f2"}'
+
+    def test_facebook_caption_gets_a_real_link(self):
+        assert ig.platform_caption("facebook", "Scorecard: link in bio.") == (
+            "Scorecard: eyewallanalytics.com."
+        )
+        assert ig.platform_caption("instagram", "Scorecard: link in bio.") == (
+            "Scorecard: link in bio."
+        )
+
+
+def fake_platforms(ig_result=None, fb_result=None):
+    """PLATFORMS with mocked publishers; a result that's an exception raises."""
+    ig_pub = MagicMock(side_effect=ig_result if isinstance(ig_result, Exception) else None)
+    ig_pub.return_value = ig_result
+    fb_pub = MagicMock(side_effect=fb_result if isinstance(fb_result, Exception) else None)
+    fb_pub.return_value = fb_result
+    return {"instagram": ("IG_USER_ID", ig_pub), "facebook": ("FB_PAGE_ID", fb_pub)}
+
+
+def ship(client=None, done=()):
+    img = Image.new("RGB", (10, 10))
+    with (
+        patch.object(ig, "upload_images", return_value=["u"]),
+        patch.object(ig, "published_platforms", return_value=set(done)),
+        patch.object(ig, "record") as rec,
+    ):
+        code = ig.ship(client or MagicMock(), "recap", "recap-x", [img], "see link in bio", False)
+    # record(client, platform, kind, post_key, status, ...)
+    return code, {c.args[1]: (c.args[4], c.args[6]) for c in rec.call_args_list}
+
+
+@pytest.fixture
+def creds(monkeypatch):
+    monkeypatch.setenv("META_PAGE_TOKEN", "tok")
+    monkeypatch.setenv("IG_USER_ID", "u1")
+    monkeypatch.setenv("FB_PAGE_ID", "pg")
+
+
+class TestShip:
+    def test_publishes_both_with_platform_captions(self, creds):
+        platforms = fake_platforms("ig1", "fb1")
+        with patch.dict(ig.PLATFORMS, platforms):
+            code, recs = ship()
+        assert code == 0
+        assert recs == {
+            "instagram": ("published", "see link in bio"),
+            "facebook": ("published", "see eyewallanalytics.com"),
+        }
+        platforms["instagram"][1].assert_called_once_with("u1", "tok", ["u"], "see link in bio")
+
+    def test_one_platform_failing_still_posts_the_other(self, creds):
+        with patch.dict(ig.PLATFORMS, fake_platforms("ig1", RuntimeError("boom"))):
+            code, recs = ship()
+        assert code == 1
+        assert recs["instagram"][0] == "published"
+        assert recs["facebook"][0] == "failed"
+
+    def test_already_published_platform_is_not_reposted(self, creds):
+        platforms = fake_platforms("ig1", "fb1")
+        with patch.dict(ig.PLATFORMS, platforms):
+            code, recs = ship(done={"instagram"})
+        assert code == 0
+        platforms["instagram"][1].assert_not_called()
+        assert list(recs) == ["facebook"]
+
+    def test_missing_page_id_records_rendered(self, creds, monkeypatch):
+        monkeypatch.delenv("FB_PAGE_ID")
+        platforms = fake_platforms("ig1", "fb1")
+        with patch.dict(ig.PLATFORMS, platforms):
+            code, recs = ship()
+        assert code == 0
+        platforms["facebook"][1].assert_not_called()
+        assert recs["facebook"][0] == "rendered"
+
+    def test_no_token_publishes_nothing(self, creds, monkeypatch):
+        monkeypatch.delenv("META_PAGE_TOKEN")
+        with patch.dict(ig.PLATFORMS, fake_platforms("ig1", "fb1")):
+            code, recs = ship()
+        assert code == 0
+        assert {status for status, _ in recs.values()} == {"rendered"}
 
 
 class TestGates:
-    def test_already_published_is_skipped(self):
-        client = table_client({"social_posts": [{"status": "published"}]})
+    def test_published_everywhere_is_skipped(self):
+        rows = [
+            {"platform": "instagram", "status": "published"},
+            {"platform": "facebook", "status": "published"},
+        ]
+        client = table_client({"social_posts": rows})
         with (
             patch.object(ig, "get_client", return_value=client),
-            patch.object(ig, "post_winners") as pw,
+            patch.dict(ig.POSTS, {"winners": MagicMock()}),
         ):
             assert ig.run("winners", day=TODAY, season=20262027) == 0
-        pw.assert_not_called()
+            ig.POSTS["winners"].assert_not_called()
+
+    def test_published_on_one_platform_still_runs(self):
+        rows = [
+            {"platform": "instagram", "status": "published"},
+            {"platform": "facebook", "status": "failed"},
+        ]
+        client = table_client({"social_posts": rows})
+        with (
+            patch.object(ig, "get_client", return_value=client),
+            patch.dict(ig.POSTS, {"winners": MagicMock(return_value=0)}),
+        ):
+            assert ig.run("winners", day=TODAY, season=20262027) == 0
+            ig.POSTS["winners"].assert_called_once()
 
     def test_winners_no_games_is_quiet(self):
         client = table_client({"game_win_probs": []})
