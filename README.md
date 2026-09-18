@@ -28,6 +28,9 @@ PRIMARY_TEAM_ABBR=CAR
 OPENROUTER_API_KEY=your_openrouter_api_key
 WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
 POLL_SECRET=your_worker_poll_secret
+# Optional -- only instagram_posts.py uses these; without them it renders but doesn't publish
+IG_USER_ID=your_instagram_user_id
+IG_ACCESS_TOKEN=your_long_lived_instagram_token
 ```
 
 **`NHL_SEASON`/`PWHL_SEASON` are now fallbacks, not the primary source.** Both are live-resolved from the Worker's `/config/seasons` endpoint via `season_lookup.py` — see [Live Season Resolution](#live-season-resolution) below. These env vars only matter if the Worker is unreachable when the pipeline starts.
@@ -372,6 +375,30 @@ python prediction_scorecard.py --backtest        # + write the three backtest ro
 ```
 
 Requires `docs/session_prediction_scorecard.sql` to be run in Supabase first (creates both tables + RLS policies).
+
+### `instagram_posts.py` (2026-09)
+
+Automatic Instagram posts, run by `.github/workflows/instagram.yml` (not `run.py`):
+
+| Post | When (UTC, backup an hour later) | Source |
+|---|---|---|
+| `rankings` -- 32-team power rankings, movement vs. a week earlier (2 slides) | Mon 15:00 | `power_rankings_narratives` |
+| `winners` -- each game's projected winner + win probability | daily 15:30, skipped with no games | `game_win_probs` |
+| `recap` -- last Mon-Sun graded: record, most confident hits and misses (up to 3 slides) | Mon 18:00 | `game_win_probs` vs `game_log` |
+
+Cards are 1080x1350 JPEGs drawn with Pillow in the site's palette and Barlow fonts (`assets/fonts/`, OFL). They're uploaded to the public Supabase Storage bucket `social`, since Instagram fetches images by URL, and then published through the Instagram API with Instagram Login. Every attempt is written to `social_posts`. A post key (`<kind>-<ET date>`) that's already published is never posted again, which makes the backup crons safe.
+
+Each post checks its data before it goes out. `rankings` needs all 32 teams ranked today. `winners` needs this morning's `game_win_probs` (the row the recap later grades) and leaves off games that have already started. `recap` needs graded games. Data that isn't ready exits 1, and the backup run tries again. A day with nothing to post (no games, offseason, or rankings not generated yet) exits 0.
+
+The token is a long-lived Instagram token (60 days). It's refreshed weekly and the new one is stored in `social_tokens`. Re-setting the `IG_ACCESS_TOKEN` secret takes over from the stored token.
+
+```bash
+python instagram_posts.py winners --dry-run                    # render to social_out/, no upload/post
+python instagram_posts.py recap --dry-run --date 2026-10-19    # as if run that day (ET)
+gh workflow run instagram.yml -f kind=rankings -f dry_run=true # images come back as a run artifact
+```
+
+Requires `docs/session_instagram_posts.sql` to be run in Supabase first (both tables + the `social` bucket), and GitHub secrets `IG_USER_ID` / `IG_ACCESS_TOKEN`.
 
 ### `power_rankings.py`
 32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).

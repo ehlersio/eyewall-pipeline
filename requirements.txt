@@ -9,3 +9,4 @@ realtime==2.31.0
 supafunc==0.10.2
 scikit-learn
 scipy
+pillow==11.3.0
