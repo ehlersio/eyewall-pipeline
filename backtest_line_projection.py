@@ -172,7 +172,18 @@ def load_season(season, positions):
     path = os.path.join(CACHE_DIR, f"{season}.json.gz")
     if os.path.exists(path):
         with gzip.open(path, "rt") as f:
-            return {int(k): v for k, v in json.load(f).items()}
+            raw = json.load(f)
+        # JSON stringifies int dict keys: restore player ids in "toi" so a
+        # cached run matches a fresh one (rank() looks TOI up by int id --
+        # string keys silently read as 0 TOI and scrambled the true line
+        # order in every cache-loaded run before this fix)
+        return {
+            int(gid): {
+                team: {**g, "toi": {int(p): v for p, v in g["toi"].items()}}
+                for team, g in teams.items()
+            }
+            for gid, teams in raw.items()
+        }
     print(f"  fetching {season} shifts...")
     rows = fetch_season_shifts(season)
     print(f"  {len(rows):,} rows")
