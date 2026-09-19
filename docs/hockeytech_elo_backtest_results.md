@@ -1,4 +1,4 @@
-# AHL / ECHL Elo Backtest — Results (2026-09-19)
+# AHL / ECHL / PWHL Elo Backtest — Results (2026-09-19)
 
 `backtest_hockeytech_elo.py`, read-only. Three regular seasons + playoffs per
 league straight from HockeyTech's modulekit `schedule` view (2023-24 through
@@ -93,3 +93,27 @@ but not a reason to fork constants now.
 
 (1) and (2) shipped with this backtest: `hockeytech_elo.py` and
 eyewall-poller's `/{league}/prediction`. AHL opens 2026-10-02, ECHL 2026-10-15.
+
+## PWHL (added 2026-09-19)
+
+Same script (`python backtest_hockeytech_elo.py pwhl`), seasons 1/3 (2024),
+5/6 (2024-25), 8/9 (2025-26). `pwhl_game_log`'s `ot`/`shootout` columns are
+false for every game, so the feed's "Final OT"/"Final SO" status is the only
+overtime source here too (26.9% of PWHL games went past regulation).
+
+| 2025-26 holdout, regular season (n = 120) | Brier | Acc. |
+|---|---|---|
+| **Elo, elo.py defaults** | **0.240** | 56% |
+| Elo, tuned (K 4 / home 45 / regress 0 — noise again) | 0.241 | 56% |
+| Home win rate (constant, 55.9%) | 0.247 | 57% |
+| Live heuristic, ported without its PP% and Corsi terms | 0.312 | 57% |
+
+Same failure shape: 0% or 100% in 49 of 120 games (19 of those wrong), and
+the home team at 0% in 7 of the season's first 12 games. The sample is
+small (one holdout season of 120 games), but Elo is the better model on
+every slice, and the heuristic's certainty problem doesn't depend on
+sample size. This supersedes `docs/pwhl_elo_investigation.md`'s "not
+recommending production wiring" -- that report couldn't see the OT/SO
+flag, and its scorecard port showed the same symptom (log loss 2.56).
+`/pwhl/prediction` now uses Elo too; 2026-27's four expansion teams (DET,
+HAM, LV, SJS) start at 1500.

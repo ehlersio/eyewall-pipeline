@@ -1,5 +1,7 @@
 # PWHL Elo Investigation — Results
 
+> **Superseded (2026-09-19):** `docs/hockeytech_elo_backtest_results.md` re-ran this with the overtime flag from HockeyTech's feed and found the same result more clearly; `/pwhl/prediction` now uses Elo.
+
 **Type:** Execution report. Runner: `eyewall-pipeline/backtest_pwhl_elo.py`.
 Read-only against production — no writes anywhere. Follow-up to
 `docs/elo_prediction_model_results.md`, which deliberately scoped NHL only

@@ -124,7 +124,7 @@ class TestUpcoming:
 class TestRun:
     def test_no_season_list_keeps_existing_ratings(self):
         with (
-            patch.object(he, "get_hockeytech_seasons", return_value=None),
+            patch.object(he, "league_seasons", return_value=None),
             patch.object(he, "get_client") as gc,
         ):
             assert he.run("ahl", today=date(2026, 10, 2)) == 1
@@ -149,7 +149,7 @@ class TestRun:
         with (
             patch.object(
                 he,
-                "get_hockeytech_seasons",
+                "league_seasons",
                 return_value=[
                     season(90, "regular", "2025-10-07"),
                     season(94, "regular", "2026-10-02"),
@@ -167,3 +167,38 @@ class TestRun:
         )
         [prob] = client.table.return_value.upsert.call_args_list[1].args[0]
         assert prob["game_id"] == 2 and prob["home_win_prob"] > 0.55  # 390 won and is at home
+
+
+class TestPwhlSeasons:
+    def test_types_come_from_the_worker_not_hockeytech_labels(self):
+        feed = {
+            "Seasons": [
+                {
+                    "season_id": "10",
+                    "season_name": "2026-27 Pre-Season",
+                    "start_date": "2026-10-01",
+                },
+                {"season_id": "9", "season_name": "2026 Playoffs", "start_date": "2026-04-28"},
+                {"season_id": "7", "season_name": "2025-26 Preseason", "start_date": "2025-06-01"},
+                {"season_id": "99", "season_name": "Unknown", "start_date": "2027-01-01"},
+            ]
+        }
+        types = {10: "regular", 9: "playoffs", 7: "preseason"}
+        with (
+            patch("hockeytech_stats._modulekit_get", return_value=feed),
+            patch.object(he, "get_season_type", side_effect=types.get),
+        ):
+            seasons = he.pwhl_seasons()
+        assert [(s["seasonId"], s["seasonType"]) for s in seasons] == [
+            (10, "regular"),  # HockeyTech calls it Pre-Season; it holds 2026-27's schedule
+            (9, "playoffs"),
+            (7, "preseason"),
+        ]  # 99 unknown to the Worker -> left out
+        replay = he.replay_seasons(seasons, date(2026, 9, 19))
+        assert [s["seasonId"] for s in replay] == [9, 10]
+
+    def test_feed_failure_means_no_season_list(self):
+        from hockeytech_stats import FetchError
+
+        with patch("hockeytech_stats._modulekit_get", side_effect=FetchError("down")):
+            assert he.pwhl_seasons() is None

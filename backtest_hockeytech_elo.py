@@ -32,7 +32,7 @@ carryover question) and playoffs separately.
 Read-only -- no writes to Supabase or anywhere else except the local
 results JSON.
 
-Run: python backtest_hockeytech_elo.py [ahl|echl]   (default: both)
+Run: python backtest_hockeytech_elo.py [ahl|echl|pwhl]   (default: all)
 """
 
 import itertools
@@ -45,6 +45,7 @@ from datetime import date, timedelta
 import requests
 
 import elo
+from hockeytech_elo import PWHL
 from hockeytech_leagues import AHL, ECHL, HOCKEYTECH_BASE
 
 # (regular season_id, playoffs season_id) oldest first -- from HockeyTech's
@@ -52,8 +53,9 @@ from hockeytech_leagues import AHL, ECHL, HOCKEYTECH_BASE
 SEASONS = {
     "ahl": [(81, 84), (86, 88), (90, 92)],  # 2023-24, 2024-25, 2025-26
     "echl": [(66, 68), (70, 71), (73, 76)],
+    "pwhl": [(1, 3), (5, 6), (8, 9)],  # 2024, 2024-25, 2025-26
 }
-LEAGUES = {"ahl": AHL, "echl": ECHL}
+LEAGUES = {"ahl": AHL, "echl": ECHL, "pwhl": PWHL}
 OPENING_WINDOW_DAYS = 15
 
 SWEEP_K = [4, 6, 8, 10, 12, 15, 20]
@@ -308,7 +310,7 @@ def backtest(key):
 
 
 if __name__ == "__main__":
-    keys = sys.argv[1:] or ["ahl", "echl"]
+    keys = sys.argv[1:] or ["ahl", "echl", "pwhl"]
     results = {k: backtest(k) for k in keys}
     with open("backtest_hockeytech_elo_results.json", "w") as f:
         json.dump(results, f, indent=2)

@@ -240,6 +240,18 @@ jobs:
         # resolution has an env-var fallback path that needs this set if
         # the live Worker call is ever unreachable during this job.
 
+      - name: PWHL Elo ratings + win probabilities (hockeytech_elo.py)
+        if: ${{ !cancelled() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_elo.py pwhl
+        # Same as the AHL/ECHL step: full replay from HockeyTech's schedule
+        # feed (pwhl_game_log's ot/shootout columns are never populated), so
+        # it doesn't depend on the steps above. Writes pwhl_team_elo_ratings
+        # (read by eyewall-poller's /pwhl/prediction) and pwhl_game_win_probs.
+        # Tables: docs/pwhl_elo_ddl.sql.
+
       - name: Notify on failure
         if: failure()
         run: echo "PWHL pipeline failed — check logs above"

@@ -1,5 +1,5 @@
 """
-hockeytech_elo.py -- AHL/ECHL Elo ratings and pre-game win probabilities.
+hockeytech_elo.py -- AHL/ECHL/PWHL Elo ratings and pre-game win probabilities.
 
 The AHL/ECHL counterpart of elo_ratings.py + win_probs.py, validated by
 backtest_hockeytech_elo.py (docs/hockeytech_elo_backtest_results.md: Brier
@@ -39,10 +39,37 @@ from zoneinfo import ZoneInfo
 
 import elo
 from db import get_client
-from hockeytech_leagues import AHL, ECHL
-from season_lookup import get_hockeytech_seasons
+from hockeytech_leagues import AHL, ECHL, League
+from season_lookup import get_hockeytech_seasons, get_season_type
 
-LEAGUES = {"ahl": AHL, "echl": ECHL}
+# The PWHL is on the same HockeyTech feed; only what this module needs
+# (pwhl_stats.py has the full config and TEAM_ID_MAP this mirrors).
+PWHL = League(
+    key="pwhl",
+    label="PWHL",
+    hockeytech_key="446521baf8c38984",
+    site_id="0",
+    league_id="1",
+    referer="https://www.thepwhl.com/",
+    team_id_map={
+        "1": "BOS",
+        "2": "MIN",
+        "3": "MTL",
+        "4": "NY",
+        "5": "OTT",
+        "6": "TOR",
+        "8": "SEA",
+        "9": "VAN",
+        "10": "DET",
+        "11": "HAM",
+        "12": "LV",
+        "13": "SJS",
+    },
+    fallback_season=8,
+    season_examples="",
+    news_sources=(),
+)
+LEAGUES = {"ahl": AHL, "echl": ECHL, "pwhl": PWHL}
 ET = ZoneInfo("America/New_York")
 REPLAY_FROM = "2023-09-01"  # 2023-24 onward -- the backtested window
 REGRESS_LEAD_DAYS = 14
@@ -54,7 +81,7 @@ SEASON_TYPES = ("regular", "playoffs")
 # the Hamilton Hammers (457) for 2026-27 (hockeytech_leagues.py). ECHL's
 # 2026-27 changes aren't mapped -- new team_ids start at the mean, like
 # expansion teams.
-RELOCATED = {"ahl": {"457": "317"}, "echl": {}}
+RELOCATED = {"ahl": {"457": "317"}, "echl": {}, "pwhl": {}}
 
 
 def fetch_schedule(league, season_id):
@@ -64,6 +91,38 @@ def fetch_schedule(league, season_id):
     from hockeytech_stats import _modulekit_get
 
     return _modulekit_get(league, "schedule", {"season_id": season_id}).get("Schedule", [])
+
+
+def pwhl_seasons():
+    """PWHL seasons in get_hockeytech_seasons()' shape. Dates come from
+    HockeyTech's `seasons` view, types from the Worker (get_season_type):
+    HockeyTech's own labels lag -- it calls season 10 "2026-27 Pre-Season"
+    while it holds the 2026-27 regular-season schedule. None if HockeyTech
+    is unreachable; seasons the Worker doesn't recognise are left out."""
+    from hockeytech_stats import FetchError, _modulekit_get
+
+    try:
+        rows = _modulekit_get(PWHL, "seasons", {}).get("Seasons", [])
+    except FetchError as e:
+        print(f"  PWHL seasons fetch failed: {e}")
+        return None
+    out = []
+    for r in rows:
+        stype = get_season_type(int(r["season_id"]))
+        if stype:
+            out.append(
+                {
+                    "seasonId": int(r["season_id"]),
+                    "seasonName": r.get("season_name", ""),
+                    "seasonType": stype,
+                    "startDate": r.get("start_date") or "",
+                }
+            )
+    return out
+
+
+def league_seasons(key):
+    return pwhl_seasons() if key == "pwhl" else get_hockeytech_seasons(key)
 
 
 def replay_seasons(seasons, today):
@@ -186,7 +245,7 @@ def run(key, dry_run=False, today=None):
     league = LEAGUES[key]
     today = today or datetime.now(ET).date()
     print(f"\n--- {league.label} Elo ({today}) ---")
-    seasons = get_hockeytech_seasons(key)
+    seasons = league_seasons(key)
     if not seasons:
         # No season list -> no idea what to replay; keep yesterday's ratings.
         print("  Worker season list unavailable -- not updating")
