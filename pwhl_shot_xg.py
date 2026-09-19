@@ -26,7 +26,11 @@ pwhl_shot_events.x_norm/y_norm are already in NHL rink-coordinate units
 [-42.5, 42.5], attacking net at x=+89-ish) — confirmed live this session,
 no rescaling needed before reusing rapm.py's distance thresholds as-is.
 
-xg_for  = sum of shot_xg() over the shooter's shot attempts this season.
+xg_for  = sum of shot_xg() over the shooter's shot attempts this season --
+          goals included, valued by location like any other attempt. (Until
+          2026-09 a goal counted as a flat 1.0, so xg_for was goals + the
+          xG of every non-goal attempt: ~2x the goals actually scored, and
+          `finishing` was negative for every skater by construction.)
 goals   = count of event_type == "goal" for that shooter.
 finishing = goals - xg_for (positive = scoring above what shot quality/
 volume alone predicts; mirrors moneypuck.py's NHL finishing() metric,
@@ -91,23 +95,20 @@ def _resolve_season_type(season_id: str) -> str | None:
 
 
 # 3-bucket danger-zone xG proxy — same distance-from-goal bucket BOUNDARIES
-# rapm.py uses for NHL (<=15/<=30/>30), but PWHL-native bucket VALUES.
-# Recalibrated (2026-08) from real PWHL shot/goal outcomes: 24,885 shot
-# attempts (goal/shot/blocked_shot) across every season/season_type with
-# shot-event coverage as of this date (season_ids 1, 3, 5, 6, 8, 9).
-# Observed goal-conversion rate per bucket: high 592/4211=0.1406, medium
-# 503/6186=0.0813, low 390/14488=0.0269 — rounded to the values below.
-# Previously ported verbatim from NHL's own calibration (rapm.py's
-# shot_xg(), itself based on league-average MoneyPuck danger-zone xG),
-# unvalidated against PWHL's actual shot-danger distribution. That NHL
-# high-danger rate (0.20) overstated PWHL's real rate by ~42%; medium
-# (0.07) understated it by ~16%; low (0.03) was already close. This is
-# what caused pwhl_goalie_percentiles.py's previously-documented "GSAX
-# runs high vs NHL norms" limitation — see that module's docstring.
+# rapm.py uses for NHL (<=15/<=30/>30), PWHL-native bucket VALUES: each
+# bucket's observed goal rate over every shot attempt (goal/shot/
+# blocked_shot) in pwhl_shot_events, seasons 1/3/5/6/8/9 (24,885 attempts,
+# re-checked 2026-09): high 592/4211 = 0.1406, medium 503/6186 = 0.0813,
+# low 390/14488 = 0.0269. Summed over those attempts they give 1,486 xG for
+# 1,485 actual goals. test_pwhl_shot_xg.py pins that.
+#
+# A goal is an attempt like any other here -- it gets its location's value,
+# not 1.0. That's what makes the rates above (goals / all attempts) add up
+# to the goals actually scored.
 DANGER_XG = {
-    "high": 0.14,
-    "medium": 0.08,
-    "low": 0.03,
+    "high": 0.141,
+    "medium": 0.081,
+    "low": 0.027,
 }
 
 # PWHL's real event_type vocabulary for shot attempts (see module docstring
@@ -118,10 +119,10 @@ REAL_SHOT_TYPES = ("goal", "shot", "blocked_shot")
 def shot_xg(event_type: str, x, y) -> float:
     """Approximate xG from shot location and event type. Own copy of
     rapm.py's shot_xg(), against PWHL's event_type vocabulary instead of
-    NHL's — see module docstring."""
-    if event_type == "goal":
-        return 1.0
-    if event_type not in ("shot", "blocked_shot"):
+    NHL's — see module docstring. Unlike rapm.py's, a goal is valued by its
+    location rather than as 1.0: this feeds a goals-minus-expected metric,
+    so a goal has to carry the same pre-shot value as a save would."""
+    if event_type not in REAL_SHOT_TYPES:
         return 0.0
     # Use distance from goal (rink coords: goal at x=+-89, centre y=0) —
     # same convention rapm.py uses for NHL, valid here since

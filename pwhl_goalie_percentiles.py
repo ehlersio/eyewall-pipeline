@@ -36,9 +36,18 @@ writing this:
     (was 0.07), low 0.03 (unchanged, was already close). This is the same
     fix applied to pwhl_shot_xg.py's skater-side `finishing` metric, which
     shares this constant's derivation — see that module for the full
-    methodology. GSAX magnitude should now read closer to NHL norms;
-    relative ranking (percentiles) was already meaningful before this fix
-    and is unaffected in shape, just rescaled.
+    methodology. That didn't fix the magnitude (strong starters still
+    read +40 to +56) because it wasn't the cause:
+    FIXED (2026-09): _shot_xg() valued every goal allowed at a flat 1.0,
+    so xg_against = goals_against + the xG of every save, and gsax
+    = xg_against - goals_against was just "xG of the shots saved" --
+    always positive, growing with workload. Goals are now valued by
+    location like any other shot faced, and the bucket values are
+    DANGER_XG_FACED: goal rates over shots that reached the goalie (goal +
+    shot), not over every attempt -- blocked shots never reach the goalie,
+    so the all-attempts rates the shooter side uses would understate each
+    faced shot. Summed over every faced shot they give 1,484 xG for 1,485
+    goals allowed.
   - GSAX/60: pwhl_goalie_seasons.toi (season-total, an "MM:SS" string from
     HockeyTech's own minutes_played field — see pwhl_stats.py's
     fetch_goalie_stats) is reliably populated for every goalie with a
@@ -119,15 +128,17 @@ SEASON_TYPE_MAP = {
 
 MIN_GP = 10  # see module docstring
 
-# Same 3-bucket danger-zone xG proxy pwhl_shot_xg.py uses — independent
-# copy, see that module's docstring for why this codebase doesn't
-# cross-import feed-derived math between pipeline modules. Values are
-# PWHL-native, recalibrated from real conversion rates — see
-# pwhl_shot_xg.py's DANGER_XG comment and this module's docstring.
-DANGER_XG = {
-    "high": 0.14,
-    "medium": 0.08,
-    "low": 0.03,
+# Same 3 distance buckets as pwhl_shot_xg.py's DANGER_XG (independent copy,
+# see that module's docstring), but valued over the shots a goalie actually
+# faces: each bucket's goal rate over goal + shot events in pwhl_shot_events
+# (seasons 1/3/5/6/8/9, re-checked 2026-09): high 592/4001 = 0.148, medium
+# 503/4978 = 0.101, low 390/9038 = 0.0432. pwhl_shot_xg.py's all-attempts
+# rates (0.141/0.081/0.027) include blocked shots in the denominator and
+# would understate a shot that got through.
+DANGER_XG_FACED = {
+    "high": 0.148,
+    "medium": 0.101,
+    "low": 0.043,
 }
 
 # A goalie only ever faces shots that actually reach them -- "goal" and
@@ -187,10 +198,9 @@ def _shot_xg(event_type: str, x, y) -> float:
     """Own copy of pwhl_shot_xg.py's shot_xg() — see module docstring.
     Narrower than the original: only ever called with GOALIE_FACED_TYPES
     ("goal"/"shot") here, never "blocked_shot" (see that constant's
-    comment for why)."""
-    if event_type == "goal":
-        return 1.0
-    return DANGER_XG[_danger_bucket(x, y)]
+    comment for why). A goal is valued by its location, not 1.0 -- see the
+    FIXED (2026-09) note in the module docstring."""
+    return DANGER_XG_FACED[_danger_bucket(x, y)]
 
 
 def _toi_minutes(toi_str: str | None) -> float | None:

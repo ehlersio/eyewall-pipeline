@@ -536,7 +536,9 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
                 "wins": int(g.get("wins", 0) or 0),
                 "losses": int(g.get("losses", 0) or 0),
                 "ot_losses": int(g.get("ot_losses", 0) or 0),
-                "shots_against": int(g.get("shots_against", 0) or 0),
+                # HockeyTech's goalie rows call it "shots" (no "shots_against"
+                # key -- reading that stored 0 for every goalie until 2026-09).
+                "shots_against": int(g.get("shots", 0) or 0),
                 "saves": int(g.get("saves", 0) or 0),
                 "goals_against": int(g.get("goals_against", 0) or 0),
                 "sv_pct": float(g["save_percentage"]) if g.get("save_percentage") else None,
@@ -1348,8 +1350,11 @@ def fetch_game_log(sb, season_id: str) -> None:
                 "home_score": _goal_count(g.get("home_goal_count")),
                 "away_score": _goal_count(g.get("visiting_goal_count")),
                 "game_state": "Final" if is_final else status,
-                "ot": bool(g.get("ot")),
-                "shootout": bool(g.get("shootout")),
+                # The schedule view has no ot/shootout fields -- only
+                # game_status "Final OT" / "Final SO" (reading g.get("ot")
+                # left both False for every game until 2026-09).
+                "ot": status.strip() == "Final OT",
+                "shootout": status.strip() == "Final SO",
                 "venue_name": venue_name or None,
                 "venue_city": venue_city or None,
                 "updated_at": datetime.now(UTC).isoformat(),

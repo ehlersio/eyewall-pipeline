@@ -73,3 +73,18 @@ def test_goal_count_helper():
     assert _goal_count("-") == 0
     assert _goal_count("") == 0
     assert _goal_count(None) == 0
+
+
+def test_ot_and_shootout_come_from_game_status(monkeypatch):
+    # The schedule view has no ot/shootout keys; reading them left both
+    # False for every game until 2026-09.
+    def flags(status):
+        row = _run_fetch_game_log(
+            monkeypatch,
+            _schedule_row(home_goal_count="3", visiting_goal_count="2", game_status=status),
+        )
+        return row["ot"], row["shootout"], row["game_state"]
+
+    assert flags("Final") == (False, False, "Final")
+    assert flags("Final OT") == (True, False, "Final")
+    assert flags("Final SO") == (False, True, "Final")

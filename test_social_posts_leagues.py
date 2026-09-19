@@ -236,6 +236,14 @@ class TestPwhlLeaders:
         cap = sl.caption_pwhl_leaders(
             week, [{"name": "C D", "team": "MIN", "points": 30}], "Nov 23\u201329"
         )
-        assert "points in 1 game\n" in cap and "expected" not in cap
+        assert "points in 1 game\n" in cap and "expected" not in cap  # no xG data -> no xG line
+        with_xg = sl.caption_pwhl_leaders(
+            week,
+            [{"name": "C D", "team": "MIN", "points": 30}],
+            "Nov 23\u201329",
+            [{"name": "E F", "team": "BOS", "gax": 3.2}],
+        )
+        assert "Most goals above expected: E F (BOS), +3.2" in with_xg
+        assert_neutral(with_xg)
         assert cap.startswith("PWHL Leaders")
         assert_neutral(cap)
