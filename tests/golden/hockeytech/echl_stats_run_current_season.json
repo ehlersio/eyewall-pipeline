@@ -458,6 +458,34 @@
     {
       "params": {
         "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "73",
+        "site_id": "0",
+        "team_id": "98",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "73",
+        "site_id": "0",
+        "team_id": "23",
+        "view": "roster"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
         "context": "overall",
         "feed": "statviewfeed",
         "key": "2c2b89ea7345cae8",
@@ -626,22 +654,6 @@
       "rows": [
         {
           "assists": 0,
-          "goals": 0,
-          "gp": 0,
-          "pim": 0,
-          "player_id": 6690,
-          "plus_minus": 0,
-          "points": 0,
-          "pp_goals": 0,
-          "season_id": 73,
-          "season_type": "regular",
-          "sh_goals": 0,
-          "shots": 0,
-          "team_id": null,
-          "updated_at": "2026-01-15T17:00:00+00:00"
-        },
-        {
-          "assists": 0,
           "goals": 1,
           "gp": 12,
           "pim": 0,
@@ -717,24 +729,6 @@
           "toi": "1800:00",
           "updated_at": "2026-01-15T17:00:00+00:00",
           "wins": 17
-        },
-        {
-          "gaa": null,
-          "goals_against": 0,
-          "gp": 0,
-          "losses": 0,
-          "ot_losses": 0,
-          "player_id": 7002,
-          "saves": 0,
-          "season_id": 73,
-          "season_type": "regular",
-          "shots_against": 0,
-          "shutouts": 0,
-          "sv_pct": null,
-          "team_id": null,
-          "toi": null,
-          "updated_at": "2026-01-15T17:00:00+00:00",
-          "wins": 0
         }
       ],
       "table": "echl_goalie_seasons"

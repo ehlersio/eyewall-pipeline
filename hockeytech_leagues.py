@@ -197,6 +197,12 @@ ECHL = League(
         "25": "WHL",  # Wheeling Nailers
         "72": "WIC",  # Wichita Thunder
         "77": "WOR",  # Worcester Railers
+        # Historical: 2025-26 teams not in 2026-27 (same reason as AHL's "317"
+        # above -- ingesting season 73/76 needs their codes). Without these,
+        # 2025-26 team stats skipped both teams and ~240 skater/goalie rows
+        # were stored with no team_id.
+        "98": "IA",  # Iowa Heartlanders
+        "23": "UTA",  # Utah Grizzlies
     },
     fallback_season=73,  # 2025-26 Regular Season
     season_examples="73, 76, 78",
@@ -257,5 +263,7 @@ ECHL = League(
         "Wheeling Nailers": "25",
         "Wichita Thunder": "72",
         "Worcester Railers": "77",
+        "Iowa Heartlanders": "98",  # historical (2025-26), see team_id_map
+        "Utah Grizzlies": "23",  # historical (2025-26), see team_id_map
     },
 )

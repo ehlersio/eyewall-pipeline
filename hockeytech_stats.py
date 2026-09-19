@@ -26,6 +26,7 @@ import logging
 import os
 import sys
 import time
+from collections import Counter
 from datetime import UTC, datetime
 
 import requests
@@ -315,6 +316,12 @@ def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -
 # ── Skater Stats ──────────────────────────────────────────────────────────────
 
 
+def _warn_unresolved(unresolved: Counter, kind: str) -> None:
+    if unresolved:
+        teams = ", ".join(f"{t} ({n})" for t, n in unresolved.most_common())
+        log.warning(f"  Skipped {sum(unresolved.values())} {kind} rows with no known team: {teams}")
+
+
 def _skater_team_id(lg: League, p: dict) -> str | None:
     """ECHL's `players` (skaters) rows carry team_name instead of team_code
     (see League.team_id_by_name); AHL's carry team_code."""
@@ -374,10 +381,18 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
     upsert_chunk(sb, f"{lg.key}_players", player_stubs, "player_id")
 
     rows = []
+    unresolved = Counter()
     for p in rows_raw:
         pid = p.get("player_id")
         team_id = _skater_team_id(lg, p)
         if not pid:
+            continue
+        if not team_id:
+            # A NULL team_id never matches the (player_id, team_id, ...)
+            # conflict key -- NULLs are distinct in Postgres -- so every run
+            # used to insert another team-less copy. Skip and name the team
+            # so it can be added to hockeytech_leagues.py.
+            unresolved[p.get("team_name") or p.get("team_code") or "?"] += 1
             continue
 
         rows.append(
@@ -399,6 +414,7 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
             }
         )
 
+    _warn_unresolved(unresolved, "skater")
     n = upsert_chunk(
         sb, f"{lg.key}_player_seasons", rows, "player_id,team_id,season_id,season_type"
     )
@@ -465,10 +481,14 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
     upsert_chunk(sb, f"{lg.key}_players", goalie_stubs, "player_id")
 
     rows = []
+    unresolved = Counter()
     for g in rows_raw:
         pid = g.get("player_id")
         team_id = lg.code_to_team_id.get(g.get("team_code", ""))
         if not pid:
+            continue
+        if not team_id:  # see fetch_skater_stats
+            unresolved[g.get("team_code") or "?"] += 1
             continue
 
         rows.append(
@@ -496,6 +516,7 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
             }
         )
 
+    _warn_unresolved(unresolved, "goalie")
     n = upsert_chunk(
         sb, f"{lg.key}_goalie_seasons", rows, "player_id,team_id,season_id,season_type"
     )
