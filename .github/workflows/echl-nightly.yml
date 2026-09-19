@@ -68,6 +68,18 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python echl_penalty_shots.py "${{ inputs.season_id }}"
 
+      - name: ECHL Elo ratings + win probabilities (hockeytech_elo.py)
+        if: ${{ !cancelled() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_elo.py echl
+        # Full replay from HockeyTech's schedule feed (2023-24 onward), so it
+        # doesn't depend on the ingestion steps above and runs even if one of
+        # them failed. Writes echl_team_elo_ratings (read by eyewall-poller's
+        # /echl/prediction) and echl_game_win_probs for today's/tomorrow's
+        # games. Tables: docs/hockeytech_elo_ddl.sql.
+
       - name: Notify on failure
         if: failure()
         run: echo "ECHL pipeline failed — check logs above"

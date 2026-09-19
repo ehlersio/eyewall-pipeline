@@ -91,5 +91,5 @@ but not a reason to fork constants now.
    parts as they are.
 3. Consider the same switch for `/pwhl/prediction`, which shares the flaw.
 
-AHL opens 2026-10-02 and ECHL 2026-10-15; until (2) ships, opening-night
-previews will keep showing the home team at 0%.
+(1) and (2) shipped with this backtest: `hockeytech_elo.py` and
+eyewall-poller's `/{league}/prediction`. AHL opens 2026-10-02, ECHL 2026-10-15.
