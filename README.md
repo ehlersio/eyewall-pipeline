@@ -162,6 +162,8 @@ Full nightly recompute of every NHL team's Elo rating (FiveThirtyEight's publish
 
 Neither is used; the public methodology page says so. Revisit the goalie adjustment during 2026-27, once `goalie_start_probs` history exists, using the probable-starter probabilities rather than the actual starter. Boxscores are cached in `lineup_backtest_cache.json` (gitignored).
 
+**AHL / ECHL Elo — tested, not yet wired in (2026-09):** `backtest_hockeytech_elo.py` (read-only; results in `docs/hockeytech_elo_backtest_results.md`) replays 2023-24 through 2025-26 for each league from HockeyTech's `schedule` view (the `{league}_game_log` tables only hold 2025-26, and the feed's "Final OT"/"Final SO" status supplies the OT flag). On the 2025-26 holdout, Elo with elo.py's NHL constants scores Brier **0.2452** (AHL) / **0.2428** (ECHL) vs 0.250 for a constant home-win rate. The live `/{league}/prediction` point-split heuristic scores **0.344 / 0.338**, worse than a coin flip: it serves 0% or 100% in ~40% of games and gives the home team 0% whenever stats are tied, including every season opener. Tuning K / home advantage / regression is noise on a flat surface, so the recommendation is Elo with the existing constants. Results JSON is gitignored.
+
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
 
