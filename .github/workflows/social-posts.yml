@@ -5,6 +5,11 @@ name: Social Posts
 #   winners   daily        -- projected winners, skipped on days with no games
 #   recap     Mondays      -- last week's projected winners, graded
 #   leaders   Tuesdays     -- last week's + season leaders, goals above expected
+#   pwhl-winners  daily      -- PWHL projected winners, skipped with no PWHL games
+#   pwhl-recap    Tuesdays   -- last week's PWHL projected winners, graded
+#   minor-recap   Wednesdays -- AHL + ECHL: last week graded + top scorer
+#   pwhl-leaders  Thursdays  -- last week's + season PWHL leaders
+# (the pwhl-*/minor-* posts are social_posts_leagues.py)
 #
 # Times are UTC and sit well after the nightly pipeline, which is scheduled
 # for 07:00 UTC but in practice has been starting 12:00-13:30 UTC and taking
@@ -18,6 +23,11 @@ name: Social Posts
 #   recap     18:00 / 19:00 Mon  (2pm / 3pm EDT)
 #   leaders   17:00 / 18:00 Tue  (1pm / 2pm EDT) -- reads the NHL stats API
 #             and MoneyPuck directly, so it doesn't wait on the nightly
+#   pwhl-winners  15:45 / 16:45 daily (11:45am ET, before the earliest
+#                 PWHL puck drop; hockeytech_elo.py logs them at ~3:20am ET)
+#   pwhl-recap    20:00 / 21:00 Tue
+#   minor-recap   17:00 / 18:00 Wed
+#   pwhl-leaders  17:00 / 18:00 Thu
 
 on:
   schedule:
@@ -29,13 +39,21 @@ on:
     - cron: '0 19 * * 1'
     - cron: '0 17 * * 2'
     - cron: '0 18 * * 2'
+    - cron: '45 15 * * *'
+    - cron: '45 16 * * *'
+    - cron: '0 20 * * 2'
+    - cron: '0 21 * * 2'
+    - cron: '0 17 * * 3'
+    - cron: '0 18 * * 3'
+    - cron: '0 17 * * 4'
+    - cron: '0 18 * * 4'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, check]
       dry_run:
         description: 'Render only (images kept as a run artifact), no upload or post'
         type: boolean
@@ -61,11 +79,18 @@ jobs:
             '30 15 * * *'|'30 16 * * *') kind=winners ;;
             '0 18 * * 1'|'0 19 * * 1')  kind=recap ;;
             '0 17 * * 2'|'0 18 * * 2')  kind=leaders ;;
+            '45 15 * * *'|'45 16 * * *') kind=pwhl-winners ;;
+            '0 20 * * 2'|'0 21 * * 2')  kind=pwhl-recap ;;
+            '0 17 * * 3'|'0 18 * * 3')  kind=minor-recap ;;
+            '0 17 * * 4'|'0 18 * * 4')  kind=pwhl-leaders ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
           flag=""
           if [ "$INPUT_DRY_RUN" = "true" ]; then flag="--dry-run"; fi
+          script=social_posts.py
+          case "$kind" in pwhl-*|minor-*) script=social_posts_leagues.py ;; esac
+          echo "script=$script" >> "$GITHUB_OUTPUT"
           echo "kind=$kind" >> "$GITHUB_OUTPUT"
           echo "flag=$flag" >> "$GITHUB_OUTPUT"
 
@@ -89,7 +114,7 @@ jobs:
           META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-        run: python social_posts.py ${{ steps.pick.outputs.kind }} ${{ steps.pick.outputs.flag }}
+        run: python ${{ steps.pick.outputs.script }} ${{ steps.pick.outputs.kind }} ${{ steps.pick.outputs.flag }}
 
       - name: Keep dry-run images
         if: steps.pick.outputs.flag == '--dry-run'
