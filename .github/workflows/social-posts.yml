@@ -4,6 +4,7 @@ name: Social Posts
 #   rankings  Mondays      -- weekly power rankings
 #   winners   daily        -- projected winners, skipped on days with no games
 #   recap     Mondays      -- last week's projected winners, graded
+#   leaders   Tuesdays     -- last week's + season leaders, goals above expected
 #
 # Times are UTC and sit well after the nightly pipeline, which is scheduled
 # for 07:00 UTC but in practice has been starting 12:00-13:30 UTC and taking
@@ -15,6 +16,8 @@ name: Social Posts
 #   winners   15:30 / 16:30 daily (before the earliest matinee puck drops;
 #             games already under way are left off the card anyway)
 #   recap     18:00 / 19:00 Mon  (2pm / 3pm EDT)
+#   leaders   17:00 / 18:00 Tue  (1pm / 2pm EDT) -- reads the NHL stats API
+#             and MoneyPuck directly, so it doesn't wait on the nightly
 
 on:
   schedule:
@@ -24,13 +27,15 @@ on:
     - cron: '30 16 * * *'
     - cron: '0 18 * * 1'
     - cron: '0 19 * * 1'
+    - cron: '0 17 * * 2'
+    - cron: '0 18 * * 2'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, check]
+        options: [winners, rankings, recap, leaders, check]
       dry_run:
         description: 'Render only (images kept as a run artifact), no upload or post'
         type: boolean
@@ -55,6 +60,7 @@ jobs:
             '0 15 * * 1'|'0 16 * * 1')  kind=rankings ;;
             '30 15 * * *'|'30 16 * * *') kind=winners ;;
             '0 18 * * 1'|'0 19 * * 1')  kind=recap ;;
+            '0 17 * * 2'|'0 18 * * 2')  kind=leaders ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
