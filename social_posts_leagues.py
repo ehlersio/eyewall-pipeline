@@ -12,8 +12,8 @@ that's already published). The posts:
   pwhl-recap    Tuesdays: last Mon-Sun's projected winners graded
                 (pwhl_game_win_probs vs pwhl_game_log finals)
   pwhl-leaders  Thursdays: last Mon-Sun's top scorers and goalies, and
-                season leaders -- from the PWHL tables, not an API. No xG
-                slide yet (see post_pwhl_leaders)
+                season leaders, and goals (saved) above expected from
+                EyeWall's PWHL xG model -- from the PWHL tables, not an API
   minor-recap   Wednesdays: one card for the AHL and ECHL -- each league's
                 projected winners graded for last Mon-Sun, its most
                 confident hit and miss, and the week's top scorer. A
@@ -64,6 +64,7 @@ HASHTAGS = {
     "minor-recap": "#AHL #ECHL #HockeyAnalytics #Hockey",
 }
 PWHL_NOTE = "Regular season · stats: PWHL"
+PWHL_XG_NOTE = "Expected goals: EyeWall's PWHL xG model"
 LEADERS, GOALIE_LEADERS = sp.LEADERS, sp.GOALIE_LEADERS
 
 
@@ -245,7 +246,7 @@ def season_goalies_by_sv_pct(rows, names):
     return sorted(out, key=lambda g: (-g["sv_pct"], -g["gp"], g["name"]))
 
 
-def caption_pwhl_leaders(week, season_pts, span):
+def caption_pwhl_leaders(week, season_pts, span, gax=None):
     lines = [f"PWHL Leaders \u2014 week of {span}", ""]
     if week:
         p = week[0]
@@ -256,7 +257,16 @@ def caption_pwhl_leaders(week, season_pts, span):
     if season_pts:
         p = season_pts[0]
         lines.append(f"Season points leader: {p['name']} ({p['team']}), {p['points']}")
-    lines += ["", "Full stats and player breakdowns: link in bio.", "", HASHTAGS["pwhl-leaders"]]
+    if gax:
+        p = gax[0]
+        lines.append(f"Most goals above expected: {p['name']} ({p['team']}), {sp.signed(p['gax'])}")
+    lines.append("")
+    if gax:
+        lines.append(
+            "Goals above expected compares a player\u2019s goals with the goals their shots "
+            "would typically produce."
+        )
+    lines += ["Full stats and player breakdowns: link in bio.", "", HASHTAGS["pwhl-leaders"]]
     return "\n".join(lines)
 
 
@@ -349,7 +359,7 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
     sk_season = select_all(
         lambda: (
             client.table("pwhl_player_seasons")
-            .select("player_id,team_id,gp,goals,assists,points")
+            .select("player_id,team_id,gp,goals,assists,points,xg_for")
             .eq("season_id", season_id)
             .eq("season_type", "regular")
         ),
@@ -358,7 +368,7 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
     g_season = select_all(
         lambda: (
             client.table("pwhl_goalie_seasons")
-            .select("player_id,team_id,gp,sv_pct")
+            .select("player_id,team_id,gp,sv_pct,gsax")
             .eq("season_id", season_id)
             .eq("season_type", "regular")
         ),
@@ -404,10 +414,55 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
             season_sections, PWHL_NOTE, teams=PWHL_TEAMS,
         ),
     ]  # fmt: skip
-    # No "Beyond the Box Score" slide: EyeWall's PWHL xG model is off by ~2x
-    # (1,081 expected vs 550 actual goals in 2025-26), so goals (saved)
-    # above expected would be wrong. Add it once pwhl_shot_xg.py is fixed.
-    caption = caption_pwhl_leaders(week_sk, season_pts, span)
+    # Goals (saved) above expected, from pwhl_shot_xg.py / pwhl_goalie_
+    # percentiles.py. Skipped if either side has nothing yet (early season).
+    gax = sorted(
+        (
+            {
+                "name": names.get(r["player_id"], str(r["player_id"])),
+                "team": code(PWHL, r["team_id"]),
+                "gp": r["gp"] or 0,
+                "goals": r["goals"] or 0,
+                "gax": (r["goals"] or 0) - r["xg_for"],
+            }
+            for r in sk_season
+            if r.get("xg_for") is not None
+        ),
+        key=lambda p: (-p["gax"], p["name"]),
+    )
+    gsax = sorted(
+        (
+            {
+                "name": names.get(r["player_id"], str(r["player_id"])),
+                "team": code(PWHL, r["team_id"]),
+                "gp": r["gp"] or 0,
+                "gsax": r["gsax"],
+            }
+            for r in g_season
+            if r.get("gsax") is not None
+        ),
+        key=lambda g: (-g["gsax"], g["name"]),
+    )
+    if gax and gsax:
+        images.append(
+            sp.render_leaders(
+                "PWHL \u00b7 Season", "Beyond the Box Score", f"Through {sp.fmt_day(end)}",
+                [
+                    ("Goals above expected", [
+                        {"name": p["name"], "team": p["team"], "value": sp.signed(p["gax"]),
+                         "detail": f"{p['goals']} G \u00b7 {p['gp']} GP"}
+                        for p in gax[:LEADERS]
+                    ]),
+                    ("Goals saved above expected", [
+                        {"name": g["name"], "team": g["team"], "value": sp.signed(g["gsax"]),
+                         "detail": f"{g['gp']} GP"}
+                        for g in gsax[:LEADERS]
+                    ]),
+                ],
+                PWHL_XG_NOTE, teams=PWHL_TEAMS,
+            )
+        )  # fmt: skip
+    caption = caption_pwhl_leaders(week_sk, season_pts, span, gax if (gax and gsax) else None)
     return sp.ship(
         client, "pwhl-leaders", f"pwhl-leaders-{today.isoformat()}", images, caption, dry_run
     )

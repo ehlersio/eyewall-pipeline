@@ -12,9 +12,20 @@ import pwhl_shot_xg
 
 
 class TestShotXG:
-    def test_goal_is_always_1(self):
-        assert pwhl_shot_xg.shot_xg("goal", 0, 0) == 1.0
-        assert pwhl_shot_xg.shot_xg("goal", 95, 40) == 1.0
+    def test_goal_is_valued_by_location_like_any_attempt(self):
+        # Not a flat 1.0: that made xg_for = goals + every miss's xG (~2x
+        # actual goals) and finishing negative for every skater.
+        for x, y in ((89, 0), (70, 10), (0, 0)):
+            assert pwhl_shot_xg.shot_xg("goal", x, y) == pwhl_shot_xg.shot_xg("shot", x, y)
+
+    def test_bucket_values_add_up_to_actual_goals(self):
+        # Attempts / goals per bucket over every PWHL season with shot data
+        # (see DANGER_XG's comment). The whole point of the values: league
+        # xG should match league goals.
+        attempts = {"high": 4211, "medium": 6186, "low": 14488}
+        goals = 592 + 503 + 390
+        xg = sum(n * pwhl_shot_xg.DANGER_XG[k] for k, n in attempts.items())
+        assert abs(xg - goals) / goals < 0.02
 
     def test_non_shot_event_type_is_zero(self):
         assert pwhl_shot_xg.shot_xg("hit", 89, 0) == 0.0

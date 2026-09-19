@@ -408,6 +408,17 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
 # ── Goalie Stats ──────────────────────────────────────────────────────────────
 
 
+def _goalie_saves(g: dict) -> int:
+    """A goalie row's saves: the feed's own field when present (AHL), else
+    shots - goals_against (ECHL sends shots and goals_against but no saves).
+    Checked against ECHL 2025-26: the derived saves reproduce the feed's own
+    save_percentage to three decimals."""
+    if g.get("saves") not in (None, ""):
+        return int(g["saves"] or 0)
+    shots = int(g.get("shots", 0) or 0)
+    return max(shots - int(g.get("goals_against", 0) or 0), 0)
+
+
 def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None:
     """Fetch league-wide goalie stats and upsert to {league}_goalie_seasons.
     Field shape matches PWHL's closely -- no fields need dropping here."""
@@ -471,7 +482,9 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
                 "losses": int(g.get("losses", 0) or 0),
                 "ot_losses": int(g.get("ot_losses", 0) or 0),
                 "shots_against": int(g.get("shots", 0) or 0),
-                "saves": int(g.get("saves", 0) or 0),
+                # ECHL's goalie rows have no "saves" field (AHL's do); fall
+                # back to shots - goals_against rather than storing 0.
+                "saves": _goalie_saves(g),
                 "goals_against": int(g.get("goals_against", 0) or 0),
                 "sv_pct": float(g["save_percentage"]) if g.get("save_percentage") else None,
                 "gaa": float(g["goals_against_average"])

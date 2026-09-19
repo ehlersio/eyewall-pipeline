@@ -16,30 +16,39 @@ import pwhl_goalie_percentiles as m
 
 
 class TestShotXG:
-    def test_goal_is_always_1(self):
-        assert m._shot_xg("goal", 0, 0) == 1.0
-        assert m._shot_xg("goal", 95, 40) == 1.0
+    def test_goal_is_valued_by_location_like_a_save(self):
+        # Not a flat 1.0: that made gsax = the xG of every save (always
+        # positive, growing with workload).
+        for x, y in ((89, 0), (70, 10), (0, 0)):
+            assert m._shot_xg("goal", x, y) == m._shot_xg("shot", x, y)
+
+    def test_faced_bucket_values_add_up_to_goals_allowed(self):
+        # goal + shot events per bucket, every PWHL season with shot data.
+        faced = {"high": 4001, "medium": 4978, "low": 9038}
+        goals = 592 + 503 + 390
+        xg = sum(n * m.DANGER_XG_FACED[k] for k, n in faced.items())
+        assert abs(xg - goals) / goals < 0.02
 
     def test_high_danger_at_goal_mouth(self):
-        assert m._shot_xg("shot", 89, 0) == m.DANGER_XG["high"]
+        assert m._shot_xg("shot", 89, 0) == m.DANGER_XG_FACED["high"]
 
     def test_high_danger_boundary_inclusive_at_15(self):
-        assert m._shot_xg("shot", 74, 0) == m.DANGER_XG["high"]
+        assert m._shot_xg("shot", 74, 0) == m.DANGER_XG_FACED["high"]
 
     def test_medium_danger_just_past_15(self):
-        assert m._shot_xg("shot", 73, 0) == m.DANGER_XG["medium"]
+        assert m._shot_xg("shot", 73, 0) == m.DANGER_XG_FACED["medium"]
 
     def test_medium_danger_boundary_inclusive_at_30(self):
-        assert m._shot_xg("shot", 59, 0) == m.DANGER_XG["medium"]
+        assert m._shot_xg("shot", 59, 0) == m.DANGER_XG_FACED["medium"]
 
     def test_low_danger_just_past_30(self):
-        assert m._shot_xg("shot", 58, 0) == m.DANGER_XG["low"]
+        assert m._shot_xg("shot", 58, 0) == m.DANGER_XG_FACED["low"]
 
     def test_none_y_treated_as_zero(self):
-        assert m._shot_xg("shot", 89, None) == m.DANGER_XG["high"]
+        assert m._shot_xg("shot", 89, None) == m.DANGER_XG_FACED["high"]
 
     def test_negative_x_handled_via_abs(self):
-        assert m._shot_xg("shot", -89, 0) == m.DANGER_XG["high"]
+        assert m._shot_xg("shot", -89, 0) == m.DANGER_XG_FACED["high"]
 
 
 class TestDangerBucket:
