@@ -15,6 +15,10 @@ Pillow from tables the nightly pipeline already fills:
   recap     Mondays: last week (Mon-Sun) graded -- how many projected winners
             won, the most confident calls that came through and the ones
             that didn't (game_win_probs vs game_log finals).
+  leaders   Tuesdays: league leaders -- last week's top scorers and goalies,
+            season points/goals/save % leaders, and goals (saved) above
+            expected. Straight from the NHL stats API and MoneyPuck's season
+            CSVs rather than Supabase, so it needs no nightly table.
 
 Neutral probability language only -- no betting framing (no odds, lines or
 "picks"), and the AI is never named on these cards.
@@ -47,6 +51,7 @@ Usage:
   python social_posts.py rankings
   python social_posts.py winners
   python social_posts.py recap
+  python social_posts.py leaders
   python social_posts.py winners --dry-run      # render to social_out/, no upload/post
   python social_posts.py recap --date 2026-10-19  # as if run that day (ET)
   python social_posts.py check                    # read-only credentials check, posts nothing
@@ -67,6 +72,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
+import moneypuck
 from db import NHL_SEASON, get_client
 from scratches import fetch_keyset
 
@@ -82,6 +88,14 @@ CONTAINER_POLL_SECONDS = 3
 CONTAINER_POLL_TRIES = 40
 GAME_TYPES = (2, 3)  # regular season, playoffs
 HIGHLIGHTS = 6  # rows per "got it right" / "missed" slide
+NHL_STATS = "https://api.nhle.com/stats/rest/en"
+MP_SEASON_CSV = "https://moneypuck.com/moneypuck/playerData/seasonSummary/{year}/regular/{kind}.csv"
+LEADERS = 5  # skater rows per leaders section
+GOALIE_LEADERS = 3
+WEEK_MIN_GOALIE_GP = 2
+# Season save-% leaders need a real workload: this share of the most games
+# any goalie has played (the NHL's own full-season bar is 25 of 82, ~30%).
+SEASON_GOALIE_GP_SHARE = 0.3
 
 # Site palette (eyewall-analytics src/index.css)
 BG0 = "#080c14"
@@ -133,9 +147,12 @@ HASHTAGS = {
     "rankings": "#NHL #NHLPowerRankings #HockeyAnalytics #Hockey",
     "winners": "#NHL #HockeyAnalytics #Hockey #NHLStats",
     "recap": "#NHL #HockeyAnalytics #Hockey #NHLStats",
+    "leaders": "#NHL #NHLStats #HockeyAnalytics #Hockey",
 }
 ELO_NOTE = "Elo model · probabilities, not certainties"
 RANKINGS_NOTE = "Points, form, goal diff, 5v5 xG, special teams"
+NHL_NOTE = "Regular season · stats: NHL"
+XG_NOTE = "Expected goals: MoneyPuck.com"
 
 
 def team_name(abbr):
@@ -344,6 +361,185 @@ def load_graded(client, season):
     return grade(probs, results)
 
 
+def last_week(today):
+    """-> (Monday, Sunday) of the most recent full week ending before today."""
+    end = today - timedelta(days=(today.weekday() + 1) % 7 or 7)
+    return end - timedelta(days=6), end
+
+
+def fetch_nhl_stats(kind, cayenne, is_game):
+    """NHL stats REST summary report (kind: skater|goalie), every row."""
+    res = httpx.get(
+        f"{NHL_STATS}/{kind}/summary",
+        params={
+            "isAggregate": "false",
+            "isGame": str(is_game).lower(),
+            "limit": -1,
+            "cayenneExp": cayenne,
+        },
+        timeout=60,
+    )
+    res.raise_for_status()
+    return res.json().get("data", [])
+
+
+def week_skaters(game_rows):
+    """Per-game skater rows for a date range -> totals per player, best
+    first (points, then goals, then fewer games)."""
+    out = {}
+    for r in sorted(game_rows, key=lambda r: r["gameDate"]):
+        p = out.setdefault(
+            r["playerId"],
+            {"name": r["skaterFullName"], "gp": 0, "goals": 0, "assists": 0, "points": 0},
+        )
+        p["team"] = r["teamAbbrev"]  # latest game's team
+        for k, src in (
+            ("gp", "gamesPlayed"),
+            ("goals", "goals"),
+            ("assists", "assists"),
+            ("points", "points"),
+        ):
+            p[k] += r[src] or 0
+    return sorted(out.values(), key=lambda p: (-p["points"], -p["goals"], p["gp"], p["name"]))
+
+
+def week_goalies(game_rows, min_gp=WEEK_MIN_GOALIE_GP):
+    """Per-game goalie rows -> [{name, team, gp, sv_pct}] with at least
+    min_gp games, best save % first (ties: more saves)."""
+    out = {}
+    for r in sorted(game_rows, key=lambda r: r["gameDate"]):
+        g = out.setdefault(
+            r["playerId"], {"name": r["goalieFullName"], "gp": 0, "saves": 0, "sa": 0}
+        )
+        g["team"] = r["teamAbbrev"]
+        g["gp"] += r["gamesPlayed"] or 0
+        g["saves"] += r["saves"] or 0
+        g["sa"] += r["shotsAgainst"] or 0
+    rows = [
+        {
+            "name": g["name"],
+            "team": g["team"],
+            "gp": g["gp"],
+            "sv_pct": g["saves"] / g["sa"],
+            "saves": g["saves"],
+        }
+        for g in out.values()
+        if g["gp"] >= min_gp and g["sa"]
+    ]
+    return sorted(rows, key=lambda g: (-g["sv_pct"], -g["saves"], g["name"]))
+
+
+def current_team(team_abbrevs):
+    """Season rows list a traded player's teams comma-joined, latest last."""
+    return (team_abbrevs or "").split(",")[-1].strip()
+
+
+def season_skaters(rows):
+    """Season skater summary rows -> [{name, team, gp, goals, assists, points}].
+    A traded player has one row per team; totals are summed."""
+    out = {}
+    for r in rows:
+        p = out.setdefault(
+            r["playerId"],
+            {
+                "name": r["skaterFullName"],
+                "team": current_team(r.get("teamAbbrevs")),
+                "gp": 0,
+                "goals": 0,
+                "assists": 0,
+                "points": 0,
+            },
+        )
+        for k, src in (
+            ("gp", "gamesPlayed"),
+            ("goals", "goals"),
+            ("assists", "assists"),
+            ("points", "points"),
+        ):
+            p[k] += r[src] or 0
+    return list(out.values())
+
+
+def season_goalies(rows):
+    """Season goalie summary rows -> [{name, team, gp, sv_pct}] qualified at
+    SEASON_GOALIE_GP_SHARE of the busiest goalie's games, best first."""
+    out = {}
+    for r in rows:
+        g = out.setdefault(
+            r["playerId"],
+            {
+                "name": r["goalieFullName"],
+                "team": current_team(r.get("teamAbbrevs")),
+                "gp": 0,
+                "saves": 0,
+                "sa": 0,
+            },
+        )
+        g["gp"] += r["gamesPlayed"] or 0
+        g["saves"] += r["saves"] or 0
+        g["sa"] += r["shotsAgainst"] or 0
+    if not out:
+        return []
+    min_gp = max(
+        WEEK_MIN_GOALIE_GP, round(max(g["gp"] for g in out.values()) * SEASON_GOALIE_GP_SHARE)
+    )
+    return week_goalies(
+        [
+            {
+                "gameDate": "",
+                "playerId": pid,
+                "goalieFullName": g["name"],
+                "teamAbbrev": g["team"],
+                "gamesPlayed": g["gp"],
+                "saves": g["saves"],
+                "shotsAgainst": g["sa"],
+            }
+            for pid, g in out.items()
+        ],
+        min_gp,
+    )
+
+
+def goals_above_expected(skater_rows, goalie_rows):
+    """MoneyPuck season CSV rows (situation 'all') ->
+    (skaters by goals minus xG, goalies by xG against minus goals against),
+    best first. Goalies use flurry-adjusted xG, same as moneypuck.py's GSAx."""
+    num = moneypuck.n
+    skaters = [
+        {
+            "name": r["name"],
+            "team": r["team"],
+            "gp": int(num(r["games_played"])),
+            "gax": num(r["I_F_goals"]) - num(r["I_F_xGoals"]),
+            "goals": int(num(r["I_F_goals"])),
+        }
+        for r in skater_rows
+        if r.get("situation") == "all"
+    ]
+    goalies = [
+        {
+            "name": r["name"],
+            "team": r["team"],
+            "gp": int(num(r["games_played"])),
+            "gsax": (num(r.get("flurryAdjustedxGoals")) or num(r["xGoals"])) - num(r["goals"]),
+        }
+        for r in goalie_rows
+        if r.get("situation") == "all"
+    ]
+    return (
+        sorted(skaters, key=lambda p: (-p["gax"], p["name"])),
+        sorted(goalies, key=lambda g: (-g["gsax"], g["name"])),
+    )
+
+
+def signed(x):
+    return f"+{x:.1f}" if x >= 0 else f"\u2212{abs(x):.1f}"
+
+
+def sv(p):
+    return f"{p:.3f}".lstrip("0")
+
+
 # ── Rendering ───────────────────────────────────────────────────────────
 
 _fonts = {}
@@ -550,6 +746,81 @@ def render_recap_list(games, hit, span):
     return img
 
 
+def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE):
+    """sections: [(heading, [{name, team, value, detail}])] -> one card.
+    Row heights shrink to fit however many rows the sections hold."""
+    img, d, top, bottom = new_card(kicker, title, subtitle, note)
+    head_h, gap, sec_gap = 48, 6, 22
+    n_rows = sum(len(rows) for _, rows in sections)
+    free = bottom - top - len(sections) * head_h - (len(sections) - 1) * sec_gap
+    h = min(88, (free - gap * max(n_rows - len(sections), 0)) // max(n_rows, 1))
+    y = top
+    for heading, rows in sections:
+        d.text((64, y + head_h // 2), heading.upper(), font=label(30), fill=RED_BRIGHT, anchor="lm")
+        y += head_h
+        for i, r in enumerate(rows):
+            mid = y + h // 2
+            row_box(d, y, h, team_color(r["team"]))
+            d.text((116, mid), str(i + 1), font=display(int(h * 0.55)), fill=MUTED, anchor="mm")
+            value_font = display(int(h * 0.58))
+            value_w = d.textlength(r["value"], font=value_font)
+            name_max = W - 100 - value_w - 40 - 160
+            name_font = fit(d, r["name"], body, int(h * 0.42), name_max - 90, min_size=22)
+            d.text((160, mid), r["name"], font=name_font, fill=TEXT, anchor="lm")
+            name_w = d.textlength(r["name"], font=name_font)
+            d.text(
+                (160 + name_w + 16, mid + 2),
+                r["team"],
+                font=label(int(h * 0.34)),
+                fill=team_color(r["team"]),
+                anchor="lm",
+            )
+            d.text((W - 100, mid), r["value"], font=value_font, fill=TEXT, anchor="rm")
+            if r.get("detail"):
+                d.text(
+                    (W - 100 - value_w - 22, mid + 2),
+                    r["detail"],
+                    font=body(int(h * 0.3)),
+                    fill=MUTED,
+                    anchor="rm",
+                )
+            y += h + gap
+        y += sec_gap - gap
+    return img
+
+
+def skater_points_rows(players, n=LEADERS):
+    return [
+        {
+            "name": p["name"],
+            "team": p["team"],
+            "value": f"{p['points']} PTS",
+            "detail": f"{p['goals']}G {p['assists']}A · {p['gp']} GP",
+        }
+        for p in players[:n]
+    ]
+
+
+def skater_goals_rows(players, n=LEADERS):
+    top = sorted(players, key=lambda p: (-p["goals"], p["gp"], p["name"]))[:n]
+    return [
+        {
+            "name": p["name"],
+            "team": p["team"],
+            "value": f"{p['goals']} G",
+            "detail": f"{p['gp']} GP",
+        }
+        for p in top
+    ]
+
+
+def goalie_rows(goalies, n=GOALIE_LEADERS):
+    return [
+        {"name": g["name"], "team": g["team"], "value": sv(g["sv_pct"]), "detail": f"{g['gp']} GP"}
+        for g in goalies[:n]
+    ]
+
+
 def to_jpeg(img):
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=92, optimize=True)
@@ -628,6 +899,29 @@ def caption_recap(s, span):
         "Full scorecard: link in bio.",
         "",
         HASHTAGS["recap"],
+    ]
+    return "\n".join(lines)
+
+
+def caption_leaders(week, season_pts, gax, span):
+    lines = [f"NHL League Leaders \u2014 week of {span}", ""]
+    if week:
+        p = week[0]
+        lines.append(
+            f"Top scorer this week: {p['name']} ({p['team']}), {p['points']} points in {p['gp']} game{'s' if p['gp'] != 1 else ''}"
+        )
+    if season_pts:
+        p = season_pts[0]
+        lines.append(f"Season points leader: {p['name']} ({p['team']}), {p['points']}")
+    if gax:
+        p = gax[0]
+        lines.append(f"Most goals above expected: {p['name']} ({p['team']}), {signed(p['gax'])}")
+    lines += [
+        "",
+        "Goals above expected compares a player\u2019s goals with the goals their shots "
+        "would typically produce. Full stats and player breakdowns: link in bio.",
+        "",
+        HASHTAGS["leaders"],
     ]
     return "\n".join(lines)
 
@@ -869,7 +1163,105 @@ def post_recap(client, season, today, dry_run):
     return ship(client, "recap", post_key, images, caption_recap(s, span), dry_run)
 
 
-POSTS = {"rankings": post_rankings, "winners": post_winners, "recap": post_recap}
+def post_leaders(client, season, today, dry_run):
+    """Last Mon-Sun's leaders + season leaders + goals above expected.
+    Regular season only."""
+    start, end = last_week(today)
+    post_key = f"leaders-{today.isoformat()}"
+    span = fmt_span(start, end)
+    week_exp = f'gameDate>="{start.isoformat()}" and gameDate<="{end.isoformat()}" and gameTypeId=2'
+    season_exp = f"seasonId={season} and gameTypeId=2"
+    try:
+        week_sk = week_skaters(fetch_nhl_stats("skater", week_exp, True))
+        if not week_sk:
+            print(f"  No regular-season games {start}..{end} -- not posting")
+            return 0
+        week_g = week_goalies(fetch_nhl_stats("goalie", week_exp, True))
+        season_sk = season_skaters(fetch_nhl_stats("skater", season_exp, False))
+        season_g = season_goalies(fetch_nhl_stats("goalie", season_exp, False))
+    except httpx.HTTPError as e:
+        print(f"  NHL stats fetch failed: {e}")
+        return 1
+    season_pts = sorted(season_sk, key=lambda p: (-p["points"], -p["goals"], p["gp"], p["name"]))
+
+    images = [
+        render_leaders(
+            span,
+            "This Week\u2019s Leaders",
+            "Top scorers and goalies, Monday to Sunday",
+            [("Points", skater_points_rows(week_sk))]
+            + ([(f"Save % (min {WEEK_MIN_GOALIE_GP} GP)", goalie_rows(week_g))] if week_g else []),
+        ),
+        render_leaders(
+            "Season",
+            "Season Leaders",
+            f"Through {fmt_day(end)}",
+            [("Points", skater_points_rows(season_pts)), ("Goals", skater_goals_rows(season_pts))]
+            + ([("Save %", goalie_rows(season_g))] if season_g else []),
+        ),
+    ]
+    # Optional third slide: MoneyPuck publishes the season file once games
+    # are played; if it isn't there (or is down) the post goes out without it.
+    year = season // 10000
+    try:
+        gax, gsax = goals_above_expected(
+            moneypuck.fetch_csv(MP_SEASON_CSV.format(year=year, kind="skaters")),
+            moneypuck.fetch_csv(MP_SEASON_CSV.format(year=year, kind="goalies")),
+        )
+    except Exception as e:  # any failure just drops the slide
+        print(f"  MoneyPuck fetch failed, posting without the xG slide: {e}")
+        gax, gsax = [], []
+    if gax and gsax:
+        images.append(
+            render_leaders(
+                "Season",
+                "Beyond the Box Score",
+                f"Through {fmt_day(end)} \u00b7 all situations",
+                [
+                    (
+                        "Goals above expected",
+                        [
+                            {
+                                "name": p["name"],
+                                "team": p["team"],
+                                "value": signed(p["gax"]),
+                                "detail": f"{p['goals']} G \u00b7 {p['gp']} GP",
+                            }
+                            for p in gax[:LEADERS]
+                        ],
+                    ),
+                    (
+                        "Goals saved above expected",
+                        [
+                            {
+                                "name": g["name"],
+                                "team": g["team"],
+                                "value": signed(g["gsax"]),
+                                "detail": f"{g['gp']} GP",
+                            }
+                            for g in gsax[:LEADERS]
+                        ],
+                    ),
+                ],
+                XG_NOTE,
+            )
+        )
+    return ship(
+        client,
+        "leaders",
+        post_key,
+        images,
+        caption_leaders(week_sk, season_pts, gax, span),
+        dry_run,
+    )
+
+
+POSTS = {
+    "rankings": post_rankings,
+    "winners": post_winners,
+    "recap": post_recap,
+    "leaders": post_leaders,
+}
 
 
 def graph_get(path, token, **params):

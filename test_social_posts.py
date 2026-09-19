@@ -367,6 +367,247 @@ class TestGates:
         assert "1 of 2 projected winners won" in caption
 
 
+def sk_game(pid, name, team, day, g, a):
+    return {
+        "playerId": pid,
+        "skaterFullName": name,
+        "teamAbbrev": team,
+        "gameDate": day,
+        "gamesPlayed": 1,
+        "goals": g,
+        "assists": a,
+        "points": g + a,
+    }
+
+
+def g_game(pid, name, team, day, saves, sa):
+    return {
+        "playerId": pid,
+        "goalieFullName": name,
+        "teamAbbrev": team,
+        "gameDate": day,
+        "gamesPlayed": 1,
+        "saves": saves,
+        "shotsAgainst": sa,
+    }
+
+
+class TestLeaders:
+    @pytest.mark.parametrize(
+        "today,start,end",
+        [
+            (date(2026, 10, 20), date(2026, 10, 12), date(2026, 10, 18)),  # Tuesday
+            (date(2026, 10, 19), date(2026, 10, 12), date(2026, 10, 18)),  # Monday
+            (date(2026, 10, 18), date(2026, 10, 5), date(2026, 10, 11)),  # Sunday: not today's week
+        ],
+    )
+    def test_last_week_is_previous_mon_sun(self, today, start, end):
+        assert ig.last_week(today) == (start, end)
+
+    def test_week_skaters_sums_games_and_takes_latest_team(self):
+        rows = [
+            sk_game(1, "A", "BOS", "2026-10-13", 1, 1),
+            sk_game(1, "A", "CAR", "2026-10-15", 1, 0),  # traded mid-week
+            sk_game(2, "B", "SEA", "2026-10-14", 0, 3),
+            sk_game(3, "C", "TOR", "2026-10-14", 3, 0),
+        ]
+        out = ig.week_skaters(rows)
+        assert [(p["name"], p["points"], p["team"]) for p in out] == [
+            ("C", 3, "TOR"),  # 3 pts, 3 G, 1 GP
+            ("A", 3, "CAR"),  # 3 pts, 2 G
+            ("B", 3, "SEA"),
+        ]
+        assert out[1]["gp"] == 2
+
+    def test_week_goalies_need_min_games(self):
+        rows = [
+            g_game(1, "Solo", "CAR", "2026-10-13", 40, 40),  # 1 GP: excluded
+            g_game(2, "Pair", "BOS", "2026-10-13", 29, 30),
+            g_game(2, "Pair", "BOS", "2026-10-16", 30, 30),
+        ]
+        out = ig.week_goalies(rows)
+        assert [g["name"] for g in out] == ["Pair"]
+        assert out[0]["sv_pct"] == pytest.approx(59 / 60)
+
+    def test_season_goalies_qualify_on_share_of_busiest(self):
+        rows = [
+            {
+                "playerId": 1,
+                "goalieFullName": "Starter",
+                "teamAbbrevs": "CAR",
+                "gamesPlayed": 60,
+                "saves": 1500,
+                "shotsAgainst": 1650,
+            },
+            {
+                "playerId": 2,
+                "goalieFullName": "Cameo",
+                "teamAbbrevs": "BOS",
+                "gamesPlayed": 5,
+                "saves": 150,
+                "shotsAgainst": 155,
+            },
+            {
+                "playerId": 3,
+                "goalieFullName": "Traded",
+                "teamAbbrevs": "SEA,VAN",
+                "gamesPlayed": 10,
+                "saves": 300,
+                "shotsAgainst": 320,
+            },
+            {
+                "playerId": 3,
+                "goalieFullName": "Traded",
+                "teamAbbrevs": "SEA,VAN",
+                "gamesPlayed": 10,
+                "saves": 300,
+                "shotsAgainst": 320,
+            },
+        ]
+        out = ig.season_goalies(rows)
+        assert [(g["name"], g["team"], g["gp"]) for g in out] == [
+            ("Traded", "VAN", 20),
+            ("Starter", "CAR", 60),
+        ]
+
+    def test_goals_above_expected_uses_all_situations(self):
+        sk = [
+            {
+                "name": "A",
+                "team": "CAR",
+                "situation": "all",
+                "games_played": "10",
+                "I_F_goals": "8",
+                "I_F_xGoals": "5.5",
+            },
+            {
+                "name": "A",
+                "team": "CAR",
+                "situation": "5on5",
+                "games_played": "10",
+                "I_F_goals": "9",
+                "I_F_xGoals": "1",
+            },
+            {
+                "name": "B",
+                "team": "BOS",
+                "situation": "all",
+                "games_played": "10",
+                "I_F_goals": "2",
+                "I_F_xGoals": "4",
+            },
+        ]
+        gl = [
+            {
+                "name": "G",
+                "team": "SEA",
+                "situation": "all",
+                "games_played": "9",
+                "xGoals": "30",
+                "flurryAdjustedxGoals": "28",
+                "goals": "20",
+            }
+        ]
+        gax, gsax = ig.goals_above_expected(sk, gl)
+        assert [(p["name"], p["gax"]) for p in gax] == [("A", 2.5), ("B", -2.0)]
+        assert gsax[0]["gsax"] == 8  # flurry-adjusted
+        assert ig.signed(2.5) == "+2.5" and ig.signed(-2.0) == "\u22122.0"
+
+    def test_cards_render_and_caption_is_neutral(self):
+        players = ig.week_skaters(
+            [
+                sk_game(i, f"Player With A Very Long Name {i}", "CAR", "2026-10-13", 2, i)
+                for i in range(6)
+            ]
+        )
+        goalies = ig.week_goalies(
+            [g_game(1, "G", "BOS", d, 30, 31) for d in ("2026-10-13", "2026-10-15")]
+        )
+        img = ig.render_leaders(
+            "Oct 12\u201318",
+            "Season Leaders",
+            "sub",
+            [
+                ("Points", ig.skater_points_rows(players)),
+                ("Goals", ig.skater_goals_rows(players)),
+                ("Save %", ig.goalie_rows(goalies)),
+            ],
+        )
+        out = Image.open(io.BytesIO(ig.to_jpeg(img)))
+        assert out.size == (1080, 1350)
+        gax = [{"name": "A", "team": "CAR", "gax": 3.2}]
+        cap = ig.caption_leaders(players, players, gax, "Oct 12\u201318")
+        assert (
+            "Top scorer this week: Player With A Very Long Name 5 (CAR), 7 points in 1 game\n"
+            in cap
+        )
+        assert "+3.2" in cap
+        assert_neutral(cap)
+
+    def _run(self, week_rows, mp=None, mp_error=None):
+        def fetch(kind, cayenne, is_game):
+            if is_game:
+                return week_rows if kind == "skater" else []
+            return (
+                [dict(r, teamAbbrevs=r["teamAbbrev"]) for r in week_rows]
+                if kind == "skater"
+                else []
+            )
+
+        csv = MagicMock(side_effect=mp_error) if mp_error else MagicMock(side_effect=mp or [[], []])
+        with (
+            patch.object(ig, "fetch_nhl_stats", side_effect=fetch),
+            patch.object(ig.moneypuck, "fetch_csv", csv),
+            patch.object(ig, "ship", return_value=0) as ship,
+        ):
+            code = ig.post_leaders(MagicMock(), 20262027, TODAY, False)
+        return code, ship
+
+    def test_no_games_last_week_is_quiet(self):
+        code, ship = self._run([])
+        assert code == 0
+        ship.assert_not_called()
+
+    def test_posts_three_slides_with_moneypuck(self):
+        week = [sk_game(1, "A", "CAR", "2026-10-13", 1, 1)]
+        sk = [
+            {
+                "name": "A",
+                "team": "CAR",
+                "situation": "all",
+                "games_played": "5",
+                "I_F_goals": "3",
+                "I_F_xGoals": "2",
+            }
+        ]
+        gl = [
+            {
+                "name": "G",
+                "team": "BOS",
+                "situation": "all",
+                "games_played": "5",
+                "xGoals": "12",
+                "goals": "10",
+            }
+        ]
+        code, ship = self._run(week, mp=[sk, gl])
+        assert code == 0
+        _, kind, key, images, caption, _ = ship.call_args.args
+        assert (kind, key, len(images)) == ("leaders", "leaders-2026-10-20", 3)
+        assert "week of Oct 12\u201318" in caption
+
+    def test_moneypuck_down_drops_only_the_xg_slide(self):
+        code, ship = self._run(
+            [sk_game(1, "A", "CAR", "2026-10-13", 1, 1)], mp_error=RuntimeError("503")
+        )
+        assert code == 0
+        assert len(ship.call_args.args[3]) == 2
+
+    def test_nhl_api_failure_retries_later(self):
+        with patch.object(ig, "fetch_nhl_stats", side_effect=ig.httpx.ConnectError("down")):
+            assert ig.post_leaders(MagicMock(), 20262027, TODAY, False) == 1
+
+
 class TestCredentialsCheck:
     def responses(self, **over):
         good = {

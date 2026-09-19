@@ -387,6 +387,7 @@ Automatic posts to Instagram and the EyeWall Facebook Page, run by `.github/work
 | `rankings` -- 32-team power rankings, movement vs. a week earlier (2 slides) | Mon 15:00 | `power_rankings_narratives` |
 | `winners` -- each game's projected winner + win probability | daily 15:30, skipped with no games | `game_win_probs` |
 | `recap` -- last Mon-Sun graded: record, most confident hits and misses (up to 3 slides) | Mon 18:00 | `game_win_probs` vs `game_log` |
+| `leaders` -- last Mon-Sun's top scorers and goalies, season points/goals/save % leaders, goals (saved) above expected (3 slides; the xG slide is dropped if MoneyPuck is unavailable) | Tue 17:00 | NHL stats API, MoneyPuck season CSVs |
 
 Cards are 1080x1350 JPEGs drawn with Pillow in the site's palette and Barlow fonts (`assets/fonts/`, OFL). They're uploaded to the public Supabase Storage bucket `social`, since both platforms fetch images by URL, and then published through the Graph API. Instagram gets a single image or a carousel. Facebook gets a photo post, or several unpublished photo uploads attached to one feed post. Every attempt is written to `social_posts`, one row per platform. A `(platform, post key)` pair (post key = `<kind>-<ET date>`) that's already published is never posted again. That makes the backup crons safe: if one platform failed, the backup retries only that one. Facebook captions swap Instagram's "link in bio" for a real `eyewallanalytics.com` link.
 
@@ -397,6 +398,7 @@ One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. 
 ```bash
 python social_posts.py winners --dry-run                           # render to social_out/, no upload/post
 python social_posts.py recap --dry-run --date 2026-10-19           # as if run that day (ET)
+python social_posts.py leaders --dry-run --date 2026-04-14 --season 20252026  # a past week, real data
 gh workflow run social-posts.yml -f kind=rankings -f dry_run=true  # images come back as a run artifact
 gh workflow run social-posts.yml -f kind=check                     # read-only: token, Page and Instagram link, publish permission
 ```
