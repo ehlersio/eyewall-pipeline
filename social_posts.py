@@ -155,12 +155,14 @@ NHL_NOTE = "Regular season · stats: NHL"
 XG_NOTE = "Expected goals: MoneyPuck.com"
 
 
-def team_name(abbr):
-    return TEAMS.get(abbr, (abbr, TEXT))[0]
+def team_name(abbr, teams=None):
+    return (teams or TEAMS).get(abbr, (abbr, TEXT))[0]
 
 
-def team_color(abbr):
-    return TEAMS.get(abbr, (abbr, TEXT))[1]
+def team_color(abbr, teams=None):
+    """teams: {abbr: (name, color)} for another league (social_posts_leagues.py);
+    NHL's TEAMS by default. Unknown teams get the text color."""
+    return (teams or TEAMS).get(abbr, (abbr, TEXT))[1]
 
 
 def et_today():
@@ -637,19 +639,24 @@ def render_rankings_slide(rows, slide, slides, week_label):
     return img
 
 
-def prob_bar(d, x0, x1, y, h, away, home, home_p):
+def prob_bar(d, x0, x1, y, h, away, home, home_p, teams=None):
     """Horizontal bar split away (left) / home (right) by win probability."""
     split = x0 + (x1 - x0) * (1 - home_p)
     d.rounded_rectangle([x0, y, x1, y + h], radius=h // 2, fill=BG3)
-    d.rounded_rectangle([x0, y, max(split, x0 + h), y + h], radius=h // 2, fill=team_color(away))
-    d.rounded_rectangle([min(split, x1 - h), y, x1, y + h], radius=h // 2, fill=team_color(home))
+    d.rounded_rectangle(
+        [x0, y, max(split, x0 + h), y + h], radius=h // 2, fill=team_color(away, teams)
+    )
+    d.rounded_rectangle(
+        [min(split, x1 - h), y, x1, y + h], radius=h // 2, fill=team_color(home, teams)
+    )
     d.rectangle([split - 2, y - 3, split + 2, y + h + 3], fill=BG2)
 
 
-def render_winners(games, day):
+def render_winners(games, day, league=None, teams=None):
+    """league: e.g. "PWHL" -- prefixes the kicker; teams: that league's palette."""
     n = len(games)
     img, d, top, bottom = new_card(
-        fmt_day(day),
+        f"{league} · {fmt_day(day)}" if league else fmt_day(day),
         "Projected Winners",
         f"{n} game{'s' if n != 1 else ''} today · win probability from the EyeWall Elo model",
     )
@@ -661,7 +668,7 @@ def render_winners(games, day):
         home_p = g["home_win_prob"]
         fav = g["home"] if home_p >= 0.5 else g["away"]
         fav_p = max(home_p, 1 - home_p)
-        row_box(d, y, h, team_color(fav))
+        row_box(d, y, h, team_color(fav, teams))
         matchup = f"{g['away']} @ {g['home']}"
         when = g["start"].astimezone(ET).strftime("%-I:%M %p ET") if g["start"] else ""
         if big:
@@ -670,7 +677,7 @@ def render_winners(games, day):
                 d.text((100, y + 84), when, font=body(26), fill=MUTED)
             d.text((W - 100, y + 26), pct(fav_p), font=display(56), fill=TEXT, anchor="ra")
             d.text((W - 100, y + 90), f"{fav} projected", font=body(26), fill=MUTED, anchor="ra")
-            prob_bar(d, 460, 800, y + h // 2 - 8, 16, g["away"], g["home"], home_p)
+            prob_bar(d, 460, 800, y + h // 2 - 8, 16, g["away"], g["home"], home_p, teams)
         else:
             mid = y + h // 2
             size = max(26, int(h * 0.5))
@@ -680,12 +687,14 @@ def render_winners(games, day):
             d.text(
                 (W - 100, mid), f"{fav} {pct(fav_p)}", font=display(size), fill=TEXT, anchor="rm"
             )
-            prob_bar(d, 600, 790, mid - 6, 12, g["away"], g["home"], home_p)
+            prob_bar(d, 600, 790, mid - 6, 12, g["away"], g["home"], home_p, teams)
     return img
 
 
-def render_recap_summary(s, span):
-    img, d, top, _ = new_card("Weekly recap", "How We Did", span)
+def render_recap_summary(s, span, league=None):
+    img, d, top, _ = new_card(
+        f"{league} · Weekly recap" if league else "Weekly recap", "How We Did", span
+    )
     d.text(
         (W // 2, top + 180),
         f"{s['hits']}\u2013{s['misses']}",
@@ -719,14 +728,14 @@ def render_recap_summary(s, span):
     return img
 
 
-def render_recap_list(games, hit, span):
+def render_recap_list(games, hit, span, league=None):
     title = "What We Got Right" if hit else "What We Missed"
     sub = (
         "Our most confident calls that came through"
         if hit
         else "Our most confident calls that didn\u2019t"
     )
-    img, d, top, bottom = new_card(span, title, sub)
+    img, d, top, bottom = new_card(f"{league} · {span}" if league else span, title, sub)
     gap = 12
     h = min(140, (bottom - top - gap * (len(games) - 1)) // max(len(games), 1))
     for i, g in enumerate(games):
@@ -746,7 +755,7 @@ def render_recap_list(games, hit, span):
     return img
 
 
-def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE):
+def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE, teams=None):
     """sections: [(heading, [{name, team, value, detail}])] -> one card.
     Row heights shrink to fit however many rows the sections hold."""
     img, d, top, bottom = new_card(kicker, title, subtitle, note)
@@ -760,7 +769,7 @@ def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE):
         y += head_h
         for i, r in enumerate(rows):
             mid = y + h // 2
-            row_box(d, y, h, team_color(r["team"]))
+            row_box(d, y, h, team_color(r["team"], teams))
             d.text((116, mid), str(i + 1), font=display(int(h * 0.55)), fill=MUTED, anchor="mm")
             value_font = display(int(h * 0.58))
             value_w = d.textlength(r["value"], font=value_font)
@@ -772,7 +781,7 @@ def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE):
                 (160 + name_w + 16, mid + 2),
                 r["team"],
                 font=label(int(h * 0.34)),
-                fill=team_color(r["team"]),
+                fill=team_color(r["team"], teams),
                 anchor="lm",
             )
             d.text((W - 100, mid), r["value"], font=value_font, fill=TEXT, anchor="rm")
@@ -862,8 +871,8 @@ def caption_rankings(rows, week_label):
     return "\n".join(lines)
 
 
-def caption_winners(games, day):
-    lines = [f"Projected winners for {fmt_day(day)}", ""]
+def caption_winners(games, day, league=None, recap_day="Monday", hashtags=None):
+    lines = [f"{league + ' p' if league else 'P'}rojected winners for {fmt_day(day)}", ""]
     for g in games:
         home_p = g["home_win_prob"]
         fav = g["home"] if home_p >= 0.5 else g["away"]
@@ -871,16 +880,16 @@ def caption_winners(games, day):
     lines += [
         "",
         "Pre-game win probabilities from our Elo model, posted before puck drop. "
-        "Every call gets graded in Monday's recap.",
+        f"Every call gets graded in {recap_day}'s recap.",
         "",
-        HASHTAGS["winners"],
+        hashtags or HASHTAGS["winners"],
     ]
     return "\n".join(lines)
 
 
-def caption_recap(s, span):
+def caption_recap(s, span, league=None, hashtags=None):
     lines = [
-        f"Weekly recap, {span}: {s['hits']} of {s['n']} projected winners won ({pct(s['accuracy'])}).",
+        f"{league + ' w' if league else 'W'}eekly recap, {span}: {s['hits']} of {s['n']} projected winners won ({pct(s['accuracy'])}).",
     ]
     if s["season_n"]:
         lines.append(
@@ -898,7 +907,7 @@ def caption_recap(s, span):
         "Every projection is posted before puck drop and graded here, hits and misses alike. "
         "Full scorecard: link in bio.",
         "",
-        HASHTAGS["recap"],
+        hashtags or HASHTAGS["recap"],
     ]
     return "\n".join(lines)
 
