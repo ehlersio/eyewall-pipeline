@@ -663,22 +663,6 @@
       "rows": [
         {
           "assists": 0,
-          "goals": 0,
-          "gp": 0,
-          "pim": 0,
-          "player_id": 6690,
-          "plus_minus": 0,
-          "points": 0,
-          "pp_goals": 0,
-          "season_id": 92,
-          "season_type": "playoffs",
-          "sh_goals": 0,
-          "shots": 0,
-          "team_id": null,
-          "updated_at": "2026-01-15T17:00:00+00:00"
-        },
-        {
-          "assists": 0,
           "goals": 1,
           "gp": 12,
           "pim": 0,
@@ -754,24 +738,6 @@
           "toi": "1800:00",
           "updated_at": "2026-01-15T17:00:00+00:00",
           "wins": 17
-        },
-        {
-          "gaa": null,
-          "goals_against": 0,
-          "gp": 0,
-          "losses": 0,
-          "ot_losses": 0,
-          "player_id": 7002,
-          "saves": 0,
-          "season_id": 92,
-          "season_type": "playoffs",
-          "shots_against": 0,
-          "shutouts": 0,
-          "sv_pct": null,
-          "team_id": null,
-          "toi": null,
-          "updated_at": "2026-01-15T17:00:00+00:00",
-          "wins": 0
         }
       ],
       "table": "ahl_goalie_seasons"
