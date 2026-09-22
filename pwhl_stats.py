@@ -132,6 +132,34 @@ TEAM_ID_MAP = {
     "13": "SJS",
 }
 
+# Team codes the feed uses that TEAM_ID_MAP isn't keyed on. The 2023
+# showcase (season 2) calls Montréal "MON"; every other season calls it
+# "MTL". Unmapped, its 21 skaters and 3 goalies resolved to no team at
+# all and were stored with team_id NULL -- which never matches the
+# upsert's conflict key, so each run inserted another copy of them (84
+# skater + 12 goalie rows by 2026-06). Same failure the ECHL's Iowa and
+# Utah rows hit; see hockeytech_leagues.py (2026-09).
+TEAM_CODE_ALIASES = {"MON": "3"}
+
+CODE_TO_TEAM_ID = {code: team_id for team_id, code in TEAM_ID_MAP.items()} | TEAM_CODE_ALIASES
+
+
+def team_id_for(team_code: str) -> str | None:
+    """The team_id a feed row's team_code belongs to, or None for a code we
+    don't know. Callers skip rows they can't place rather than writing
+    team_id NULL -- see TEAM_CODE_ALIASES."""
+    return CODE_TO_TEAM_ID.get((team_code or "").strip())
+
+
+def warn_unresolved(unresolved: dict, kind: str) -> None:
+    """Name the team codes whose rows were skipped, so a code the feed
+    starts sending is visible in the run log instead of silently costing a
+    season its players."""
+    if unresolved:
+        teams = ", ".join(f"{code} ({n})" for code, n in sorted(unresolved.items()))
+        log.warning(f"  Skipped {sum(unresolved.values())} {kind} rows with no known team: {teams}")
+
+
 # City name → team_id (used in game log responses)
 CITY_TEAM_MAP = {
     "Boston": "1",
@@ -406,10 +434,9 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
     player_stubs = []
     for p in rows_raw:
         pid = p.get("player_id")
-        if not pid:
+        team_id = team_id_for(p.get("team_code", ""))
+        if not pid or not team_id:
             continue
-        team_code = p.get("team_code", "")
-        team_id = next((k for k, v in TEAM_ID_MAP.items() if v == team_code), None)
         full_name = p.get("name", "")
         name_parts = full_name.rsplit(" ", 1)
         player_stubs.append(
@@ -418,24 +445,28 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
                 "first_name": name_parts[0] if len(name_parts) > 1 else full_name,
                 "last_name": name_parts[1] if len(name_parts) > 1 else "",
                 "position": p.get("position", "F"),
-                "team_id": int(team_id) if team_id else None,
+                "team_id": int(team_id),
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
     upsert_chunk(sb, "pwhl_players", player_stubs, "player_id")
 
     rows = []
+    unresolved: dict[str, int] = {}
     for p in rows_raw:
         pid = p.get("player_id")
-        team_code = p.get("team_code", "")
-        team_id = next((k for k, v in TEAM_ID_MAP.items() if v == team_code), None)
         if not pid:
+            continue
+        team_code = p.get("team_code", "")
+        team_id = team_id_for(team_code)
+        if not team_id:
+            unresolved[team_code] = unresolved.get(team_code, 0) + 1
             continue
 
         rows.append(
             {
                 "player_id": int(pid),
-                "team_id": int(team_id) if team_id else None,
+                "team_id": int(team_id),
                 "season_id": int(season_id),
                 "season_type": season_type,
                 "gp": int(p.get("games_played", 0) or 0),
@@ -467,6 +498,7 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
             }
         )
 
+    warn_unresolved(unresolved, "skater")
     n = upsert_chunk(sb, "pwhl_player_seasons", rows, "player_id,team_id,season_id,season_type")
     log.info(f"  {n} skater season rows upserted")
 
@@ -500,10 +532,9 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
     goalie_stubs = []
     for g in rows_raw:
         pid = g.get("player_id")
-        if not pid:
+        team_id = team_id_for(g.get("team_code", ""))
+        if not pid or not team_id:
             continue
-        team_code = g.get("team_code", "")
-        team_id = next((k for k, v in TEAM_ID_MAP.items() if v == team_code), None)
         full_name = g.get("name", "")
         name_parts = full_name.rsplit(" ", 1)
         goalie_stubs.append(
@@ -512,24 +543,28 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
                 "first_name": name_parts[0] if len(name_parts) > 1 else full_name,
                 "last_name": name_parts[1] if len(name_parts) > 1 else "",
                 "position": "G",
-                "team_id": int(team_id) if team_id else None,
+                "team_id": int(team_id),
                 "updated_at": datetime.now(UTC).isoformat(),
             }
         )
     upsert_chunk(sb, "pwhl_players", goalie_stubs, "player_id")
 
     rows = []
+    unresolved: dict[str, int] = {}
     for g in rows_raw:
         pid = g.get("player_id")
-        team_code = g.get("team_code", "")
-        team_id = next((k for k, v in TEAM_ID_MAP.items() if v == team_code), None)
         if not pid:
+            continue
+        team_code = g.get("team_code", "")
+        team_id = team_id_for(team_code)
+        if not team_id:
+            unresolved[team_code] = unresolved.get(team_code, 0) + 1
             continue
 
         rows.append(
             {
                 "player_id": int(pid),
-                "team_id": int(team_id) if team_id else None,
+                "team_id": int(team_id),
                 "season_id": int(season_id),
                 "season_type": season_type,
                 "gp": int(g.get("games_played", 0) or 0),
@@ -551,6 +586,7 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
             }
         )
 
+    warn_unresolved(unresolved, "goalie")
     n = upsert_chunk(sb, "pwhl_goalie_seasons", rows, "player_id,team_id,season_id,season_type")
     log.info(f"  {n} goalie season rows upserted")
 
@@ -682,7 +718,7 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
         # team_code may have clinch prefixes like "x - MTL", "y - BOS" — strip them
         raw_code = t.get("team_code", "")
         team_code = raw_code.split(" - ")[-1].strip()
-        team_id = next((k for k, v in TEAM_ID_MAP.items() if v == team_code), None)
+        team_id = team_id_for(team_code)
         if not team_id:
             log.warning(f"  Unknown team_code: '{raw_code}' — skipping")
             continue
