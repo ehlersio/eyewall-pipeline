@@ -72,6 +72,10 @@ on:
         description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
         default: true
+      date:
+        description: 'Optional ET date (YYYY-MM-DD) to run as, e.g. a past week for a dry run'
+        type: string
+        required: false
 
 concurrency:
   group: social-posts
@@ -87,6 +91,7 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           INPUT_KIND: ${{ inputs.kind }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_DATE: ${{ inputs.date }}
         run: |
           case "$SCHEDULE" in
             '0 15 * * 1'|'0 16 * * 1')  kind=rankings ;;
@@ -104,6 +109,12 @@ jobs:
           esac
           flag=""
           if [ "$INPUT_DRY_RUN" = "true" ]; then flag="--dry-run"; fi
+          if [ -n "$INPUT_DATE" ]; then
+            case "$INPUT_DATE" in
+              [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) flag="$flag --date $INPUT_DATE" ;;
+              *) echo "date must be YYYY-MM-DD, got: $INPUT_DATE"; exit 1 ;;
+            esac
+          fi
           script=social_posts.py
           case "$kind" in
             pwhl-*|minor-*) script=social_posts_leagues.py ;;
