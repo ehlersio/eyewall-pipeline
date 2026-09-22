@@ -25,6 +25,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      # test_goal_of_week.py encodes a real MP4 and checks it with ffprobe;
+      # it only skips when ffmpeg is missing outside CI.
+      - name: Ensure ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
       - name: Lint (Ruff)
         run: |
           ruff check .
