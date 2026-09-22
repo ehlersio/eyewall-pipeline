@@ -11,8 +11,10 @@ name: Social Posts
 #   pwhl-leaders  Thursdays  -- last week's + season PWHL leaders
 #   milk-carton   Mondays    -- the week's roughest NHL week, on a milk carton
 #                              (milk_carton.py)
+#   goal-of-week  Fridays    -- last Mon-Sun's Goal of the Week, a Reel redrawn
+#                              from NHL tracking data (goal_of_week.py)
 # (the pwhl-*/minor-* posts are social_posts_leagues.py, milk-carton is
-# milk_carton.py)
+# milk_carton.py, goal-of-week is goal_of_week.py)
 #
 # Times are UTC and sit well after the nightly pipeline, which is scheduled
 # for 07:00 UTC but in practice has been starting 12:00-13:30 UTC and taking
@@ -33,6 +35,9 @@ name: Social Posts
 #   pwhl-leaders  17:00 / 18:00 Thu
 #   milk-carton   21:00 / 22:00 Mon (5pm / 6pm EDT) -- NHL stats API and
 #                 MoneyPuck, which has Sunday's games by Monday afternoon
+#   goal-of-week  17:00 / 18:00 Fri (1pm / 2pm EDT) -- NHL game center and
+#                 tracking replays directly, so it doesn't wait on the nightly;
+#                 Friday has no other post
 
 on:
   schedule:
@@ -54,15 +59,17 @@ on:
     - cron: '0 18 * * 4'
     - cron: '0 21 * * 1'
     - cron: '0 22 * * 1'
+    - cron: '0 17 * * 5'
+    - cron: '0 18 * * 5'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, goal-of-week, check]
       dry_run:
-        description: 'Render only (images kept as a run artifact), no upload or post'
+        description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
         default: true
 
@@ -91,6 +98,7 @@ jobs:
             '0 17 * * 3'|'0 18 * * 3')  kind=minor-recap ;;
             '0 17 * * 4'|'0 18 * * 4')  kind=pwhl-leaders ;;
             '0 21 * * 1'|'0 22 * * 1')  kind=milk-carton ;;
+            '0 17 * * 5'|'0 18 * * 5')  kind=goal-of-week ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
@@ -100,6 +108,7 @@ jobs:
           case "$kind" in
             pwhl-*|minor-*) script=social_posts_leagues.py ;;
             milk-carton) script=milk_carton.py ;;
+            goal-of-week) script=goal_of_week.py ;;
           esac
           echo "script=$script" >> "$GITHUB_OUTPUT"
           echo "kind=$kind" >> "$GITHUB_OUTPUT"
@@ -116,6 +125,12 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # goal_of_week.py encodes its clip with ffmpeg. GitHub's Ubuntu images
+      # ship it; install only if an image ever doesn't.
+      - name: Ensure ffmpeg
+        if: steps.pick.outputs.kind == 'goal-of-week'
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
 
       - name: Post
         env:

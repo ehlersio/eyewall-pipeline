@@ -24,6 +24,9 @@ Neutral probability language only -- no betting framing (no odds, lines or
 "picks"), and the AI is never named on these cards.
 
 How a post goes out (Graph API, one Facebook Login Page token for both):
+  (a video post -- goal_of_week.py -- goes through ship_video() instead: an
+  MP4 uploaded the same way, published as an Instagram Reel and a Facebook
+  Page video, with the same once-per-platform bookkeeping)
   1. render JPEG(s) -- Instagram's publishing API only accepts JPEG
   2. upload to the public Supabase Storage bucket `social` (both platforms
      fetch the image from a public URL)
@@ -86,6 +89,9 @@ SITE_URL = "eyewallanalytics.com"
 BUCKET = "social"
 CONTAINER_POLL_SECONDS = 3
 CONTAINER_POLL_TRIES = 40
+GRAPH_VIDEO = "https://graph-video.facebook.com/v25.0"
+VIDEO_POLL_SECONDS = 10
+VIDEO_POLL_TRIES = 60
 GAME_TYPES = (2, 3)  # regular season, playoffs
 HIGHLIGHTS = 6  # rows per "got it right" / "missed" slide
 NHL_STATS = "https://api.nhle.com/stats/rest/en"
@@ -945,8 +951,10 @@ def graph_post(path, token, **params):
     return res.json()
 
 
-def wait_for_container(container_id, token):
-    for _ in range(CONTAINER_POLL_TRIES):
+def wait_for_container(
+    container_id, token, tries=CONTAINER_POLL_TRIES, seconds=CONTAINER_POLL_SECONDS
+):
+    for _ in range(tries):
         res = httpx.get(
             f"{GRAPH}/{container_id}",
             params={"fields": "status_code", "access_token": token},
@@ -958,7 +966,7 @@ def wait_for_container(container_id, token):
             return
         if status in ("ERROR", "EXPIRED"):
             raise RuntimeError(f"Instagram container {container_id} {status}")
-        time.sleep(CONTAINER_POLL_SECONDS)
+        time.sleep(seconds)
     raise RuntimeError(f"Instagram container {container_id} not ready after polling")
 
 
@@ -997,6 +1005,35 @@ def publish_facebook(page_id, token, image_urls, caption):
     return graph_post(f"{page_id}/feed", token, message=caption, **attached)["id"]
 
 
+def publish_instagram_reel(user_id, token, video_urls, caption, thumb_offset_ms=None):
+    """One video as a Reel, also shown on the profile grid -> media id.
+    Instagram transcodes it first, which takes far longer than an image, so
+    the container is polled for up to ~10 minutes."""
+    params = {"media_type": "REELS", "video_url": video_urls[0], "caption": caption}
+    params["share_to_feed"] = "true"
+    if thumb_offset_ms is not None:
+        params["thumb_offset"] = str(int(thumb_offset_ms))
+    creation = graph_post(f"{user_id}/media", token, **params)
+    wait_for_container(creation["id"], token, tries=VIDEO_POLL_TRIES, seconds=VIDEO_POLL_SECONDS)
+    return graph_post(f"{user_id}/media_publish", token, creation_id=creation["id"])["id"]
+
+
+def publish_facebook_video(page_id, token, video_urls, caption, thumb_offset_ms=None):
+    """One video on the Page, fetched by Facebook from its public URL -> id.
+    Video uploads go to Graph's video host, not graph.facebook.com."""
+    del thumb_offset_ms  # Facebook picks its own thumbnail
+    res = httpx.post(
+        f"{GRAPH_VIDEO}/{page_id}/videos",
+        data={"file_url": video_urls[0], "description": caption, "access_token": token},
+        timeout=120,
+    )
+    if res.status_code >= 400:
+        raise RuntimeError(
+            f"Graph API {page_id}/videos failed ({res.status_code}): {res.text[:300]}"
+        )
+    return res.json()["id"]
+
+
 def platform_caption(platform, caption):
     """Links aren't clickable in Instagram captions but are on Facebook."""
     if platform == "facebook":
@@ -1008,6 +1045,10 @@ def platform_caption(platform, caption):
 PLATFORMS = {
     "instagram": ("IG_USER_ID", publish_instagram),
     "facebook": ("FB_PAGE_ID", publish_facebook),
+}
+VIDEO_PLATFORMS = {
+    "instagram": ("IG_USER_ID", publish_instagram_reel),
+    "facebook": ("FB_PAGE_ID", publish_facebook_video),
 }
 
 
@@ -1068,9 +1109,16 @@ def ship(client, kind, post_key, images, caption, dry_run):
     done = published_platforms(client, post_key)
     urls = upload_images(client, kind, post_key, jpegs)
     print(f"  Uploaded {len(urls)} image(s)")
+    return publish_everywhere(client, kind, post_key, urls, caption, PLATFORMS, done)
+
+
+def publish_everywhere(client, kind, post_key, urls, caption, platforms, done, **extra):
+    """Publish uploaded media to each platform not already in `done`, and
+    record each outcome. `extra` goes to every publisher (a video's
+    thumbnail offset). Returns 1 if any platform failed."""
     token = os.environ.get("META_PAGE_TOKEN")
     code = 0
-    for platform, (id_var, publisher) in PLATFORMS.items():
+    for platform, (id_var, publisher) in platforms.items():
         if platform in done:
             print(f"  {platform}: already published")
             continue
@@ -1081,7 +1129,7 @@ def ship(client, kind, post_key, images, caption, dry_run):
             record(client, platform, kind, post_key, "rendered", urls, text)
             continue
         try:
-            media_id = publisher(account_id, token, urls, text)
+            media_id = publisher(account_id, token, urls, text, **extra)
         except (RuntimeError, httpx.HTTPError, KeyError) as e:
             print(f"  {platform}: publish failed: {e}")
             record(client, platform, kind, post_key, "failed", urls, text, error=str(e)[:1000])
@@ -1090,6 +1138,37 @@ def ship(client, kind, post_key, images, caption, dry_run):
         record(client, platform, kind, post_key, "published", urls, text, media_id=media_id)
         print(f"  {platform}: published {media_id}")
     return code
+
+
+def ship_video(client, kind, post_key, mp4, caption, dry_run, thumb_offset_ms=None):
+    """ship() for one MP4: an Instagram Reel and a Facebook Page video, with
+    the same once-per-platform bookkeeping in social_posts."""
+    if dry_run:
+        OUT_DIR.mkdir(exist_ok=True)
+        (OUT_DIR / f"{post_key}.mp4").write_bytes(mp4)
+        for platform in VIDEO_PLATFORMS:
+            (OUT_DIR / f"{post_key}-{platform}.txt").write_text(platform_caption(platform, caption))
+        print(
+            f"  DRY RUN: video ({len(mp4) // 1024} KB) + captions written to {OUT_DIR}/{post_key}*"
+        )
+        return 0
+
+    done = published_platforms(client, post_key)
+    path = f"{kind}/{post_key}.mp4"
+    bucket = client.storage.from_(BUCKET)
+    bucket.upload(path, mp4, {"content-type": "video/mp4", "upsert": "true"})
+    urls = [bucket.get_public_url(path).rstrip("?")]
+    print(f"  Uploaded video ({len(mp4) // 1024} KB)")
+    return publish_everywhere(
+        client,
+        kind,
+        post_key,
+        urls,
+        caption,
+        VIDEO_PLATFORMS,
+        done,
+        thumb_offset_ms=thumb_offset_ms,
+    )
 
 
 # ── Posts ───────────────────────────────────────────────────────────────
