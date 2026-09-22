@@ -141,6 +141,18 @@ Once `clinch_indicator` is populated for a team, it's ground truth from the NHL 
 ### `shot_events.py`
 League-wide shot coordinates from PBP. Incremental. Runtime: ~2 min nightly, ~10-15 min backfill.
 
+Every row also carries **`event_id`** (2026-09), the NHL's own id for the play it came from. `(game_id, event_id)` is what lets a row be pointed back at that play: the game center `landing` feed names the same id for a goal, and a goal's player-and-puck tracking replay is addressed by `(gameId, eventId)` -- `eyewall-poller`'s `/nhl/goal-replay`. Without it the shot map's season-wide view ("All N games") can offer neither a goal's video nor its replay, since those dots come from this table rather than from a game's play-by-play. Run `docs/shot_events_event_id.sql` before deploying. The column is nullable: a row written before it existed has no id until its game is re-processed, and the app reads a missing id as "no replay for this dot".
+
+`backfill_shot_event_ids.py` fills it in for games already ingested -- `shot_events.py` skips any game already in the table, so they'd otherwise stay null forever. It re-fetches a game's play-by-play and rewrites its rows through the same `process_game()` the nightly run uses, over the seasons that have tracking replays (2023-24 on). Stop and re-run freely: it only picks up games that still have a row with no id.
+
+```bash
+python backfill_shot_event_ids.py --dry-run          # count the work, change nothing
+python backfill_shot_event_ids.py --limit 25         # a first slice, to watch it
+python backfill_shot_event_ids.py                    # 2023-24 onward
+python backfill_shot_event_ids.py --season 20252026  # one season
+python backfill_shot_event_ids.py --verify           # what's still missing
+```
+
 ### `shift_data.py`
 Per-player shift start/end times. Falls back to HTML shift reports when JSON API returns no data. Used by `rapm.py`. Incremental.
 
