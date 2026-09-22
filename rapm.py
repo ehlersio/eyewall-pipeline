@@ -23,10 +23,17 @@ Scope:
   - League-wide shots and shifts (all 32 teams)
 """
 
-import math
 from collections import defaultdict
 
 from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
+
+# A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
+# line_combinations.py, and re-exported here because
+# backtest_predictions.py calls rapm.shot_xg. These are the values rapm
+# uses as y, the outcome per shot event. Until 2026-09 this file had its
+# own copy that scored a goal 1.0 and used roughly double the real
+# per-band rates; see nhl_shot_xg.py.
+from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
 
 # -- Score-state adjustment weights (Macdonald 2012) -----------
 # Teams trailing outshooot; teams leading turtle.
@@ -45,34 +52,6 @@ SCORE_WEIGHTS = {
 def score_weight(score_diff: int) -> float:
     clamped = max(-3, min(3, score_diff))
     return SCORE_WEIGHTS[clamped]
-
-
-# -- xG proxy from shot danger ---------------------------------
-# MoneyPuck xG not stored per-event in shot_events.
-# Use danger-zone proxy: high=0.20, med=0.07, low=0.03
-# Based on league-average MoneyPuck danger-zone xG values.
-# These are the values rapm.py uses as y (outcome per shot event).
-DANGER_XG = {
-    "high": 0.20,
-    "medium": 0.07,
-    "low": 0.03,
-    "goal": 1.00,  # actual goals always count as 1.0
-}
-
-
-def shot_xg(event_type: str, x: int, y: int) -> float:
-    """Approximate xG from shot location and event type."""
-    if event_type == "goal":
-        return 1.0
-    if event_type not in ("shot-on-goal", "missed-shot", "blocked-shot"):
-        return 0.0
-    # Use distance from goal (NHL goal at x=89, centre y=0)
-    dist = math.sqrt((abs(x) - 89) ** 2 + (y or 0) ** 2)
-    if dist <= 15:
-        return DANGER_XG["high"]
-    if dist <= 30:
-        return DANGER_XG["medium"]
-    return DANGER_XG["low"]
 
 
 def fetch_all(client, table, select, filters: dict, page_size=1000):

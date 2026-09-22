@@ -70,12 +70,15 @@ Run order: after shift_data and shot_events (both must be populated).
 """
 
 import argparse
-import math
 from collections import defaultdict
 
 import requests
 
 from db import NHL_SEASON, get_client
+
+# A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
+# rapm.py (this file used to keep its own copy).
+from nhl_shot_xg import shot_xg
 from pipeline_common import FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
@@ -120,20 +123,6 @@ ALL_TEAMS = [
     "WPG",
     "WSH",
 ]
-
-
-# xG proxy (mirrors rapm.py — no MoneyPuck xG stored per shot event)
-def shot_xg(event_type, x, y):
-    if event_type == "goal":
-        return 1.0
-    if event_type not in ("shot-on-goal", "missed-shot", "blocked-shot"):
-        return 0.0
-    dist = math.sqrt((abs(x or 0) - 89) ** 2 + (y or 0) ** 2)
-    if dist <= 15:
-        return 0.20
-    if dist <= 30:
-        return 0.07
-    return 0.03
 
 
 def fetch_all(client, table, select, filters, page_size=999, cursor_col="id"):
