@@ -154,7 +154,7 @@ jobs:
         run: python ${{ steps.pick.outputs.script }} ${{ steps.pick.outputs.kind }} ${{ steps.pick.outputs.flag }}
 
       - name: Keep dry-run images
-        if: steps.pick.outputs.flag == '--dry-run'
+        if: contains(steps.pick.outputs.flag, '--dry-run')
         uses: actions/upload-artifact@v4
         with:
           name: social-${{ steps.pick.outputs.kind }}
