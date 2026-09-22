@@ -172,6 +172,14 @@ def process_game(game, season):
 
         shots.append(
             {
+                # The NHL's own id for this play. Unique within a game, not
+                # across games -- (game_id, event_id) is the identifying
+                # pair. It's what lets a row here be pointed back at the
+                # play it came from: the game center `landing` feed names
+                # the same id for a goal, and a goal's tracking replay is
+                # addressed by (gameId, eventId). See
+                # docs/shot_events_event_id.sql.
+                "event_id": play.get("eventId"),
                 "player_id": shooter_id,
                 "goalie_id": goalie_id,
                 "season": season,
