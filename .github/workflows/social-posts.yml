@@ -9,7 +9,10 @@ name: Social Posts
 #   pwhl-recap    Tuesdays   -- last week's PWHL projected winners, graded
 #   minor-recap   Wednesdays -- AHL + ECHL: last week graded + top scorer
 #   pwhl-leaders  Thursdays  -- last week's + season PWHL leaders
-# (the pwhl-*/minor-* posts are social_posts_leagues.py)
+#   milk-carton   Mondays    -- the week's roughest NHL week, on a milk carton
+#                              (milk_carton.py)
+# (the pwhl-*/minor-* posts are social_posts_leagues.py, milk-carton is
+# milk_carton.py)
 #
 # Times are UTC and sit well after the nightly pipeline, which is scheduled
 # for 07:00 UTC but in practice has been starting 12:00-13:30 UTC and taking
@@ -28,6 +31,8 @@ name: Social Posts
 #   pwhl-recap    20:00 / 21:00 Tue
 #   minor-recap   17:00 / 18:00 Wed
 #   pwhl-leaders  17:00 / 18:00 Thu
+#   milk-carton   21:00 / 22:00 Mon (5pm / 6pm EDT) -- NHL stats API and
+#                 MoneyPuck, which has Sunday's games by Monday afternoon
 
 on:
   schedule:
@@ -47,13 +52,15 @@ on:
     - cron: '0 18 * * 3'
     - cron: '0 17 * * 4'
     - cron: '0 18 * * 4'
+    - cron: '0 21 * * 1'
+    - cron: '0 22 * * 1'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, check]
       dry_run:
         description: 'Render only (images kept as a run artifact), no upload or post'
         type: boolean
@@ -83,13 +90,17 @@ jobs:
             '0 20 * * 2'|'0 21 * * 2')  kind=pwhl-recap ;;
             '0 17 * * 3'|'0 18 * * 3')  kind=minor-recap ;;
             '0 17 * * 4'|'0 18 * * 4')  kind=pwhl-leaders ;;
+            '0 21 * * 1'|'0 22 * * 1')  kind=milk-carton ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
           flag=""
           if [ "$INPUT_DRY_RUN" = "true" ]; then flag="--dry-run"; fi
           script=social_posts.py
-          case "$kind" in pwhl-*|minor-*) script=social_posts_leagues.py ;; esac
+          case "$kind" in
+            pwhl-*|minor-*) script=social_posts_leagues.py ;;
+            milk-carton) script=milk_carton.py ;;
+          esac
           echo "script=$script" >> "$GITHUB_OUTPUT"
           echo "kind=$kind" >> "$GITHUB_OUTPUT"
           echo "flag=$flag" >> "$GITHUB_OUTPUT"

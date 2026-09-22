@@ -402,8 +402,11 @@ Automatic posts to Instagram and the EyeWall Facebook Page, run by `.github/work
 | `pwhl-recap` -- last Mon-Sun's PWHL projected winners graded (up to 3 slides) | Tue 20:00 | `pwhl_game_win_probs` vs `pwhl_game_log` |
 | `minor-recap` -- one card for the AHL and ECHL: each league's projected winners graded for last Mon-Sun, most confident hit and miss, top scorer; a league with nothing graded is left off | Wed 17:00 | `{ahl,echl}_game_win_probs` vs `{league}_game_log`, `{league}_skater_game_box` |
 | `pwhl-leaders` -- last Mon-Sun's top scorers and goalies, season points/goals/save % leaders, goals (saved) above expected from EyeWall's PWHL xG model (3 slides; the xG slide is skipped until both sides have data) | Thu 17:00 | `pwhl_skater_game_box`, `pwhl_goalie_game_box`, `pwhl_player_seasons`, `pwhl_goalie_seasons` |
+| `milk-carton` -- the NHL player with last Mon-Sun's roughest week on a "MISSING" milk carton with his headshot, plus up to two more only in a genuinely bad week (see below) | Mon 21:00 | NHL stats API (skater summary/realtime/penalties, goalie summary), MoneyPuck goalie game-by-game, NHL headshots |
 
 The `pwhl-*` and `minor-recap` posts live in `social_posts_leagues.py`, which reuses `social_posts.py`'s cards, captions and publishing; the workflow routes each kind to the right script. PWHL cards use PWHL team colors (copied from eyewall-analytics' `pwhlConfig.js`).
+
+`milk-carton` lives in `milk_carton.py` (same reuse). Skaters (3+ GP, 14+ min a game) score giveaways minus takeaways, plus 2 x penalties taken beyond those drawn, minus plus/minus, minus 2 x points, per 3 games. Goalies (2+ starts) score minus GSAx (MoneyPuck flurry-adjusted), plus 2 per start pulled early (out before 40:00 having allowed 3+, so an injury exit doesn't count), plus half their rebounds above expected. Each position is measured against its own cutoff, the worst 0.5% of its weeks in 2025-26 (forwards 9.0, defensemen 12.0, goalies 9.65), because a defenseman's minutes pile up giveaways and minuses a forward's don't. The highest score/cutoff headlines every week. Up to two more cartons are added only at 15% past a cutoff. Over 2025-26 that meant 16 forward, 8 defense and 2 goalie headliners, and a second carton in 3 of 26 weeks. Regular season only; a week without games exits 0. A goalie MoneyPuck hasn't caught up on sits the week out, and a missing headshot falls back to a silhouette.
 
 Cards are 1080x1350 JPEGs drawn with Pillow in the site's palette and Barlow fonts (`assets/fonts/`, OFL). They're uploaded to the public Supabase Storage bucket `social`, since both platforms fetch images by URL, and then published through the Graph API. Instagram gets a single image or a carousel. Facebook gets a photo post, or several unpublished photo uploads attached to one feed post. Every attempt is written to `social_posts`, one row per platform. A `(platform, post key)` pair (post key = `<kind>-<ET date>`) that's already published is never posted again. That makes the backup crons safe: if one platform failed, the backup retries only that one. Facebook captions swap Instagram's "link in bio" for a real `eyewallanalytics.com` link.
 
@@ -416,6 +419,7 @@ python social_posts.py winners --dry-run                           # render to s
 python social_posts.py recap --dry-run --date 2026-10-19           # as if run that day (ET)
 python social_posts.py leaders --dry-run --date 2026-04-14 --season 20252026  # a past week, real data
 python social_posts_leagues.py pwhl-leaders --dry-run --date 2026-03-10 --season 8  # a past PWHL week
+python milk_carton.py milk-carton --dry-run --date 2026-04-13        # a past week's carton
 gh workflow run social-posts.yml -f kind=rankings -f dry_run=true  # images come back as a run artifact
 gh workflow run social-posts.yml -f kind=check                     # read-only: token, Page and Instagram link, publish permission
 ```
