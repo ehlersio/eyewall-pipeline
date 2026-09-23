@@ -267,9 +267,23 @@ def run_all():
     elapsed = round(time.time() - start, 1)
     print(f"\n{'=' * 55}")
     print(f"  All pipelines complete in {elapsed}s")
+    # rapm/validate_rapm report through their own return values rather than
+    # failed_stages, so say so here too -- this summary used to print "All
+    # stages completed without error" immediately before exiting 1 on one of
+    # them, which made a red nightly genuinely hard to read.
+    status_problems = []
+    if rapm_status != "ok":
+        status_problems.append(f"rapm={rapm_status}")
+    if validation_status not in ("pass", "warn", "off_season"):
+        status_problems.append(f"validate_rapm={validation_status}")
+
     if failed_stages:
         print(f"  {len(failed_stages)} stage(s) failed: {', '.join(failed_stages)}")
-    else:
+    if status_problems:
+        print(
+            f"  {len(status_problems)} stage(s) reported a bad status: {', '.join(status_problems)}"
+        )
+    if not failed_stages and not status_problems:
         print("  All stages completed without error")
     print(f"{'=' * 55}\n")
 
@@ -283,8 +297,10 @@ def run_all():
     # data even when tonight's regression never ran). "off_season" is a
     # narrow, separate carve-out (added after the off-season nightly run
     # started failing on this check) for when game_log genuinely has zero
-    # completed games this season -- nothing stale to hide, nothing to
-    # validate, not the Session 45 failure mode. Any other stage failing
+    # REGULAR-SEASON games this season -- nothing stale to hide, nothing to
+    # validate, not the Session 45 failure mode. Preseason games count for
+    # nothing here: rapm.py never rates them, so they cannot make RAPM
+    # mandatory (they did once, and failed every nightly for four days). Any other stage failing
     # (per-stage isolation, Session 46) also fails the job, but critically
     # doesn't prevent the remaining stages from having run first.
     if (

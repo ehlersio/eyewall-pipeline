@@ -64,6 +64,33 @@ def _table_mock(**per_table_data):
     return client
 
 
+def _filtering_table_mock(**per_table_data):
+    """Like _table_mock, but .eq() actually filters the canned rows.
+
+    The plain mocks above let every .eq() through, so they cannot tell a
+    query that filters game_type from one that does not -- which is exactly
+    the bug below. These tests need the filter to be real."""
+    client = MagicMock()
+
+    def table(name):
+        rows = list(per_table_data.get(name, []))
+        m = MagicMock()
+        state = {"rows": rows}
+
+        def eq(col, val):
+            state["rows"] = [r for r in state["rows"] if r.get(col) == val]
+            return m
+
+        for method in ("select", "range", "gt", "order", "limit", "in_"):
+            getattr(m, method).return_value = m
+        m.eq.side_effect = eq
+        m.execute.side_effect = lambda: MagicMock(data=state["rows"])
+        return m
+
+    client.table.side_effect = table
+    return client
+
+
 class TestValidateRapmReturnsExplicitStatus:
     def test_no_rapm_values_with_completed_games_returns_no_data_not_none(self, monkeypatch):
         """player_seasons has no rows with a non-null rapm for this season,
@@ -88,6 +115,45 @@ class TestValidateRapmReturnsExplicitStatus:
 
         assert status == "off_season"
         assert status is not None
+
+    def test_preseason_games_alone_do_not_demand_rapm(self, monkeypatch):
+        """The 2026-09-20 nightly failure: the first preseason games landed in
+        game_log, and this check -- which did not filter game_type -- read
+        them as "the season has started" and demanded regular-season RAPM
+        that cannot exist yet. rapm.py only ever writes game_type=2, so
+        preseason must not make RAPM mandatory."""
+        client = _filtering_table_mock(
+            game_log=[
+                {"game_id": 2026010001, "season": 20262027, "game_type": 1},
+                {"game_id": 2026010032, "season": 20262027, "game_type": 1},
+            ],
+        )
+        monkeypatch.setattr(validate_rapm, "get_client", lambda: client)
+
+        assert validate_rapm.run(season=20262027) == "off_season"
+
+    def test_regular_season_games_still_demand_rapm(self, monkeypatch):
+        """The guard above must not become a blanket excuse: once real
+        regular-season games are logged, missing RAPM is still the Session 45
+        failure this module exists to catch."""
+        client = _filtering_table_mock(
+            game_log=[
+                {"game_id": 2026010001, "season": 20262027, "game_type": 1},
+                {"game_id": 2026020001, "season": 20262027, "game_type": 2},
+            ],
+        )
+        monkeypatch.setattr(validate_rapm, "get_client", lambda: client)
+
+        assert validate_rapm.run(season=20262027) == "no_data"
+
+    def test_playoff_games_alone_do_not_demand_rapm(self, monkeypatch):
+        """Same reasoning as preseason, for game_type=3."""
+        client = _filtering_table_mock(
+            game_log=[{"game_id": 2026030111, "season": 20262027, "game_type": 3}],
+        )
+        monkeypatch.setattr(validate_rapm, "get_client", lambda: client)
+
+        assert validate_rapm.run(season=20262027) == "off_season"
 
 
 class TestRapmReturnsExplicitStatus:

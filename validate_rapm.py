@@ -278,18 +278,31 @@ def run(season=NHL_SEASON, eh_csv_path=None):
     print(f"  EyeWall RAPM values loaded: {len(our_rapm)}")
 
     if not our_rapm:
-        # Distinguish "off-season, nothing to validate yet" from "games have
-        # been played and rapm.py should have produced values but didn't" --
-        # only the latter is the Session 45 stale-data failure mode this
-        # module's hard-fail-by-default policy exists to catch (see run.py's
-        # allowlist comment). Same game_log/season convention rapm.py itself
-        # already reads from (rapm.py:224).
+        # Distinguish "nothing to validate yet" from "games have been played
+        # and rapm.py should have produced values but didn't" -- only the
+        # latter is the Session 45 stale-data failure mode this module's
+        # hard-fail-by-default policy exists to catch (see run.py's allowlist
+        # comment).
+        #
+        # game_type=2 (regular season) is the whole point of the filter: the
+        # RAPM values queried above are game_type=2, and rapm.py only ever
+        # writes those, so only regular-season games can make RAPM mandatory.
+        # Without it, preseason (game_type=1) rows in game_log made this
+        # demand regular-season values that cannot exist yet -- the nightly
+        # failed every night from the first preseason game (2026-09-20) with
+        # 64 preseason rows logged and, correctly, zero RAPM.
         has_games = (
-            client.table("game_log").select("game_id").eq("season", season).limit(1).execute()
+            client.table("game_log")
+            .select("game_id")
+            .eq("season", season)
+            .eq("game_type", 2)
+            .limit(1)
+            .execute()
         )
         if not has_games.data:
             print(
-                "  No completed games logged for this season yet — off-season, nothing to validate."
+                "  No regular-season games logged for this season yet — "
+                "nothing to validate (preseason games, if any, are not rated)."
             )
             return "off_season"
         print(
