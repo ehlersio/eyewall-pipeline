@@ -155,7 +155,7 @@ jobs:
 
       - name: Keep dry-run images
         if: contains(steps.pick.outputs.flag, '--dry-run')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: social-${{ steps.pick.outputs.kind }}
           path: social_out/
