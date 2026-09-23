@@ -1,4 +1,4 @@
-# HockeyTech Endpoint Mapping — Automated Pass
+# HockeyTech Endpoint Mapping â€” Automated Pass
 
 Generated: 2026-07-04T13:25:20.439798+00:00
 
