@@ -86,6 +86,14 @@ OUT_DIR = Path(__file__).parent / "social_out"
 
 GRAPH = "https://graph.facebook.com/v25.0"
 SITE_URL = "eyewallanalytics.com"
+APP_STORE_URL = "https://apps.apple.com/app/eyewall-analytics/id6811195260"
+# Last line of every caption, after the hashtags: never ahead of the post's
+# own text, so it can't push content into the "...more" fold. A tappable
+# link on Facebook; Instagram captions can't link, so there it's a search.
+APP_LINE = {
+    "facebook": f"\U0001F4F1 Free iPhone app: {APP_STORE_URL}",
+    "instagram": "\U0001F4F1 Free iPhone app: search \u201cEyeWall Analytics\u201d on the App Store",
+}
 BUCKET = "social"
 CONTAINER_POLL_SECONDS = 3
 CONTAINER_POLL_TRIES = 40
@@ -1035,10 +1043,12 @@ def publish_facebook_video(page_id, token, video_urls, caption, thumb_offset_ms=
 
 
 def platform_caption(platform, caption):
-    """Links aren't clickable in Instagram captions but are on Facebook."""
+    """Links aren't clickable in Instagram captions but are on Facebook.
+    Every caption ends with the platform's APP_LINE."""
     if platform == "facebook":
-        return caption.replace("link in bio", SITE_URL)
-    return caption
+        caption = caption.replace("link in bio", SITE_URL)
+    app_line = APP_LINE.get(platform)
+    return f"{caption}\n\n{app_line}" if app_line else caption
 
 
 # platform -> (env var for its account id, publisher)

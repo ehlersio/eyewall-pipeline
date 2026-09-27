@@ -201,11 +201,22 @@ class TestPublish:
 
     def test_facebook_caption_gets_a_real_link(self):
         assert ig.platform_caption("facebook", "Scorecard: link in bio.") == (
-            "Scorecard: eyewallanalytics.com."
+            f"Scorecard: eyewallanalytics.com.\n\n{ig.APP_LINE['facebook']}"
         )
         assert ig.platform_caption("instagram", "Scorecard: link in bio.") == (
-            "Scorecard: link in bio."
+            f"Scorecard: link in bio.\n\n{ig.APP_LINE['instagram']}"
         )
+
+    def test_app_line_comes_last_after_the_hashtags(self):
+        caption = "Projected winners\n\nNYR @ BOS — BOS 58%\n\n#NHL #EyeWallAnalytics"
+        for platform in ("facebook", "instagram"):
+            text = ig.platform_caption(platform, caption)
+            before, app_line = text.rsplit("\n\n", 1)
+            assert app_line == ig.APP_LINE[platform]
+            assert before.endswith("#NHL #EyeWallAnalytics")
+        # Only Facebook gets the tappable App Store URL; Instagram can't link.
+        assert ig.APP_STORE_URL in ig.platform_caption("facebook", caption)
+        assert "apps.apple.com" not in ig.platform_caption("instagram", caption)
 
 
 def fake_platforms(ig_result=None, fb_result=None):
@@ -242,11 +253,12 @@ class TestShip:
         with patch.dict(ig.PLATFORMS, platforms):
             code, recs = ship()
         assert code == 0
+        ig_text = f"see link in bio\n\n{ig.APP_LINE['instagram']}"
         assert recs == {
-            "instagram": ("published", "see link in bio"),
-            "facebook": ("published", "see eyewallanalytics.com"),
+            "instagram": ("published", ig_text),
+            "facebook": ("published", f"see eyewallanalytics.com\n\n{ig.APP_LINE['facebook']}"),
         }
-        platforms["instagram"][1].assert_called_once_with("u1", "tok", ["u"], "see link in bio")
+        platforms["instagram"][1].assert_called_once_with("u1", "tok", ["u"], ig_text)
 
     def test_one_platform_failing_still_posts_the_other(self, creds):
         with patch.dict(ig.PLATFORMS, fake_platforms("ig1", RuntimeError("boom"))):
