@@ -91,8 +91,8 @@ APP_STORE_URL = "https://apps.apple.com/app/eyewall-analytics/id6811195260"
 # own text, so it can't push content into the "...more" fold. A tappable
 # link on Facebook; Instagram captions can't link, so there it's a search.
 APP_LINE = {
-    "facebook": f"\U0001F4F1 Free iPhone app: {APP_STORE_URL}",
-    "instagram": "\U0001F4F1 Free iPhone app: search \u201cEyeWall Analytics\u201d on the App Store",
+    "facebook": f"\U0001f4f1 Free iPhone app: {APP_STORE_URL}",
+    "instagram": "\U0001f4f1 Free iPhone app: search \u201cEyeWall Analytics\u201d on the App Store",
 }
 BUCKET = "social"
 CONTAINER_POLL_SECONDS = 3
