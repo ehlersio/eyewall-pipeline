@@ -21,12 +21,23 @@ from db import NHL_SEASON, get_client
 # it from NHL_SEASON instead means there's exactly one place this needs
 # to be right.
 MP_START_YEAR = int(str(NHL_SEASON)[:4])
-MP_SKATERS_URL = (
-    f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{MP_START_YEAR}/regular/skaters.csv"
-)
-MP_GOALIES_URL = (
-    f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{MP_START_YEAR}/regular/goalies.csv"
-)
+
+
+def mp_season_url(season: int, kind: str) -> str:
+    """MoneyPuck's season-summary CSV ("skaters" or "goalies") for a
+    YYYYYYYY season. From the season being run, not NHL_SEASON: with the
+    URLs fixed at import, `python moneypuck.py 20252026` fetched 2026-27's
+    file (header only on 2026-09-28) and wrote no player analytics at all,
+    so re-running a past season -- e.g. to recompute WAR after the RAPM
+    fix -- silently did nothing."""
+    start_year = int(str(season)[:4])
+    return (
+        f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{start_year}/regular/{kind}.csv"
+    )
+
+
+MP_SKATERS_URL = mp_season_url(NHL_SEASON, "skaters")
+MP_GOALIES_URL = mp_season_url(NHL_SEASON, "goalies")
 MP_TEAM_GAMES_URL = "https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv"
 HEADERS = {
     "User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)",
@@ -482,7 +493,7 @@ def run_goalies(client, season: int = NHL_SEASON):
     helpers.
     """
     print(f"\n--- Goalie GSAX / save% analytics (MoneyPuck) — Season {season} ---")
-    rows = fetch_csv(MP_GOALIES_URL)
+    rows = fetch_csv(mp_season_url(season, "goalies"))
 
     # Split by situation
     by_situation = {}
@@ -800,7 +811,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
     print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
 
     try:
-        rows = fetch_csv()
+        rows = fetch_csv(mp_season_url(season, "skaters"))
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
             # MoneyPuck doesn't publish a season's CSV until real games have
