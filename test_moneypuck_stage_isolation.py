@@ -36,7 +36,7 @@ class TestSeasonNotYetPublished:
     def test_404_on_initial_fetch_skips_cleanly(self, monkeypatch):
         monkeypatch.setattr(moneypuck, "get_client", lambda: MagicMock())
 
-        def boom():
+        def boom(url=None):
             resp = MagicMock()
             resp.status_code = 404
             raise moneypuck.requests.HTTPError(response=resp)
@@ -51,7 +51,7 @@ class TestSeasonNotYetPublished:
         silently swallowed alongside the expected 404 case."""
         monkeypatch.setattr(moneypuck, "get_client", lambda: MagicMock())
 
-        def boom():
+        def boom(url=None):
             resp = MagicMock()
             resp.status_code = 500
             raise moneypuck.requests.HTTPError(response=resp)
@@ -71,7 +71,7 @@ class TestRunSubstageIsolation:
     def test_exception_is_caught_and_recorded(self):
         failures = []
 
-        def boom():
+        def boom(url=None):
             raise ValueError("simulated MoneyPuck CSV schema change")
 
         moneypuck._run_substage(failures, "game_xg", boom)
@@ -83,7 +83,7 @@ class TestRunSubstageIsolation:
         from being attempted by run()."""
         failures = []
 
-        def boom():
+        def boom(url=None):
             raise KeyError("unexpected MoneyPuck row shape")
 
         try:
