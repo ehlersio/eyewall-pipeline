@@ -124,6 +124,27 @@ def fetch_all_keyset(client, table, select, filters: dict, page_size=999, cursor
     return rows
 
 
+def design_row(shoot_ids, defend_ids, player_idx, sign):
+    """One shot's regression row, from the reference team's side -- the same
+    side y is signed from: the reference team's skaters +1, the other team's
+    -1, whichever team shot.
+
+    Until 2026-09-28 the row was always shooters +1 / defenders -1 while y was
+    signed by the reference team (alphabetically first in the game). A shot by
+    the non-reference team then read as its own skaters giving up xG, so every
+    player's RAPM leaned on where his team's name sorts: 2025-26 roster WAR
+    summed by team ran from ANA +35.8 down to WSH -7.4, in alphabetical order.
+    """
+    row = {}
+    for pid in shoot_ids:
+        if pid in player_idx:
+            row[player_idx[pid]] = sign
+    for pid in defend_ids:
+        if pid in player_idx:
+            row[player_idx[pid]] = -sign
+    return row
+
+
 def prior_season(season: int) -> int:
     """Return the season immediately before this one.
     e.g. 20252026 -> 20242025, 20242025 -> 20232024
@@ -375,24 +396,21 @@ def run(season: int = NHL_SEASON):
         ozs_w = sum(shoot_ozs_weights) / len(shoot_ozs_weights) if shoot_ozs_weights else 1.0
         combined_w = norm_w * ozs_w
 
-        # Build row: shooting team +1, defending team -1
-        row = {}
-        for s in shoot_skaters:
-            if s["player_id"] in player_idx:
-                row[player_idx[s["player_id"]]] = 1
-        for s in defend_skaters:
-            if s["player_id"] in player_idx:
-                row[player_idx[s["player_id"]]] = -1
-
-        if not row:
-            continue
-
         # Signed xG: positive if shooting team is the reference team, else negative.
         # This makes y centered at 0 (equal shots each direction) and treats
         # forwards and defensemen symmetrically — the model measures xG *differential*
         # not raw xG. This is the standard EH RAPM formulation.
         ref_team = game_ref_team.get(game_id, shooting_team)
         sign = 1 if shooting_team == ref_team else -1
+
+        row = design_row(
+            [s["player_id"] for s in shoot_skaters],
+            [s["player_id"] for s in defend_skaters],
+            player_idx,
+            sign,
+        )
+        if not row:
+            continue
 
         rows_X.append(row)
         rows_y.append(sign * xg * combined_w)
