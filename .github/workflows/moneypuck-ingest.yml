@@ -33,15 +33,23 @@ jobs:
               "https://moneypuck.com/moneypuck/playerData/seasonSummary/$1/regular/skaters.csv"
           }
 
+          # Data rows in what was just fetched (the header line doesn't count).
+          data_rows() { echo $(( $(wc -l < skaters.csv) - 1 )); }
+
           YEAR_USED=$PRIMARY_YEAR
           STATUS=$(fetch_year "$PRIMARY_YEAR")
-          if [ "$STATUS" != "200" ]; then
-            echo "MoneyPuck has no published data for $PRIMARY_YEAR yet (HTTP $STATUS) -- falling back to $FALLBACK_YEAR"
+          # A new season's file can exist before any games do: on 2026-09-28
+          # MoneyPuck served 2026/regular/skaters.csv as a 200 with only the
+          # header row, the ingest sent that, and the Worker rejected it
+          # (400, body under 100 bytes). No data rows counts as "not
+          # published yet", same as a 404.
+          if [ "$STATUS" != "200" ] || [ "$(data_rows)" -lt 1 ]; then
+            echo "MoneyPuck has no published data for $PRIMARY_YEAR yet (HTTP $STATUS, $(data_rows) rows) -- falling back to $FALLBACK_YEAR"
             YEAR_USED=$FALLBACK_YEAR
             STATUS=$(fetch_year "$FALLBACK_YEAR")
           fi
-          if [ "$STATUS" != "200" ]; then
-            echo "MoneyPuck fetch failed for both $PRIMARY_YEAR and $FALLBACK_YEAR (HTTP $STATUS)"
+          if [ "$STATUS" != "200" ] || [ "$(data_rows)" -lt 1 ]; then
+            echo "MoneyPuck fetch failed for both $PRIMARY_YEAR and $FALLBACK_YEAR (HTTP $STATUS, $(data_rows) rows)"
             exit 1
           fi
 
