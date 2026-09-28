@@ -124,6 +124,22 @@ def fetch_goalie_ids(season: int) -> set[int]:
         return set()
 
 
+# Rankings wait until every team has played this many games. Before a
+# season's first games every component is 0 for all 32 teams, so the order
+# came down to database row order: on 2026-09-28 (0 GP) that ranked STL #1
+# and it went out as the weekly social post. A few games in, the early
+# weight on roster WAR (below) carries it.
+MIN_GAMES_TO_RANK = 3
+
+
+def ready_to_rank(team_seasons: list[dict]) -> bool:
+    """Every team has played MIN_GAMES_TO_RANK games."""
+    return (
+        bool(team_seasons)
+        and min((t.get("games_played") or 0) for t in team_seasons) >= MIN_GAMES_TO_RANK
+    )
+
+
 def fetch_player_seasons_for_war(season: int) -> list[dict]:
     """All skater WAR rows for the season (goalies excluded via players table)."""
     goalie_ids = fetch_goalie_ids(season)
@@ -573,6 +589,13 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
     team_seasons = fetch_team_seasons(season)
     if not team_seasons:
         print("  No team_seasons data — skipping")
+        return
+    if not ready_to_rank(team_seasons):
+        # Nothing written, so the Monday social post skips itself too.
+        fewest = min((t.get("games_played") or 0) for t in team_seasons)
+        print(
+            f"  A team has only {fewest} GP (< {MIN_GAMES_TO_RANK}) — too early to rank, skipping"
+        )
         return
 
     print("  Fetching player WAR...")
