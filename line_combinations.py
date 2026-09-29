@@ -36,6 +36,18 @@ played in, so it can't be reused as a per-team filter (special_teams.py hit
 this same trap; its per-team shot fetch now uses the same game_id-list
 pattern, see that file's `fetch_game_ids_for_team`).
 
+Game types (2026-09): a season's lines are built per game type -- the
+regular season (game_type 2) and the playoffs (3), each from that type's
+games only, and stored under that game_type. Preseason games never count.
+Until 2026-09 every game_log game of the season went in, so before the
+opener a season's "lines" were preseason groupings. A team that hasn't
+played a regular-season game gets no regular-season rows at all (any old
+ones are cleared); the app shows projected_lines.py's projection instead.
+
+Playoff blend: a playoff slot the playoff games can't fill yet is filled
+from the same season's regular-season units, the same way as the
+prior-season blend below, tagged source="regular_season".
+
 Prior-season blend (added to fix empty/partial lines early in a season):
   `db.NHL_SEASON` is resolved league-wide (see eyewall-poller's seasons.js)
   and flips the moment ANY team's regular-season game has been played --
@@ -79,7 +91,7 @@ from db import NHL_SEASON, get_client
 # A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
 # rapm.py (this file used to keep its own copy).
 from nhl_shot_xg import shot_xg
-from pipeline_common import FetchError
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
@@ -411,12 +423,14 @@ def prior_season(season):
     return season - 10001
 
 
-def fetch_prior_units(client, team, season):
-    """This team's own last-written line_combinations rows for the season
-    immediately before `season`. Returns [] on no data or fetch error --
-    same "just skip it" posture as the rest of this module's Supabase
-    reads; a missing prior season is a normal, expected state (a team's
-    first season in this dataset, or a gap in nightly runs), not a bug."""
+def fetch_prior_units(client, team, season, game_type=NHL_REGULAR_SEASON):
+    """This team's own last-written line_combinations rows of `game_type`
+    for `season` -- the prior season's regular-season units for the
+    regular-season blend, this season's for the playoff one. Returns [] on
+    no data or fetch error -- same "just skip it" posture as the rest of
+    this module's Supabase reads; a missing season is a normal, expected
+    state (a team's first season in this dataset, or a gap in nightly
+    runs), not a bug."""
     # Explicit column list, not select("*") -- must match the insert-row
     # shape exactly (below) so a carried-over row can be spread straight
     # into a fresh insert. select("*") would smuggle this row's own `id`
@@ -431,14 +445,15 @@ def fetch_prior_units(client, team, season):
             client.table("line_combinations")
             .select(columns)
             .eq("team", team)
-            .eq("season", prior_season(season))
+            .eq("season", season)
+            .eq("game_type", game_type)
             .order("unit_type")
             .order("rank")
             .execute()
             .data
         )
     except Exception as e:
-        print(f"  WARN: couldn't fetch prior-season line_combinations for {team}: {e}")
+        print(f"  WARN: couldn't fetch {season} line_combinations for {team}: {e}")
         return []
     return rows or []
 
@@ -451,7 +466,9 @@ def _prior_row_player_ids(row):
     ]
 
 
-def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
+def blend_units(
+    current_rows, prior_rows, roster_ids, season, target_counts, carried_source="prior_season"
+):
     """Fill any rank slot current_rows is short of (per unit_type) from
     prior_rows, skipping any prior unit containing a player no longer on
     roster_ids or already placed via a current-season unit. Never
@@ -461,7 +478,8 @@ def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
     current_rows / prior_rows: lists of upsert-shaped dicts (unit_type,
     rank, player_a/b/c, name_a/b/c, pos_a/b/c, toi_secs, xgf, xga, xgf_pct).
     Returns a new list, re-ranked contiguously per unit_type, each row
-    carrying a "source" field ("current" or "prior_season").
+    carrying a "source" field: "current", or `carried_source` for a unit
+    carried over ("prior_season", or "regular_season" in the playoffs).
 
     If roster_ids is None (live roster fetch failed), returns current_rows
     unchanged (tagged "current") -- fail safe, no blending attempted.
@@ -494,7 +512,7 @@ def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
                     continue  # a member left the org -- drop the whole unit, don't patch it
                 if any(pid in used_players for pid in pids):
                     continue  # avoid showing the same player in two rows
-                carried = {**pr, "season": season, "source": "prior_season"}
+                carried = {**pr, "season": season, "source": carried_source}
                 merged.append(carried)
                 used_players.update(pids)
                 remaining -= 1
@@ -507,11 +525,11 @@ def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
         for i, r in enumerate(merged, start=1):
             r["rank"] = i
         for r in merged:
-            if r["source"] != "prior_season":
+            if r["source"] == "current":
                 continue
             label = f"Line {r['rank']}" if unit_type == "F" else f"D{r['rank']}"
             names = " / ".join(n for n in (r.get("name_a"), r.get("name_b"), r.get("name_c")) if n)
-            print(f"  {label:6s}  {names:<45}  (carried over from prior season)")
+            print(f"  {label:6s}  {names:<45}  (carried over: {r['source']})")
         out.extend(merged)
 
     return out
@@ -520,7 +538,24 @@ def blend_units(current_rows, prior_rows, roster_ids, season, target_counts):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-def compute_current_season_rows(client, team, season):
+def fetch_team_game_ids(client, team, season) -> dict:
+    """{game_type: [game_id, ...]} for the games this team played this
+    season, from game_log (one row per team per game). Preseason included
+    here; callers take the types they build lines from."""
+    rows = fetch_all(
+        client,
+        "game_log",
+        "game_id,game_type",
+        {"season": season, "team": team},
+        cursor_col="game_id",
+    )
+    by_type = defaultdict(list)
+    for r in rows:
+        by_type[r["game_type"]].append(r["game_id"])
+    return by_type
+
+
+def compute_current_season_rows(client, team, season, game_type, game_ids):
     """Everything run_team() used to do end-to-end before the prior-season
     blend existed: load this team's current-season shift/shot data, cluster
     it into units, build the upsert-shaped rows.
@@ -534,28 +569,24 @@ def compute_current_season_rows(client, team, season):
     prefer, so every slot falls through to a surviving prior-season unit
     (or stays empty, if there's no prior data either).
     """
-    # 1. Load this team's shifts (situation column may be null; filter at shot level)
+    # 1. Load this team's shifts of this game type (situation column may be
+    # null; filter at shot level)
     raw_shifts = fetch_all(
         client,
         "shift_events",
         "game_id,player_id,team,start_secs,end_secs",
-        {"season": season, "team": team},
+        {"season": season, "team": team, "game_type": game_type},
     )
     print(f"  {len(raw_shifts):,} shift rows")
     if not raw_shifts:
-        print("  no current-season shift data yet — leaving this to the prior-season blend")
+        print("  no current-season shift data yet — leaving this to the blend")
         return []
 
-    # 2. Look up this team's game_ids for the season, then its 5v5 shot events.
-    # game_log has one row per team per game, so filtering by team here gives
-    # exactly the games this team played (home or away) — not shot_events.car_game,
-    # which only ever flags CAR's own games (see module docstring).
-    game_rows = fetch_all(
-        client, "game_log", "game_id", {"season": season, "team": team}, cursor_col="game_id"
-    )
-    game_ids = [g["game_id"] for g in game_rows]
+    # 2. This team's 5v5 shot events, for its game_ids of this type (from
+    # game_log, via fetch_team_game_ids) -- not shot_events.car_game, which
+    # only ever flags CAR's own games (see module docstring).
     if not game_ids:
-        print("  no games in game_log yet — leaving this to the prior-season blend")
+        print("  no games in game_log yet — leaving this to the blend")
         return []
 
     raw_shots = fetch_all(
@@ -609,7 +640,7 @@ def compute_current_season_rows(client, team, season):
     )
 
     if not units:
-        print("  no units met the minimum TOI threshold — leaving this to the prior-season blend")
+        print("  no units met the minimum TOI threshold — leaving this to the blend")
         return []
 
     # 7. Build upsert rows
@@ -680,47 +711,82 @@ def compute_current_season_rows(client, team, season):
     return rows
 
 
-def run_team(client, team, season, dry_run=False):
-    """Compute and (unless dry_run) write line combinations for one team.
+def build_rows(client, team, season, game_type, game_ids):
+    """This game type's units for one team, blended: regular-season gaps
+    from last season's regular-season units, playoff gaps from this
+    season's. Returns [] when there's nothing at all."""
+    rows = compute_current_season_rows(client, team, season, game_type, game_ids)
 
-    Returns the number of unit rows written (or that would be written under
-    --dry-run), or None if there was nothing to write even after attempting
-    the prior-season blend.
-    """
-    print(f"\n--- {team} ---")
-
-    rows = compute_current_season_rows(client, team, season)
-
-    # Blend in prior-season units for any rank slot current data can't fill
+    # Blend in carried-over units for any rank slot current data can't fill
     # yet. Runs even when rows is empty (see compute_current_season_rows'
-    # docstring) -- an all-empty current season is exactly the case this
-    # exists for, not a reason to skip it. Skips the extra fetches entirely
-    # once current data already covers every slot -- the common case once a
-    # season's a few weeks old.
+    # docstring). Skips the extra fetches entirely once current data
+    # already covers every slot -- the common case a few weeks in.
     target_counts = {"F": FORWARD_TARGET, "D": DEFENSE_TARGET}
     current_counts = {ut: sum(1 for r in rows if r["unit_type"] == ut) for ut in target_counts}
     if any(current_counts[ut] < target_counts[ut] for ut in target_counts):
+        if game_type == NHL_PLAYOFFS:
+            source_season, carried_source = season, "regular_season"
+        else:
+            source_season, carried_source = prior_season(season), "prior_season"
         roster_ids = fetch_current_roster_ids(team)
-        prior_rows = fetch_prior_units(client, team, season) if roster_ids is not None else []
-        rows = blend_units(rows, prior_rows, roster_ids, season, target_counts)
+        prior_rows = (
+            fetch_prior_units(client, team, source_season, NHL_REGULAR_SEASON)
+            if roster_ids is not None
+            else []
+        )
+        rows = blend_units(rows, prior_rows, roster_ids, season, target_counts, carried_source)
     else:
         for r in rows:
             r["source"] = "current"
+    for r in rows:
+        r["game_type"] = game_type
+    return rows
 
-    if not rows:
-        print("  nothing to write — no current-season data and no usable prior-season data")
-        return None
 
-    if dry_run:
-        print(f"  (dry-run) {len(rows)} line combination rows would be written")
-        return len(rows)
+def run_team(client, team, season, dry_run=False):
+    """Compute and (unless dry_run) write line combinations for one team:
+    its regular-season units, and its playoff units once it has playoff
+    games.
 
-    # Delete old rows for this season/team, then insert fresh
-    client.table("line_combinations").delete().eq("season", season).eq("team", team).execute()
-    for i in range(0, len(rows), 500):
-        client.table("line_combinations").insert(rows[i : i + 500]).execute()
-    print(f"  OK line_combinations: {len(rows)} rows written")
-    return len(rows)
+    A team that hasn't played a regular-season game gets no regular-season
+    rows -- any left from before are deleted -- so the app shows its
+    projected lines instead (projected_lines.py). Returns the number of
+    unit rows written (or that would be written under --dry-run), or None
+    if there was nothing to write.
+    """
+    print(f"\n--- {team} ---")
+    game_ids = fetch_team_game_ids(client, team, season)
+
+    written = 0
+    for game_type in (NHL_REGULAR_SEASON, NHL_PLAYOFFS):
+        ids = game_ids.get(game_type, [])
+        if not ids:
+            if game_type == NHL_REGULAR_SEASON:
+                print("  no regular-season game yet — no lines; the app shows projected lines")
+                if not dry_run:
+                    client.table("line_combinations").delete().eq("season", season).eq(
+                        "team", team
+                    ).eq("game_type", game_type).execute()
+            continue
+
+        print(f"  game_type {game_type}: {len(ids)} games")
+        rows = build_rows(client, team, season, game_type, ids)
+        if dry_run:
+            print(f"  (dry-run) {len(rows)} game_type {game_type} rows would be written")
+            written += len(rows)
+            continue
+
+        # Replace this season/team/game type's rows. An empty result clears
+        # them: they'd be from an older run, not from these games.
+        client.table("line_combinations").delete().eq("season", season).eq("team", team).eq(
+            "game_type", game_type
+        ).execute()
+        for i in range(0, len(rows), 500):
+            client.table("line_combinations").insert(rows[i : i + 500]).execute()
+        print(f"  OK line_combinations: {len(rows)} game_type {game_type} rows written")
+        written += len(rows)
+
+    return written or None
 
 
 def run(season=NHL_SEASON, team=None, dry_run=False):

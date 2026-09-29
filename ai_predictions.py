@@ -25,7 +25,7 @@ from ai_persona import build_matchup_prompt, build_prediction_prompt, get_system
 from ai_scouting import LOCALES
 from db import get_client
 from early_season import season_from_game_id
-from pipeline_common import nhl_get
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_game_type, nhl_get
 
 supabase = get_client()
 
@@ -172,7 +172,11 @@ def process_game(game: dict, force: bool = False, locale: str = "en") -> bool:
     # Generate line/player matchup analysis in a second call
     print(f"  {game_id} ({locale}) — building matchup context...")
     try:
-        matchup_ctx = build_matchup_context(home_team, away_team, season=season)
+        # A playoff game's matchup uses the teams' playoff lines.
+        game_type = NHL_PLAYOFFS if nhl_game_type(game_id) == NHL_PLAYOFFS else NHL_REGULAR_SEASON
+        matchup_ctx = build_matchup_context(
+            home_team, away_team, season=season, game_type=game_type
+        )
         matchup_prompt = build_matchup_prompt(matchup_ctx)
         print(f"  {game_id} ({locale}) — generating matchup analysis...")
         matchup = generate(matchup_prompt, system=system)

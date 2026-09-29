@@ -144,6 +144,6 @@ class TestSpecialTeamsFetchShiftsForTeam:
         client = _paged_client({"shift_events": rows})
         monkeypatch.setattr(special_teams, "supabase", client)
 
-        result = special_teams.fetch_shifts_for_team("CAR", 20252026)
+        result = special_teams.fetch_shifts_for_team("CAR", 20252026, 2)
 
         assert len(result) == 1099

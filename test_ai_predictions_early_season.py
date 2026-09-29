@@ -488,6 +488,7 @@ def unit_row(unit_type, rank, names, source, xgf_pct=0.5616):
     return {
         "team": "CAR",
         "season": SEASON,
+        "game_type": 2,
         "unit_type": unit_type,
         "rank": rank,
         "name_a": a,
@@ -504,6 +505,7 @@ def unit_row(unit_type, rank, names, source, xgf_pct=0.5616):
 
 class TestMatchupPrompt:
     def test_carried_over_units_and_xgf_scale(self, db):
+        add_current_games(db, "CAR", 1)
         db.tables["line_combinations"] = [
             unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "prior_season")
         ]
@@ -515,24 +517,62 @@ class TestMatchupPrompt:
         assert "preseason games" not in out  # nothing built from this season's games
         assert "it's early in the 2026-27 season" in build_matchup_prompt(ctx)
 
-    def test_units_before_the_opener_are_labeled_preseason(self, db):
-        """line_combinations.py builds a season's units from every game_log
-        game of the season, preseason included; before a team's first
-        regular-season game those units are exhibition groupings."""
-        db.tables["line_combinations"] = [
-            unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "current"),
-            unit_row("D", 1, ("Dee Fence", "Other Olaf"), "current"),
+    def test_before_the_opener_uses_projected_lines(self, db):
+        """line_combinations.py never builds lines from preseason games, so
+        before a team's first regular-season game the matchup uses
+        projected_lines.py's projection from its preseason games, labeled."""
+        db.tables["projected_lines"] = [
+            {
+                "team": "CAR",
+                "season": SEASON,
+                "unit_type": "F",
+                "rank": 1,
+                "names": ["Carl Center", "Wes Wing", "Rookie Rick"],
+                "positions": ["C", "L", "R"],
+                "basis": "preseason",
+                "basis_games": 5,
+            },
+            {
+                "team": "CAR",
+                "season": SEASON,
+                "unit_type": "D",
+                "rank": 1,
+                "names": ["Dee Fence", "Other Olaf"],
+                "positions": ["D", "D"],
+                "basis": "preseason",
+                "basis_games": 5,
+            },
         ]
         ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON)
-        assert ctx["home_lines_preseason"] is True
+        assert ctx["home_lines_projected"] == 5
+        assert ctx["away_lines_projected"] is None  # BOS has no projection stored
         prompt = build_matchup_prompt(ctx)
         assert (
-            "Line combinations (from 2026-27 preseason games -- CAR hasn't played a "
-            "regular-season game yet, so these may not match the opening-night lineup):"
+            "Projected lines (CAR hasn't played a regular-season game yet; projected from its "
+            "5 2026-27 preseason games, not a confirmed lineup):"
         ) in prompt
-        assert "Forward lines (2026-27 preseason games, inferred from 5v5 shift data):" in prompt
-        assert "Defence pairs (2026-27 preseason games):" in prompt
-        assert "Lines marked as from 2026-27 preseason games (CAR) are exhibition" in prompt
+        # A projection has no xGF% or time together to report.
+        assert "  Line 1: Carl Center, Wes Wing, Rookie Rick | projected\n" in prompt
+        assert "  Pair 1: Dee Fence, Other Olaf | projected\n" in prompt
+        assert "Lines marked as projected (CAR) are a projection from 2026-27 preseason" in prompt
+
+    def test_playoff_matchup_uses_playoff_units(self, db):
+        add_current_games(db, "CAR", 1)
+        db.tables["line_combinations"] = [
+            unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "current"),
+            {
+                **unit_row("F", 1, ("Playoff Pete", "Wes Wing", "Rookie Rick"), "current"),
+                "game_type": 3,
+            },
+            {
+                **unit_row("F", 2, ("Carl Center", "Other Olaf", "Dee Fence"), "regular_season"),
+                "game_type": 3,
+            },
+        ]
+        ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON, game_type=3)
+        out = format_matchup_context(ctx)
+        assert "Line 1: Playoff Pete, Wes Wing, Rookie Rick" in out
+        assert "carried over from the regular season" in out
 
     def test_units_after_the_opener_are_this_seasons(self, db):
         add_current_games(db, "CAR", 1)
@@ -540,7 +580,7 @@ class TestMatchupPrompt:
             unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "current")
         ]
         ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON)
-        assert ctx["home_lines_preseason"] is False
+        assert ctx["home_lines_projected"] is None
         prompt = build_matchup_prompt(ctx)
         assert "Forward lines (2026-27, inferred from 5v5 shift data):" in prompt
         assert "preseason games" not in prompt
@@ -580,8 +620,9 @@ def test_process_game_builds_context_for_the_games_own_season(monkeypatch):
         seen["prediction"] = season
         return {"home_players": [{"name": "x"}], "away_players": []}
 
-    def fake_matchup(home, away, season=None):
+    def fake_matchup(home, away, season=None, game_type=None):
         seen["matchup"] = season
+        seen["matchup_game_type"] = game_type
         return {}
 
     monkeypatch.setattr(ap, "already_generated", lambda *a: False)
@@ -594,5 +635,5 @@ def test_process_game_builds_context_for_the_games_own_season(monkeypatch):
     monkeypatch.setattr(ap, "save_prediction", lambda *a, **k: saved.update(season=a[1]))
     game_ = {"game_id": 2026020001, "home_team": "CAR", "away_team": "FLA", "game_date": "x"}
     assert ap.process_game(game_)
-    assert seen == {"prediction": SEASON, "matchup": SEASON}
+    assert seen == {"prediction": SEASON, "matchup": SEASON, "matchup_game_type": 2}
     assert saved["season"] == SEASON

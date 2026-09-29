@@ -12,6 +12,15 @@ For each team in the season:
   5. Top cluster = unit 1, second cluster = unit 2
   6. Writes to special_teams_units (skips rows where source = 'manual')
 
+Game types (2026-09): units are inferred per game type -- the regular
+season (game_type 2) and the playoffs (3), each from that type's games
+only, and stored under that game_type. Preseason games never count. Until
+2026-09 every game_log game of the season went in, so before the opener a
+season's PP/PK units came from preseason games. A team that hasn't played a
+regular-season game has no inferred units, and each run replaces a game
+type's inferred units rather than leaving older ones behind. Manual units
+are never touched.
+
 Run order: after shift_data.py (needs fresh shift_events).
 
 Usage:
@@ -35,11 +44,15 @@ from dotenv import load_dotenv
 # of 2.31.0). Don't "clean up" this import back to the submodule path.
 from supabase import ClientOptions, create_client
 
+# The live-resolved season, like every other module. This used to read the
+# NHL_SEASON env var with a hardcoded 20252026 default.
+from db import NHL_SEASON
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, select_all
+
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-NHL_SEASON = int(os.environ.get("NHL_SEASON", "20252026"))
 
 ALL_TEAMS = [
     "ANA",
@@ -98,15 +111,20 @@ supabase = create_client(
 
 
 def fetch_game_home_away(season: int) -> dict[int, tuple[str, str]]:
-    """Returns {game_id: (home_team, away_team)} for all games in the season."""
-    rows = (
-        supabase.table("game_log")
-        .select("game_id,home_team,away_team")
-        .eq("season", season)
-        .not_.is_("home_team", "null")
-        .limit(2000)
-        .execute()
-        .data
+    """Returns {game_id: (home_team, away_team)} for all games in the season.
+
+    Every page, not one capped read: game_log has two rows per game, so a
+    single request (capped at 1,000 rows) covered only ~500 games, and PP/PK
+    shots in the rest of the season were silently dropped."""
+    rows = select_all(
+        lambda: (
+            supabase.table("game_log")
+            .select("game_id,team,home_team,away_team")
+            .eq("season", season)
+            .not_.is_("home_team", "null")
+            .order("game_id")
+        ),
+        order="team",
     )
     seen = {}
     for r in rows or []:
@@ -116,8 +134,8 @@ def fetch_game_home_away(season: int) -> dict[int, tuple[str, str]]:
     return seen
 
 
-def fetch_game_ids_for_team(team: str, season: int) -> set[int]:
-    """Returns the game_ids `team` played in this season, from `game_log`
+def fetch_game_ids_for_team(team: str, season: int, game_type: int) -> set[int]:
+    """Returns the game_ids of `game_type` `team` played this season, from `game_log`
     (one row per team per game) -- not `shot_events.car_game`, which only
     ever flags games *Carolina* played in (see shot_events.py's docstring).
     Same fix as line_combinations.py's fetch_all(..., "game_log", ...) call;
@@ -128,7 +146,8 @@ def fetch_game_ids_for_team(team: str, season: int) -> set[int]:
         .select("game_id")
         .eq("season", season)
         .eq("team", team)
-        .limit(200)  # a full season incl. playoffs is well under this
+        .eq("game_type", game_type)
+        .limit(200)  # a full season of one game type is well under this
         .execute()
         .data
     )
@@ -225,8 +244,8 @@ def filter_pk_shots(team: str, situational_rows: list[dict], game_home_away: dic
     return pk_shots
 
 
-def fetch_shifts_for_team(team: str, season: int) -> list[dict]:
-    """Returns all shift_events for the team in the season.
+def fetch_shifts_for_team(team: str, season: int, game_type: int) -> list[dict]:
+    """Returns the team's shift_events from this season's games of `game_type`.
 
     Keyset (not OFFSET) pagination -- team-scoped so each call is bounded
     today, but this is the same shift_events table that hit a Postgres
@@ -242,6 +261,7 @@ def fetch_shifts_for_team(team: str, season: int) -> list[dict]:
             .select("id,game_id,player_id,period,start_secs,end_secs")
             .eq("season", season)
             .eq("team", team)
+            .eq("game_type", game_type)
             .gt("id", last_id)
             .order("id")
             .limit(999)
@@ -257,13 +277,14 @@ def fetch_shifts_for_team(team: str, season: int) -> list[dict]:
     return rows
 
 
-def fetch_existing_manual_units(team: str, season: int) -> set[tuple]:
+def fetch_existing_manual_units(team: str, season: int, game_type: int) -> set[tuple]:
     """Returns set of (unit_type, unit_number) that are manually set — never overwrite."""
     rows = (
         supabase.table("special_teams_units")
         .select("unit_type,unit_number")
         .eq("team", team)
         .eq("season", season)
+        .eq("game_type", game_type)
         .eq("source", "manual")
         .execute()
         .data
@@ -382,20 +403,34 @@ def infer_units(
 # ── DB write ──────────────────────────────────────────────────────────────────
 
 
+def clear_inferred_units(team: str, season: int, game_type: int) -> None:
+    """Delete this team/season/game type's inferred units (manual ones stay),
+    so a run leaves only what it inferred from these games."""
+    supabase.table("special_teams_units").delete().eq("team", team).eq("season", season).eq(
+        "game_type", game_type
+    ).eq("source", "inferred").execute()
+
+
 def upsert_unit(
-    team: str, season: int, unit_type: str, unit_number: int, player_ids: list[int]
+    team: str,
+    season: int,
+    game_type: int,
+    unit_type: str,
+    unit_number: int,
+    player_ids: list[int],
 ) -> None:
     supabase.table("special_teams_units").upsert(
         {
             "team": team,
             "season": season,
+            "game_type": game_type,
             "unit_type": unit_type,
             "unit_number": unit_number,
             "player_ids": player_ids,
             "source": "inferred",
             "updated_at": datetime.now(UTC).isoformat(),
         },
-        on_conflict="team,season,unit_type,unit_number",
+        on_conflict="team,season,game_type,unit_type,unit_number",
     ).execute()
 
 
@@ -403,20 +438,39 @@ def upsert_unit(
 
 
 def run_team(team: str, season: int, game_home_away: dict, dry_run: bool = False) -> None:
-    print(f"  {team}:", end=" ", flush=True)
+    """Infer one team's PP/PK units for the regular season and, once it has
+    playoff games, the playoffs. Before its first regular-season game it has
+    no inferred units: any left over are cleared."""
+    for game_type in (NHL_REGULAR_SEASON, NHL_PLAYOFFS):
+        game_ids = fetch_game_ids_for_team(team, season, game_type)
+        if not game_ids:
+            if game_type == NHL_REGULAR_SEASON:
+                print(f"  {team}: no regular-season game yet — no units")
+                if not dry_run:
+                    clear_inferred_units(team, season, game_type)
+            continue
+        print(f"  {team} (game_type {game_type}):", end=" ", flush=True)
+        if not dry_run:
+            clear_inferred_units(team, season, game_type)
+        run_team_game_type(team, season, game_type, game_ids, game_home_away, dry_run)
 
-    manual_units = fetch_existing_manual_units(team, season)
-    shifts = fetch_shifts_for_team(team, season)
+
+def run_team_game_type(
+    team: str,
+    season: int,
+    game_type: int,
+    game_ids: set[int],
+    game_home_away: dict,
+    dry_run: bool = False,
+) -> None:
+    manual_units = fetch_existing_manual_units(team, season, game_type)
+    shifts = fetch_shifts_for_team(team, season, game_type)
     if not shifts:
         print("no shifts — skip")
         return
 
     shift_idx = build_shift_index(shifts)
 
-    game_ids = fetch_game_ids_for_team(team, season)
-    if not game_ids:
-        print("no games in game_log — skip")
-        return
     situational_rows = fetch_situational_shots_for_team(team, season, game_ids)
 
     # ── PP ────────────────────────────────────────────────────
@@ -451,7 +505,7 @@ def run_team(team: str, season: int, game_home_away: dict, dry_run: bool = False
         if dry_run:
             print(f"\n    {unit_type}{unit_num}: {player_ids}", end="")
         else:
-            upsert_unit(team, season, unit_type, unit_num, player_ids)
+            upsert_unit(team, season, game_type, unit_type, unit_num, player_ids)
         written += 1
 
     print(f" {written} units {'would be ' if dry_run else ''}written")
