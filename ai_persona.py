@@ -516,15 +516,15 @@ def _data_notes(ctx: dict, form_keys: bool) -> str:
                 f"{who} {verb} played a {label} regular-season game yet, so there's no recent "
                 f"form to discuss for {'it' if len(idle) == 1 else 'them'}."
             )
-    preseason = [
+    projected = [
         ctx.get(f"{side}_team", "")
         for side in ("home", "away")
-        if ctx.get(f"{side}_lines_preseason")
+        if ctx.get(f"{side}_lines_projected")
     ]
-    if preseason:
+    if projected:
         notes.append(
-            f"Lines marked as from {label} preseason games ({' and '.join(preseason)}) are "
-            f"exhibition groupings, not a confirmed lineup -- say so if you discuss them."
+            f"Lines marked as projected ({' and '.join(projected)}) are a projection from "
+            f"{label} preseason games, not a confirmed lineup -- say so if you discuss them."
         )
     notes.append('Don\'t cite any stat marked "not available".')
     return "\n".join(notes)
@@ -624,12 +624,18 @@ def build_prediction_prompt(ctx: dict) -> str:
 def _format_unit(kind: str, i: int, unit: dict, prior_label: str) -> str:
     xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% not available"
     toi = f" | {unit['toiMins']}min together" if unit.get("toiMins") else ""
-    carried = (
-        f" (carried over from {prior_label}: this season's shifts can't fill this slot yet; "
-        f"its players are still on the roster)"
-        if unit.get("source") == "prior_season"
-        else ""
-    )
+    carried = {
+        "prior_season": (
+            f" (carried over from {prior_label}: this season's shifts can't fill this slot "
+            f"yet; its players are still on the roster)"
+        ),
+        "regular_season": (
+            " (carried over from the regular season: the playoff games can't fill this slot yet)"
+        ),
+    }.get(unit.get("source"), "")
+    if unit.get("source") == "projected":
+        # A projection has no ice time or xG together to report.
+        xgf, toi = "projected", ""
     names = ", ".join(p["name"] for p in unit.get("players", []))
     return f"  {kind} {i}: {names} | {xgf}{toi}{carried}"
 
@@ -652,13 +658,14 @@ def format_matchup_context(ctx: dict) -> str:
 
         fwd_lines = combos.get("lines", [])
         d_pairs = combos.get("pairs", [])
-        preseason = ctx.get(f"{side}_lines_preseason")
-        source = f"{label} preseason games" if preseason else label
+        projected_from = ctx.get(f"{side}_lines_projected")
+        source = f"projected from {label} preseason games" if projected_from else label
 
-        if preseason:
+        if projected_from:
+            games = f"{projected_from} {label} preseason game{'s' if projected_from != 1 else ''}"
             lines.append(
-                f"Line combinations (from {label} preseason games -- {team} hasn't played a "
-                f"regular-season game yet, so these may not match the opening-night lineup):"
+                f"Projected lines ({team} hasn't played a regular-season game yet; projected "
+                f"from its {games}, not a confirmed lineup):"
             )
         if fwd_lines:
             lines.append(f"Forward lines ({source}, inferred from 5v5 shift data):")

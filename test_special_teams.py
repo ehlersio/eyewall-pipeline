@@ -111,13 +111,14 @@ class TestFetchGameIdsForTeam:
         client.table.return_value = q
         special_teams.supabase = client
 
-        result = special_teams.fetch_game_ids_for_team("TOR", 20252026)
+        result = special_teams.fetch_game_ids_for_team("TOR", 20252026, 2)
 
         assert result == {1, 2}
         client.table.assert_called_once_with("game_log")
         called_names = [name for name, _, _ in q.calls]
         assert "car_game" not in str(q.calls)
         assert ("eq", ("team", "TOR"), {}) in [(n, a, k) for n, a, k in q.calls]
+        assert ("eq", ("game_type", 2), {}) in [(n, a, k) for n, a, k in q.calls]
         assert "eq" in called_names
 
 
@@ -142,3 +143,46 @@ class TestFetchSituationalShotsForTeam:
         assert in_calls, "expected a .in_(...) call scoping to the game_id list"
         assert in_calls[0][0][0] == "game_id"
         assert set(in_calls[0][0][1]) == {1, 2, 3}
+
+
+class TestRunTeamByGameType:
+    """PP/PK units per game type, never from preseason (2026-09: all of
+    2026-27's units came from preseason games), and a run replaces a game
+    type's inferred units instead of leaving older ones."""
+
+    def _patch(self, monkeypatch, ids_by_type):
+        calls = []
+        monkeypatch.setattr(
+            special_teams,
+            "fetch_game_ids_for_team",
+            lambda _t, _s, gt: ids_by_type.get(gt, set()),
+        )
+        monkeypatch.setattr(
+            special_teams, "clear_inferred_units", lambda t, s, gt: calls.append(("clear", gt))
+        )
+        monkeypatch.setattr(
+            special_teams,
+            "run_team_game_type",
+            lambda t, s, gt, ids, gha, dry_run=False: calls.append(("infer", gt, sorted(ids))),
+        )
+        return calls
+
+    def test_before_the_opener_only_clears(self, monkeypatch):
+        calls = self._patch(monkeypatch, {1: {2026010001}})
+        special_teams.run_team("CAR", 20262027, {})
+        assert calls == [("clear", 2)]
+
+    def test_each_game_type_is_cleared_then_inferred_from_its_own_games(self, monkeypatch):
+        calls = self._patch(monkeypatch, {1: {2026010001}, 2: {2026020001}, 3: {2026030111}})
+        special_teams.run_team("CAR", 20262027, {})
+        assert calls == [
+            ("clear", 2),
+            ("infer", 2, [2026020001]),
+            ("clear", 3),
+            ("infer", 3, [2026030111]),
+        ]
+
+    def test_dry_run_writes_nothing(self, monkeypatch):
+        calls = self._patch(monkeypatch, {2: {2026020001}})
+        special_teams.run_team("CAR", 20262027, {}, dry_run=True)
+        assert calls == [("infer", 2, [2026020001])]

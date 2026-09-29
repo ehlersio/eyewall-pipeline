@@ -1137,11 +1137,13 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 
-def get_line_combos(team: str, season: int = None) -> dict:
-    """Returns inferred forward lines and D pairs for a team. xgfPct is a
-    percentage (line_combinations stores a 0-1 fraction); source is
-    "prior_season" for a unit line_combinations.py carried over from last
-    season because this season's shifts can't fill that slot yet."""
+def get_line_combos(team: str, season: int = None, game_type: int = NHL_REGULAR_SEASON) -> dict:
+    """Returns inferred forward lines and D pairs for a team, from its games
+    of `game_type`. xgfPct is a percentage (line_combinations stores a 0-1
+    fraction); source is "prior_season" for a unit line_combinations.py
+    carried over from last season (or "regular_season", in the playoffs,
+    from this season's regular season) because this game type's shifts
+    can't fill that slot yet."""
     season = season or NHL_SEASON
     rows = (
         supabase.table("line_combinations")
@@ -1151,6 +1153,7 @@ def get_line_combos(team: str, season: int = None) -> dict:
         )
         .eq("team", team)
         .eq("season", season)
+        .eq("game_type", game_type)
         .order("unit_type")
         .order("rank")
         .execute()
@@ -1185,6 +1188,43 @@ def get_line_combos(team: str, season: int = None) -> dict:
     return {"lines": lines, "pairs": pairs}
 
 
+def get_projected_lines(team: str, season: int) -> tuple[dict, int | None]:
+    """projected_lines.py's projection for `team`'s next game, when it's
+    based on preseason games (before the team's regular-season opener):
+    ({"lines", "pairs"} shaped like get_line_combos(), with source
+    "projected" and no TOI or xGF%), and how many preseason games it pooled.
+    ({"lines": [], "pairs": []}, None) when there's no preseason-based
+    projection."""
+    rows = (
+        supabase.table("projected_lines")
+        .select("unit_type,rank,names,positions,basis,basis_games")
+        .eq("team", team)
+        .eq("season", season)
+        .eq("basis", "preseason")
+        .order("unit_type")
+        .order("rank")
+        .execute()
+        .data
+    )
+    combos = {"lines": [], "pairs": []}
+    for r in rows or []:
+        players = [
+            {"name": n, "pos": p}
+            for n, p in zip(r.get("names") or [], r.get("positions") or [], strict=False)
+            if n
+        ]
+        unit = {
+            "rank": r["rank"],
+            "players": players,
+            "toiMins": None,
+            "xgfPct": None,
+            "source": "projected",
+        }
+        combos["lines" if r["unit_type"] == "F" else "pairs"].append(unit)
+    games = rows[0].get("basis_games") if rows else None
+    return combos, games
+
+
 # ---------------------------------------------------------------------------
 # Line chemistry context (narrative generation)
 # ---------------------------------------------------------------------------
@@ -1215,6 +1255,7 @@ def get_line_chemistry_context(team: str = None, season: int = None) -> dict:
             "name_a, name_b, name_c, pos_a, pos_b, pos_c, toi_secs, xgf_pct"
         )
         .eq("season", season)
+        .eq("game_type", NHL_REGULAR_SEASON)
         .order("unit_type")
         .order("rank")
         .execute()
@@ -1315,21 +1356,23 @@ def get_scouting_blurbs(team: str, season: int = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def build_matchup_context(home_team: str, away_team: str, season: int = None) -> dict:
+def build_matchup_context(
+    home_team: str, away_team: str, season: int = None, game_type: int = NHL_REGULAR_SEASON
+) -> dict:
     """
     Assembles line combo + player scouting context for matchup analysis.
     Extends build_prediction_context with line combos and scouting blurbs;
     players are built the same way (last season's stats early on, labeled
     via {side}_players_info).
 
-    {side}_lines_preseason is True when the team hasn't played a
-    regular-season game this season but has stored units of its own:
-    line_combinations.py builds a season's units from every game_log game
-    of that season, preseason included, so before the opener those units
-    are exhibition groupings (units it carried over from last season are
-    tagged source="prior_season" and labeled separately). They are kept --
-    preseason groupings predicted opening-night linemates better than last
-    season's units (docs/opening_night_backtest_results.md) -- but labeled.
+    Lines are the team's units from games of `game_type` (a playoff game
+    gets its playoff units). Before a team's first regular-season game it
+    has none -- line_combinations.py never builds lines from preseason --
+    so a regular-season game uses projected_lines.py's projection from its
+    preseason games instead, and {side}_lines_projected holds how many
+    preseason games that pooled (None otherwise). Preseason groupings
+    predicted opening-night linemates better than last season's units
+    (docs/opening_night_backtest_results.md).
     """
     season = season or NHL_SEASON
     ctx = {
@@ -1340,13 +1383,13 @@ def build_matchup_context(home_team: str, away_team: str, season: int = None) ->
     }
     for side, team in (("home", home_team), ("away", away_team)):
         team_gp, _, players = _team_player_context(team, season)
-        combos = get_line_combos(team=team, season=season)
-        units = combos["lines"] + combos["pairs"]
+        combos = get_line_combos(team=team, season=season, game_type=game_type)
+        projected_from = None
+        if game_type == NHL_REGULAR_SEASON and team_gp == 0:
+            combos, projected_from = get_projected_lines(team, season)
         ctx[f"{side}_players"] = players.pop("players")
         ctx[f"{side}_players_info"] = players
         ctx[f"{side}_lines"] = combos
-        ctx[f"{side}_lines_preseason"] = team_gp == 0 and any(
-            u.get("source") != "prior_season" for u in units
-        )
+        ctx[f"{side}_lines_projected"] = projected_from
         ctx[f"{side}_blurbs"] = get_scouting_blurbs(team=team, season=season)
     return ctx
