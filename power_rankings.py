@@ -166,18 +166,23 @@ def fetch_player_seasons_for_war(season: int) -> list[dict]:
 
 
 def fetch_goalie_seasons_for_gsax(season: int) -> list[dict]:
-    """Goalie GSAX from goalie_seasons or player_seasons."""
-    try:
-        rows = (
-            supabase.table("goalie_seasons")
-            .select("player_id,team,gsax,gp")
-            .eq("season", season)
-            .execute()
-            .data
-        )
-        return rows or []
-    except Exception:
-        return []
+    """Regular-season goalie GSAX from goalie_seasons.
+
+    Until 2026-09 this selected a `gp` column goalie_seasons doesn't have
+    (it's games_played) and swallowed the error, so every team's goalie term
+    in roster_war_score was 0. It also had no game_type filter, which would
+    have let a playoff GSAX stand in for the regular season's once playoff
+    rows got one. Errors now raise, so the stage fails instead of quietly
+    ranking without goalies."""
+    rows = (
+        supabase.table("goalie_seasons")
+        .select("player_id,team,gsax,games_played")
+        .eq("season", season)
+        .eq("game_type", 2)
+        .execute()
+        .data
+    )
+    return rows or []
 
 
 def fetch_prior_ranks(season: int, today: date) -> dict[str, int | None]:
@@ -250,12 +255,16 @@ def compute_roster_war_scores(
     For each team: sum top-18 skater WAR + top goalie GSAX.
     Returns {team: raw_war_score} (not yet normalised).
     """
-    # Build goalie GSAX map: team → best goalie GSAX
+    # Build goalie GSAX map: team → best goalie GSAX. A goalie with no GSAX
+    # yet is left out rather than counted as 0, and a team's best can be
+    # negative -- starting the max at 0 used to score a team whose goalies
+    # were all below expected as if they were average.
     goalie_map: dict[str, float] = {}
     for g in goalie_rows:
-        team = g["team"]
-        gsax = g.get("gsax") or 0.0
-        goalie_map[team] = max(goalie_map.get(team, 0.0), gsax)
+        if g.get("gsax") is None:
+            continue
+        team, gsax = g["team"], float(g["gsax"])
+        goalie_map[team] = max(goalie_map.get(team, gsax), gsax)
 
     # Group skater WAR by team
     by_team: dict[str, list[float]] = {}
