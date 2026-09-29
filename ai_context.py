@@ -6,6 +6,8 @@ All functions return plain dicts/lists — no model calls happen here.
 
 from db import NHL_SEASON, get_client
 from db import PRIMARY_TEAM_ABBR as PRIMARY_TEAM
+from early_season import EARLY_SEASON_K, blend_stat, game_id_range, prior_season
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_get, select_all
 
 supabase = get_client()
 
@@ -270,6 +272,16 @@ def get_goal_scorers(game_id: int) -> list:
 # ---------------------------------------------------------------------------
 
 
+PLAYER_SEASON_COLUMNS = (
+    "player_id, team, games_played, goals, assists, points, "
+    "rapm, war, ev_off_pct, ev_def_inv, pct_ev_off, pct_ev_def, "
+    "goals_per60, a1_per60, xgf_per60, xga_per60, "
+    "pp_goals, pp_points, sh_goals, finishing, pct_finishing, "
+    "toi_per_game, competition, pct_competition, "
+    "hits, blocked_shots, takeaways, giveaways"
+)
+
+
 def get_player_context(
     team: str = None, season: int = None, top_n: int = 12, min_gp: int = 5
 ) -> list:
@@ -283,14 +295,7 @@ def get_player_context(
 
     rows = (
         supabase.table("player_seasons")
-        .select(
-            "player_id, team, games_played, goals, assists, points, "
-            "rapm, war, ev_off_pct, ev_def_inv, pct_ev_off, pct_ev_def, "
-            "goals_per60, a1_per60, xgf_per60, xga_per60, "
-            "pp_goals, pp_points, sh_goals, finishing, pct_finishing, "
-            "toi_per_game, competition, pct_competition, "
-            "hits, blocked_shots, takeaways, giveaways"
-        )
+        .select(PLAYER_SEASON_COLUMNS)
         .eq("team", team)
         .eq("season", season)
         .eq("game_type", 2)  # regular season
@@ -315,36 +320,41 @@ def get_player_context(
     for r in rows:
         pid = r["player_id"]
         info = name_map.get(pid, {"name": f"Player {pid}", "position": "?"})
-        result.append(
-            {
-                "name": info["name"],
-                "position": info["position"],
-                "games_played": r.get("games_played"),
-                "goals": r.get("goals"),
-                "assists": r.get("assists"),
-                "points": r.get("points"),
-                "rapm": float(r["rapm"]) if r.get("rapm") is not None else None,
-                "war": float(r["war"]) if r.get("war") is not None else None,
-                "pct_ev_off": r.get("pct_ev_off"),
-                "pct_ev_def": r.get("pct_ev_def"),
-                "pct_finishing": r.get("pct_finishing"),
-                "pct_competition": r.get("pct_competition"),
-                "goals_per60": float(r["goals_per60"])
-                if r.get("goals_per60") is not None
-                else None,
-                "a1_per60": float(r["a1_per60"]) if r.get("a1_per60") is not None else None,
-                "xgf_per60": float(r["xgf_per60"]) if r.get("xgf_per60") is not None else None,
-                "xga_per60": float(r["xga_per60"]) if r.get("xga_per60") is not None else None,
-                "pp_goals": r.get("pp_goals"),
-                "pp_points": r.get("pp_points"),
-                "toi_per_game": _fmt_toi(r.get("toi_per_game")),
-                "hits": r.get("hits"),
-                "blocked_shots": r.get("blocked_shots"),
-                "takeaways": r.get("takeaways"),
-                "giveaways": r.get("giveaways"),
-            }
-        )
+        result.append(_player_season_dict(r, info))
     return result
+
+
+def _float_or_none(v):
+    return float(v) if v is not None else None
+
+
+def _player_season_dict(r: dict, info: dict) -> dict:
+    """One player_seasons row -> the player dict the prompt formatters read."""
+    return {
+        "name": info["name"],
+        "position": info["position"],
+        "games_played": r.get("games_played"),
+        "goals": r.get("goals"),
+        "assists": r.get("assists"),
+        "points": r.get("points"),
+        "rapm": _float_or_none(r.get("rapm")),
+        "war": _float_or_none(r.get("war")),
+        "pct_ev_off": r.get("pct_ev_off"),
+        "pct_ev_def": r.get("pct_ev_def"),
+        "pct_finishing": r.get("pct_finishing"),
+        "pct_competition": r.get("pct_competition"),
+        "goals_per60": _float_or_none(r.get("goals_per60")),
+        "a1_per60": _float_or_none(r.get("a1_per60")),
+        "xgf_per60": _float_or_none(r.get("xgf_per60")),
+        "xga_per60": _float_or_none(r.get("xga_per60")),
+        "pp_goals": r.get("pp_goals"),
+        "pp_points": r.get("pp_points"),
+        "toi_per_game": _fmt_toi(r.get("toi_per_game")),
+        "hits": r.get("hits"),
+        "blocked_shots": r.get("blocked_shots"),
+        "takeaways": r.get("takeaways"),
+        "giveaways": r.get("giveaways"),
+    }
 
 
 def get_results_vs_process_context(team: str = None, season: int = None, top_n: int = 50) -> list:
@@ -593,22 +603,36 @@ def get_zone_starts_context(
 ) -> list:
     """
     If game_id provided: zone starts for that specific game.
-    Otherwise: aggregated season zone starts for a team's top players.
+    Otherwise: aggregated regular-season zone starts for a team's top
+    players. zone_starts has no game_type column and its `season` also
+    covers preseason and playoff games, so the season path filters on the
+    regular-season game-id range; it pages because a team's season is
+    ~1,600 rows, past Supabase's 1,000-row cap.
     """
     team = team or PRIMARY_TEAM
     season = season or NHL_SEASON
 
-    query = (
-        supabase.table("zone_starts")
-        .select("player_id, team, oz_starts, dz_starts, nz_starts")
-        .eq("team", team)
-    )
     if game_id:
-        query = query.eq("game_id", game_id)
+        rows = (
+            supabase.table("zone_starts")
+            .select("player_id, team, oz_starts, dz_starts, nz_starts")
+            .eq("team", team)
+            .eq("game_id", game_id)
+            .execute()
+            .data
+        )
     else:
-        query = query.eq("season", season)
-
-    rows = query.execute().data
+        lo, hi = game_id_range(season, NHL_REGULAR_SEASON)
+        rows = select_all(
+            lambda: (
+                supabase.table("zone_starts")
+                .select("id, player_id, team, oz_starts, dz_starts, nz_starts")
+                .eq("team", team)
+                .gte("game_id", lo)
+                .lt("game_id", hi)
+            ),
+            order="id",
+        )
     if not rows:
         return []
 
@@ -623,9 +647,7 @@ def get_zone_starts_context(
         agg[pid]["nz"] += r.get("nz_starts") or 0
 
     # Fetch names
-    player_ids = list(agg.keys())
-    players = supabase.table("players").select("id, name").in_("id", player_ids).execute().data
-    name_map = {p["id"]: p["name"] for p in players}
+    name_map = {pid: info["name"] for pid, info in _player_info(list(agg.keys())).items()}
 
     result = []
     for pid, counts in agg.items():
@@ -653,30 +675,38 @@ def get_zone_starts_context(
 # ---------------------------------------------------------------------------
 
 
-def get_recent_form(team: str = None, n_games: int = 10) -> list:
-    """Returns last n_games results for a team."""
+def get_recent_form(team: str = None, n_games: int = 10, season: int = None) -> list:
+    """Returns the last n_games regular-season/playoff results for a team,
+    newest first. Preseason games are never form -- game_log holds them
+    under the new season's `season` value, and they used to be the whole
+    "recent form" in late September. With `season`, only that season's
+    games; without it, games can reach back into earlier seasons, so each
+    entry carries its own `season`."""
     team = team or PRIMARY_TEAM
 
-    rows = (
+    query = (
         supabase.table("game_log")
-        .select("game_id, game_date, opponent, team_score, opp_score, game_type, period_end")
+        .select(
+            "game_id, game_date, season, opponent, team_score, opp_score, game_type, period_end"
+        )
         .eq("team", team)
-        .order("game_date", desc=True)
-        .limit(n_games)
-        .execute()
-        .data
+        .in_("game_type", [NHL_REGULAR_SEASON, NHL_PLAYOFFS])
     )
+    if season:
+        query = query.eq("season", season)
+    rows = query.order("game_date", desc=True).limit(n_games).execute().data
 
     result = []
     for r in rows:
         result.append(
             {
                 "game_date": r["game_date"],
+                "season": r.get("season"),
                 "opponent": r["opponent"],
                 "team_score": r["team_score"],
                 "opp_score": r["opp_score"],
                 "result": "W" if r["team_score"] > r["opp_score"] else "L",
-                "game_type": "playoff" if r["game_type"] == 3 else "regular",
+                "game_type": "playoff" if r["game_type"] == NHL_PLAYOFFS else "regular",
                 "went_to_ot": r["period_end"] > 3,
             }
         )
@@ -728,71 +758,366 @@ def build_game_summary_context(game_id: int, team: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Full prediction context (pre-game)
 # ---------------------------------------------------------------------------
+#
+# Early in a season this season's tables are thin or empty: player_seasons
+# has no rows until a team has played (the old min_gp=5 player filter left
+# predictions with no players at all -- none were generated for the first
+# week of 2026-27), zone_starts/team_seasons hold only September exhibition
+# data, and game_log's "recent form" was last season's playoffs. So until a
+# team has played enough games, each section leans on last season (see
+# early_season.py): player lists rank on last season's stats for players on
+# the team's CURRENT roster, and zone starts/Corsi are blended with last
+# season by games played. Everything is labeled in the prompt, and anything
+# neither season has reads "not available".
+
+# Player lists rank on last season's regular season until the team has
+# played this many games; from then on it's this season alone (min_gp 5).
+# Points are a goal stat, hence the goal-rate k.
+EARLY_SEASON_PLAYER_GP = EARLY_SEASON_K["goals"]
+
+# At most this many roster players with no NHL stats last season (rookies,
+# returns from Europe) are listed separately on this season's numbers alone.
+MAX_NEWCOMERS = 3
+
+_roster_cache: dict = {}
 
 
-def get_team_corsi(team: str, season: int = None) -> dict | None:
-    """Real Corsi (shot-attempt share) for a team/season from team_seasons —
-    all-situations and 5v5-filtered (Session 52; replaces the SOG-share-only
-    proxy nhl.js's /prediction/analyze fallback tier used to compute
-    inline). Returns None if the row doesn't exist or neither Corsi column
-    is populated yet (e.g. before moneypuck.py's nightly rollup has run for
-    this season) -- callers should treat that the same as "no Corsi data",
-    not synthesize a value from something else.
-
-    corsi_for_pct/corsi_for_pct_5v5 are stored as 0-1 fractions, same
-    convention as this table's existing xgf_pct column -- scaled to a
-    percentage here before being handed to the prompt formatter.
-    """
-    season = season or NHL_SEASON
+def _player_info(player_ids) -> dict:
+    """{player_id: {"name", "position"}} from the players table."""
+    if not player_ids:
+        return {}
     rows = (
-        supabase.table("team_seasons")
-        .select("corsi_for_pct, corsi_for_pct_5v5")
-        .eq("team", team)
-        .eq("season", season)
-        .eq("game_type", 2)
-        .limit(1)
+        supabase.table("players")
+        .select("id, name, position")
+        .in_("id", list(player_ids))
         .execute()
         .data
     )
-    if not rows:
-        return None
-    row = rows[0]
-    all_sit = row.get("corsi_for_pct")
-    v5 = row.get("corsi_for_pct_5v5")
-    if all_sit is None and v5 is None:
-        return None
+    return {p["id"]: {"name": p["name"], "position": p.get("position") or "?"} for p in rows}
+
+
+def fetch_current_roster(team: str) -> dict | None:
+    """{player_id: {"name", "position"}} from the team's live NHL roster
+    (api-web /roster/{team}/current), or None if it can't be fetched --
+    callers must treat None as "current team unknown", not "empty roster".
+
+    The live roster is the only reliable source of a player's current team:
+    player_seasons.team is who he played for that season, and players.team
+    is only as fresh as the last roster sweep (Kirill Marchenko, CBJ -> TOR,
+    still read CBJ there on 2026-09-29). Cached for the process -- a run
+    builds two contexts per game and two locales.
+    """
+    if team in _roster_cache:
+        return _roster_cache[team]
+    roster = None
+    try:
+        data = nhl_get(f"/roster/{team}/current")
+        roster = {}
+        for group in ("forwards", "defensemen", "goalies"):
+            for p in data.get(group) or []:
+                if p.get("id") is None:
+                    continue
+                first = (p.get("firstName") or {}).get("default", "")
+                last = (p.get("lastName") or {}).get("default", "")
+                roster[int(p["id"])] = {
+                    "name": f"{first} {last}".strip(),
+                    "position": p.get("positionCode") or "?",
+                }
+        roster = roster or None  # an NHL roster is never really empty
+    except Exception as e:
+        print(f"  WARN: couldn't fetch the current {team} roster: {e}")
+    _roster_cache[team] = roster
+    return roster
+
+
+def get_team_games_played(team: str, season: int) -> int:
+    """Regular-season games the team has completed this season, from game_log
+    (preseason rows share the season value, so game_type matters)."""
+    result = (
+        supabase.table("game_log")
+        .select("game_id", count="exact")
+        .eq("team", team)
+        .eq("season", season)
+        .eq("game_type", NHL_REGULAR_SEASON)
+        .limit(1)
+        .execute()
+    )
+    return result.count or 0
+
+
+def _player_season_rows(season: int, team: str = None, player_ids=None) -> list:
+    """Regular-season player_seasons rows for one season, by team or by id."""
+    query = (
+        supabase.table("player_seasons")
+        .select(PLAYER_SEASON_COLUMNS)
+        .eq("season", season)
+        .eq("game_type", NHL_REGULAR_SEASON)
+    )
+    query = query.in_("player_id", list(player_ids)) if player_ids else query.eq("team", team)
+    return query.execute().data or []
+
+
+def _by_points(rows: list) -> list:
+    # Nulls last: a row with no points recorded isn't a 0-point player.
+    return sorted(rows, key=lambda r: (r.get("points") is None, -(r.get("points") or 0)))
+
+
+def get_prediction_players(
+    team: str, season: int, team_gp: int, roster: dict | None, top_n: int = 12
+) -> dict:
+    """Top players for the pre-game prompt.
+
+    From EARLY_SEASON_PLAYER_GP team games on: this season's leaders
+    (get_player_context, min 5 GP). Before that: the team's current-roster
+    players ranked by LAST season's regular season, each with his line so
+    far this season, plus roster players with no NHL stats last season on
+    this season's numbers alone. A player who changed teams carries last
+    season's team(s) so the prompt can say so. Without a roster (fetch
+    failed), falls back to the players who were on this team last season,
+    flagged roster_confirmed=False.
+
+    Returns {"mode", "season", "stats_season", "team_gp", "roster_confirmed",
+    "players", "newcomers"}.
+    """
+    if team_gp >= EARLY_SEASON_PLAYER_GP:
+        return {
+            "mode": "current",
+            "season": season,
+            "stats_season": season,
+            "team_gp": team_gp,
+            "roster_confirmed": None,
+            "players": get_player_context(team=team, season=season, top_n=top_n),
+            "newcomers": [],
+        }
+
+    last = prior_season(season)
+    if roster:
+        prior_rows = _player_season_rows(last, player_ids=roster.keys())
+        cur_rows = _player_season_rows(season, player_ids=roster.keys())
+    else:
+        prior_rows = _player_season_rows(last, team=team)
+        cur_rows = _player_season_rows(season, team=team)
+
+    cur_by_pid = {r["player_id"]: r for r in cur_rows if (r.get("games_played") or 0) > 0}
+    prior_pids = {r["player_id"] for r in prior_rows}
+    top = _by_points(prior_rows)[:top_n]
+    newcomers = _by_points([r for r in cur_by_pid.values() if r["player_id"] not in prior_pids])
+    newcomers = newcomers[:MAX_NEWCOMERS]
+
+    ids = {r["player_id"] for r in top} | {r["player_id"] for r in newcomers}
+    info = {pid: roster[pid] for pid in ids if roster and pid in roster}
+    missing = ids - set(info)
+    if missing:
+        info.update(_player_info(missing))
+
+    def who(pid):
+        return info.get(pid, {"name": f"Player {pid}", "position": "?"})
+
+    players = []
+    for r in top:
+        p = _player_season_dict(r, who(r["player_id"]))
+        p["stats_season"] = last
+        teams = [t.strip() for t in (r.get("team") or "").split(",") if t.strip()]
+        p["last_season_teams"] = teams if teams and teams != [team] else None
+        cur = cur_by_pid.get(r["player_id"])
+        p["this_season"] = (
+            {k: cur.get(k) for k in ("games_played", "goals", "assists", "points")} if cur else None
+        )
+        players.append(p)
+
+    newcomer_dicts = []
+    for r in newcomers:
+        p = _player_season_dict(r, who(r["player_id"]))
+        p["stats_season"] = season
+        newcomer_dicts.append(p)
+
     return {
-        "corsi_for_pct": round(all_sit * 100, 1) if all_sit is not None else None,
-        "corsi_for_pct_5v5": round(v5 * 100, 1) if v5 is not None else None,
+        "mode": "early",
+        "season": season,
+        "stats_season": last,
+        "team_gp": team_gp,
+        "roster_confirmed": bool(roster),
+        "players": players,
+        "newcomers": newcomer_dicts,
     }
 
 
-def build_prediction_context(home_team: str, away_team: str) -> dict:
-    """
-    Assembles context for a pre-game prediction.
-    Pulls season stats and recent form for both teams.
-    """
-    home_players = get_player_context(team=home_team)
-    away_players = get_player_context(team=away_team)
-    home_zones = get_zone_starts_context(team=home_team)
-    away_zones = get_zone_starts_context(team=away_team)
-    home_form = get_recent_form(team=home_team, n_games=10)
-    away_form = get_recent_form(team=away_team, n_games=10)
-    home_corsi = get_team_corsi(team=home_team)
-    away_corsi = get_team_corsi(team=away_team)
+def _zone_totals(season: int, team: str = None, player_ids=None) -> dict:
+    """{player_id: {"oz", "dz", "nz", "games"}} over a season's regular-season
+    games, by team or by player id (a player's starts with any team)."""
+    lo, hi = game_id_range(season, NHL_REGULAR_SEASON)
 
+    def build():
+        q = (
+            supabase.table("zone_starts")
+            .select("id, game_id, player_id, oz_starts, dz_starts, nz_starts")
+            .gte("game_id", lo)
+            .lt("game_id", hi)
+        )
+        return q.in_("player_id", list(player_ids)) if player_ids else q.eq("team", team)
+
+    totals: dict = {}
+    for r in select_all(build, order="id"):
+        t = totals.setdefault(r["player_id"], {"oz": 0, "dz": 0, "nz": 0, "games": set()})
+        t["oz"] += r.get("oz_starts") or 0
+        t["dz"] += r.get("dz_starts") or 0
+        t["nz"] += r.get("nz_starts") or 0
+        t["games"].add(r["game_id"])
+    return totals
+
+
+def get_prediction_zones(
+    team: str, season: int, team_gp: int, roster: dict | None, top_n: int = 12
+) -> dict:
+    """Zone deployment for the pre-game prompt.
+
+    From EARLY_SEASON_K["shots"] team games on: this season's regular-season
+    zone starts (get_zone_starts_context). Before that, each player's OZ%/DZ%
+    is blended with his own last-season share by his games this season
+    (k = 10, the shot-share k -- zone starts are a deployment share like
+    Corsi). Players come from the live roster when there is one.
+
+    Returns {"mode": "current", "zones": [{name, oz_pct, dz_pct, ...}]} or
+    {"mode": "early", "zones": [{name, oz_pct: blend, dz_pct: blend,
+    games_this_season}]}, blends as early_season.blend_stat() returns them.
+    """
+    if team_gp >= EARLY_SEASON_K["shots"]:
+        return {
+            "mode": "current",
+            "season": season,
+            "zones": get_zone_starts_context(team=team, season=season, top_n=top_n),
+        }
+
+    ids = list(roster) if roster else None
+    cur = _zone_totals(season, team=team, player_ids=ids)
+    last = _zone_totals(prior_season(season), team=team, player_ids=ids)
+
+    def pct(t, key):
+        total = t["oz"] + t["dz"] + t["nz"]
+        return t[key] / total * 100 if total else None
+
+    entries = []
+    for pid in set(cur) | set(last):
+        c, p = cur.get(pid), last.get(pid)
+        gp = len(c["games"]) if c else 0
+        oz = blend_stat(
+            pct(c, "oz") if c else None, gp, pct(p, "oz") if p else None, EARLY_SEASON_K["shots"]
+        )
+        dz = blend_stat(
+            pct(c, "dz") if c else None, gp, pct(p, "dz") if p else None, EARLY_SEASON_K["shots"]
+        )
+        if oz is None and dz is None:
+            continue
+        starts = sum(t["oz"] + t["dz"] + t["nz"] for t in (c, p) if t)
+        entries.append(
+            {"pid": pid, "oz_pct": oz, "dz_pct": dz, "games_this_season": gp, "starts": starts}
+        )
+
+    entries.sort(key=lambda e: e["starts"], reverse=True)
+    entries = entries[:top_n]
+    names = {pid: roster[pid]["name"] for pid in (roster or {})}
+    missing = [e["pid"] for e in entries if e["pid"] not in names]
+    names.update({pid: i["name"] for pid, i in _player_info(missing).items()})
+    zones = [
+        {
+            "name": names.get(e["pid"], f"Player {e['pid']}"),
+            "oz_pct": e["oz_pct"],
+            "dz_pct": e["dz_pct"],
+            "games_this_season": e["games_this_season"],
+        }
+        for e in entries
+    ]
+    return {"mode": "early", "season": season, "zones": zones}
+
+
+def get_team_season_stats(team: str, season: int) -> dict:
+    """Team-level numbers for the pre-game prompt from team_seasons: Corsi
+    (5v5 and all-situations) blended with last season's by this season's
+    games played (k = 10), and last season's regular-season record.
+
+    team_seasons stores Corsi as 0-1 fractions (same as xgf_pct); scaled to
+    percentages here. A 0-GP row's Corsi is ignored (weight 0): until #170
+    moneypuck.py's rollup counted preseason games, so before the regular
+    season the row held September exhibition data. Corsi values are
+    None-safe blends -- None means neither season has it.
+    """
+    last = prior_season(season)
+    rows = (
+        supabase.table("team_seasons")
+        .select(
+            "season, games_played, wins, losses, ot_losses, points, "
+            "corsi_for_pct, corsi_for_pct_5v5"
+        )
+        .eq("team", team)
+        .eq("game_type", NHL_REGULAR_SEASON)
+        .in_("season", [season, last])
+        .execute()
+        .data
+    )
+    by_season = {int(r["season"]): r for r in rows or []}
+    cur = by_season.get(season, {})
+    prev = by_season.get(last, {})
+    gp = cur.get("games_played") or 0
+
+    def pct(v):
+        return round(v * 100, 1) if v is not None else None
+
+    k = EARLY_SEASON_K["shots"]
+    prior_record = None
+    if prev.get("games_played") and prev.get("wins") is not None:
+        prior_record = {
+            key: prev.get(key) for key in ("games_played", "wins", "losses", "ot_losses", "points")
+        }
     return {
+        "season": season,
+        "prior_season": last,
+        "games_played": gp,
+        "corsi_for_pct_5v5": blend_stat(
+            pct(cur.get("corsi_for_pct_5v5")), gp, pct(prev.get("corsi_for_pct_5v5")), k
+        ),
+        "corsi_for_pct": blend_stat(
+            pct(cur.get("corsi_for_pct")), gp, pct(prev.get("corsi_for_pct")), k
+        ),
+        "prior_record": prior_record,
+    }
+
+
+def _team_player_context(team: str, season: int) -> tuple[int, dict | None, dict]:
+    """(regular-season GP, live roster or None, get_prediction_players())."""
+    team_gp = get_team_games_played(team, season)
+    roster = fetch_current_roster(team) if team_gp < EARLY_SEASON_PLAYER_GP else None
+    return team_gp, roster, get_prediction_players(team, season, team_gp, roster)
+
+
+def build_prediction_context(home_team: str, away_team: str, season: int = None) -> dict:
+    """
+    Assembles context for a pre-game prediction. `season` is the game's own
+    season (ai_predictions derives it from the game id); defaults to
+    NHL_SEASON.
+
+    {side}_players stays a plain list (ai_predictions skips a game when both
+    are empty); how it was built -- this season's leaders, or last season's
+    stats early on -- is in {side}_players_info, and likewise
+    {side}_zones/{side}_zones_info.
+    """
+    season = season or NHL_SEASON
+    ctx = {
         "home_team": home_team,
         "away_team": away_team,
-        "home_players": home_players,
-        "away_players": away_players,
-        "home_zones": home_zones,
-        "away_zones": away_zones,
-        "home_form": home_form,
-        "away_form": away_form,
-        "home_corsi": home_corsi,
-        "away_corsi": away_corsi,
+        "season": season,
+        "prior_season": prior_season(season),
     }
+    for side, team in (("home", home_team), ("away", away_team)):
+        team_gp, roster, players = _team_player_context(team, season)
+        zones = get_prediction_zones(team, season, team_gp, roster)
+        ctx[f"{side}_games_played"] = team_gp
+        ctx[f"{side}_players"] = players.pop("players")
+        ctx[f"{side}_players_info"] = players
+        ctx[f"{side}_zones"] = zones.pop("zones")
+        ctx[f"{side}_zones_info"] = zones
+        ctx[f"{side}_form"] = get_recent_form(team=team, n_games=10, season=season)
+        ctx[f"{side}_team_stats"] = get_team_season_stats(team, season)
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -813,11 +1138,17 @@ if __name__ == "__main__":
 
 
 def get_line_combos(team: str, season: int = None) -> dict:
-    """Returns inferred forward lines and D pairs for a team."""
+    """Returns inferred forward lines and D pairs for a team. xgfPct is a
+    percentage (line_combinations stores a 0-1 fraction); source is
+    "prior_season" for a unit line_combinations.py carried over from last
+    season because this season's shifts can't fill that slot yet."""
     season = season or NHL_SEASON
     rows = (
         supabase.table("line_combinations")
-        .select("unit_type, rank, name_a, name_b, name_c, pos_a, pos_b, pos_c, toi_secs, xgf_pct")
+        .select(
+            "unit_type, rank, name_a, name_b, name_c, pos_a, pos_b, pos_c, toi_secs, xgf_pct, "
+            "source"
+        )
         .eq("team", team)
         .eq("season", season)
         .order("unit_type")
@@ -843,7 +1174,8 @@ def get_line_combos(team: str, season: int = None) -> dict:
             "rank": r["rank"],
             "players": players,
             "toiMins": round(r["toi_secs"] / 60) if r.get("toi_secs") else None,
-            "xgfPct": float(r["xgf_pct"]) if r.get("xgf_pct") is not None else None,
+            "xgfPct": round(float(r["xgf_pct"]) * 100, 1) if r.get("xgf_pct") is not None else None,
+            "source": r.get("source"),
         }
         if r["unit_type"] == "F":
             lines.append(unit)
@@ -983,25 +1315,38 @@ def get_scouting_blurbs(team: str, season: int = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def build_matchup_context(home_team: str, away_team: str) -> dict:
+def build_matchup_context(home_team: str, away_team: str, season: int = None) -> dict:
     """
     Assembles line combo + player scouting context for matchup analysis.
-    Extends build_prediction_context with line combos and scouting blurbs.
-    """
-    home_players = get_player_context(team=home_team)
-    away_players = get_player_context(team=away_team)
-    home_lines = get_line_combos(team=home_team)
-    away_lines = get_line_combos(team=away_team)
-    home_blurbs = get_scouting_blurbs(team=home_team)
-    away_blurbs = get_scouting_blurbs(team=away_team)
+    Extends build_prediction_context with line combos and scouting blurbs;
+    players are built the same way (last season's stats early on, labeled
+    via {side}_players_info).
 
-    return {
+    {side}_lines_preseason is True when the team hasn't played a
+    regular-season game this season but has stored units of its own:
+    line_combinations.py builds a season's units from every game_log game
+    of that season, preseason included, so before the opener those units
+    are exhibition groupings (units it carried over from last season are
+    tagged source="prior_season" and labeled separately). They are kept --
+    preseason groupings predicted opening-night linemates better than last
+    season's units (docs/opening_night_backtest_results.md) -- but labeled.
+    """
+    season = season or NHL_SEASON
+    ctx = {
         "home_team": home_team,
         "away_team": away_team,
-        "home_players": home_players,
-        "away_players": away_players,
-        "home_lines": home_lines,
-        "away_lines": away_lines,
-        "home_blurbs": home_blurbs,
-        "away_blurbs": away_blurbs,
+        "season": season,
+        "prior_season": prior_season(season),
     }
+    for side, team in (("home", home_team), ("away", away_team)):
+        team_gp, _, players = _team_player_context(team, season)
+        combos = get_line_combos(team=team, season=season)
+        units = combos["lines"] + combos["pairs"]
+        ctx[f"{side}_players"] = players.pop("players")
+        ctx[f"{side}_players_info"] = players
+        ctx[f"{side}_lines"] = combos
+        ctx[f"{side}_lines_preseason"] = team_gp == 0 and any(
+            u.get("source") != "prior_season" for u in units
+        )
+        ctx[f"{side}_blurbs"] = get_scouting_blurbs(team=team, season=season)
+    return ctx

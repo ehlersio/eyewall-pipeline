@@ -24,6 +24,7 @@ from ai_context import build_matchup_context, build_prediction_context
 from ai_persona import build_matchup_prompt, build_prediction_prompt, get_system_prompt
 from ai_scouting import LOCALES
 from db import get_client
+from early_season import season_from_game_id
 from pipeline_common import nhl_get
 
 supabase = get_client()
@@ -58,6 +59,10 @@ def get_upcoming_games() -> list:
             state = g.get("gameState", "")
 
             if state not in ("FUT", "PRE"):
+                continue
+            # Preseason exhibitions dress prospects and camp invites; no
+            # prediction is written for them.
+            if g.get("gameType") == 1:
                 continue
             if game_id in seen:
                 continue
@@ -133,9 +138,10 @@ def process_game(game: dict, force: bool = False, locale: str = "en") -> bool:
     away_team = game["away_team"]
     game_date = game["game_date"]
     # Derive season from NHL game ID — first 4 digits are the start year
-    # e.g. 2025030415 → start year 2025 → season 20252026
-    start_year = int(str(game_id)[:4])
-    season = start_year * 10000 + (start_year + 1)
+    # e.g. 2025030415 → start year 2025 → season 20252026. The context is
+    # built for this season, not NHL_SEASON, so a game is never described
+    # with another season's numbers whatever the Worker resolves.
+    season = season_from_game_id(game_id)
 
     if not force and already_generated(game_id, locale):
         print(f"  {game_id} ({locale}) — already generated, skipping")
@@ -143,7 +149,7 @@ def process_game(game: dict, force: bool = False, locale: str = "en") -> bool:
 
     print(f"  {game_id} ({locale}) — building context for {away_team} @ {home_team}...")
     try:
-        ctx = build_prediction_context(home_team, away_team)
+        ctx = build_prediction_context(home_team, away_team, season=season)
     except Exception as e:
         print(f"  {game_id} ({locale}) — context error: {e}")
         return False
@@ -166,7 +172,7 @@ def process_game(game: dict, force: bool = False, locale: str = "en") -> bool:
     # Generate line/player matchup analysis in a second call
     print(f"  {game_id} ({locale}) — building matchup context...")
     try:
-        matchup_ctx = build_matchup_context(home_team, away_team)
+        matchup_ctx = build_matchup_context(home_team, away_team, season=season)
         matchup_prompt = build_matchup_prompt(matchup_ctx)
         print(f"  {game_id} ({locale}) — generating matchup analysis...")
         matchup = generate(matchup_prompt, system=system)

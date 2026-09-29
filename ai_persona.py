@@ -4,6 +4,7 @@ Defines the Sticks persona and all prompt templates used by the AI pipeline.
 No model calls happen here — just strings and formatters.
 """
 
+from early_season import describe_stat, fmt_pct, is_early_estimate, prior_season, season_label
 
 # ---------------------------------------------------------------------------
 # Persona — system prompt
@@ -299,62 +300,234 @@ def format_game_context(ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def _stat_or_na(label: str, value, fmt: str) -> str:
+    return f"{label} {value:{fmt}}" if value is not None else f"{label} not available"
+
+
+def _player_stat_line(p: dict) -> str:
+    """G/A/GP, RAPM and xGF/60 for one player; a missing stat says so."""
+    return (
+        f"{p.get('goals')}G {p.get('assists')}A in {p.get('games_played')} GP | "
+        f"{_stat_or_na('RAPM', p.get('rapm'), '+.3f')} | "
+        f"{_stat_or_na('xGF/60', p.get('xgf_per60'), '.2f')}"
+    )
+
+
+def _season_labels(ctx: dict) -> tuple[str, str]:
+    season = ctx.get("season")
+    prior = ctx.get("prior_season") or (prior_season(season) if season else None)
+    return season_label(season), season_label(prior, fallback="last season")
+
+
+def _format_players(team: str, players: list, info: dict, label: str, prior_label: str, limit: int):
+    """Player block for the prediction/matchup prompts. `info` is
+    ai_context.get_prediction_players()'s metadata; without it (older
+    callers) the list is taken as this season's."""
+    lines = []
+    players = [p for p in players if p.get("goals") is not None][:limit]
+    if info.get("mode") != "early":
+        lines.append(f"Top players ({label} regular season):")
+        for p in players:
+            lines.append(f"  {p['name']} ({p['position']}): {_player_stat_line(p)}")
+        if not players:
+            lines.append("  Player stats: not available")
+        return lines
+
+    gp = info.get("team_gp", 0)
+    lines.append(
+        f"Top players, ranked on LAST season's ({prior_label}) regular-season stats -- {team} "
+        f"has played {gp} regular-season game{'s' if gp != 1 else ''} in {label}, so these "
+        f"{prior_label} numbers are the main guide. This season's line is shown after each:"
+    )
+    if not info.get("roster_confirmed"):
+        lines.append(
+            f"  (Current roster couldn't be confirmed: these are players who were on {team} in "
+            f"{prior_label}, and some may have moved on. Only treat a player as on this season's "
+            f"{team} if a this-season line is shown for them.)"
+        )
+    for p in players:
+        moved = ""
+        if p.get("last_season_teams"):
+            moved = (
+                f" [on {team}'s current roster; played for "
+                f"{'/'.join(p['last_season_teams'])} in {prior_label}]"
+            )
+        cur = p.get("this_season")
+        now = (
+            f"{label}: {cur.get('goals')}G {cur.get('assists')}A in {cur.get('games_played')} GP"
+            if cur
+            else f"no {label} games yet"
+        )
+        lines.append(
+            f"  {p['name']} ({p['position']}){moved}: {prior_label}: {_player_stat_line(p)} | {now}"
+        )
+    if not players:
+        lines.append(f"  Player stats: not available ({prior_label} or {label})")
+    newcomers = info.get("newcomers") or []
+    if newcomers:
+        lines.append(
+            f"  On the roster with no NHL regular-season stats in {prior_label} "
+            f"({label} only, small sample):"
+        )
+        for p in newcomers:
+            lines.append(f"    {p['name']} ({p['position']}): {_player_stat_line(p)}")
+    return lines
+
+
+def _zone_note(s: dict, gp: int, prior_label: str) -> str:
+    if s["cur"] is None:
+        return f"{prior_label}; none this season yet"
+    if s["prior"] is None:
+        return f"{gp} GP this season, small sample; no {prior_label} data"
+    if s["gp"] >= s["k"]:
+        return f"{gp} GP this season"
+    return f"{gp} GP this season, blended with {prior_label}"
+
+
+def _format_zones(zones: list, info: dict, label: str, prior_label: str) -> list:
+    if not zones:
+        return ["Zone deployment: not available"]
+    if info.get("mode") != "early":
+        lines = [f"Zone deployment ({label} regular season):"]
+        for z in zones[:6]:
+            lines.append(f"  {z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}%")
+        return lines
+    lines = [
+        f"Zone deployment (share of shifts started in each zone; early-season estimate: "
+        f"{label} blended with {prior_label} by games played):"
+    ]
+    for z in zones[:6]:
+        oz, dz = z.get("oz_pct"), z.get("dz_pct")
+        ref = oz or dz
+        oz_txt = fmt_pct(oz["value"]) if oz else "not available"
+        dz_txt = fmt_pct(dz["value"]) if dz else "not available"
+        lines.append(
+            f"  {z['name']}: OZ {oz_txt} | DZ {dz_txt} "
+            f"({_zone_note(ref, z.get('games_this_season', 0), prior_label)})"
+        )
+    return lines
+
+
+def _format_team_stats(stats: dict | None, prior_label: str, early: bool) -> list:
+    stats = stats or {}
+    lines = []
+    v5, all_sit = stats.get("corsi_for_pct_5v5"), stats.get("corsi_for_pct")
+    if v5:
+        lines.append(describe_stat("Corsi For% (5-on-5 shot-attempt share)", v5, prior_label))
+    elif all_sit:
+        lines.append(
+            describe_stat(
+                "Corsi For% (all-situations shot-attempt share, not 5v5-filtered)",
+                all_sit,
+                prior_label,
+            )
+        )
+    else:
+        lines.append("Corsi For%: not available")
+    rec = stats.get("prior_record")
+    if early and rec:
+        lines.append(
+            f"{prior_label} regular-season record: {rec['wins']}-{rec['losses']}-"
+            f"{rec['ot_losses']} ({rec['points']} pts in {rec['games_played']} GP)"
+        )
+    return lines
+
+
+def _format_form(form: list, label: str) -> list:
+    if not form:
+        return [f"Recent form: no {label} regular-season games played yet."]
+    record = {"W": 0, "L": 0}
+    for g in form:
+        record[g["result"]] += 1
+    lines = [
+        f"Recent form ({label}, last {len(form)} game{'s' if len(form) != 1 else ''}, "
+        f"preseason excluded): {record['W']}W-{record['L']}L"
+    ]
+    for g in form[:5]:
+        ot = " (OT)" if g.get("went_to_ot") else ""
+        po = " (playoff)" if g.get("game_type") == "playoff" else ""
+        lines.append(
+            f"  {g['game_date']} vs {g['opponent']}: {g['result']} "
+            f"{g['team_score']}-{g['opp_score']}{ot}{po}"
+        )
+    return lines
+
+
+def _side_is_early(ctx: dict, side: str) -> bool:
+    if (ctx.get(f"{side}_players_info") or {}).get("mode") == "early":
+        return True
+    if (ctx.get(f"{side}_zones_info") or {}).get("mode") == "early":
+        return True
+    stats = ctx.get(f"{side}_team_stats") or {}
+    return any(is_early_estimate(stats.get(k)) for k in ("corsi_for_pct_5v5", "corsi_for_pct"))
+
+
 def format_prediction_context(ctx: dict) -> str:
-    """Formats pre-game prediction context into a readable prompt block."""
+    """Formats pre-game prediction context into a readable prompt block.
+
+    Every number says which season it's from whenever it isn't simply this
+    season's (see ai_context's early-season handling), and a missing stat
+    reads "not available" rather than being dropped or zeroed."""
+    label, prior_label = _season_labels(ctx)
     lines = []
 
     for side in ("home", "away"):
         team = ctx.get(f"{side}_team", "")
-        players = ctx.get(f"{side}_players", [])
-        zones = ctx.get(f"{side}_zones", [])
-        form = ctx.get(f"{side}_form", [])
-
+        early = _side_is_early(ctx, side)
         lines.append(f"{team.upper()} — {side.upper()}")
-
-        lines.append("Top players (regular season):")
-        for p in players[:8]:
-            if p.get("goals") is None:
-                continue
-            rapm_str = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
-            lines.append(
-                f"  {p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A "
-                f"| {rapm_str} | xGF/60 {p.get('xgf_per60'):.2f}"
-            )
-
-        lines.append("Zone deployment (season):")
-        for z in zones[:6]:
-            lines.append(f"  {z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}%")
-
-        # Real Corsi (Session 52) -- prefers 5v5-filtered over
-        # all-situations, same preference order as nhl.js's
-        # /prediction/analyze fallback tier. Omitted entirely (not printed
-        # as "—") when neither is populated yet, so the prompt doesn't
-        # imply a stat exists when it doesn't.
-        corsi = ctx.get(f"{side}_corsi")
-        if corsi and corsi.get("corsi_for_pct_5v5") is not None:
-            lines.append(
-                f"Corsi For% (5-on-5 shot-attempt share): {corsi['corsi_for_pct_5v5']:.1f}%"
-            )
-        elif corsi and corsi.get("corsi_for_pct") is not None:
-            lines.append(
-                f"Corsi For% (all-situations shot-attempt share, not 5v5-filtered): {corsi['corsi_for_pct']:.1f}%"
-            )
-
-        lines.append("Recent form (last 10):")
-        record = {"W": 0, "L": 0}
-        for g in form:
-            record[g["result"]] += 1
-        lines.append(f"  {record['W']}W-{record['L']}L")
-        for g in form[:5]:
-            ot = " (OT)" if g.get("went_to_ot") else ""
-            lines.append(
-                f"  {g['game_date']} vs {g['opponent']}: {g['result']} "
-                f"{g['team_score']}-{g['opp_score']}{ot}"
-            )
-
+        lines += _format_players(
+            team,
+            ctx.get(f"{side}_players", []),
+            ctx.get(f"{side}_players_info") or {},
+            label,
+            prior_label,
+            limit=8,
+        )
+        lines += _format_zones(
+            ctx.get(f"{side}_zones", []), ctx.get(f"{side}_zones_info") or {}, label, prior_label
+        )
+        lines += _format_team_stats(ctx.get(f"{side}_team_stats"), prior_label, early)
+        lines += _format_form(ctx.get(f"{side}_form", []), label)
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _data_notes(ctx: dict, form_keys: bool) -> str:
+    """Closing notes shared by the prediction and matchup prompts."""
+    label, prior_label = _season_labels(ctx)
+    notes = []
+    if any(_side_is_early(ctx, side) for side in ("home", "away")):
+        notes.append(
+            f"Note: it's early in the {label} season. Numbers labeled {prior_label} are last "
+            f"season's -- never present them as this season's. A stat marked \"early-season "
+            f"estimate\" blends this season's few games with last season's, weighted by games "
+            f"played: treat it as the team's level, and don't call anything a strength or "
+            f"weakness from this season's small sample alone."
+        )
+    if form_keys:
+        idle = [
+            ctx.get(f"{side}_team", "") for side in ("home", "away") if not ctx.get(f"{side}_form")
+        ]
+        if idle:
+            who = " and ".join(idle)
+            verb = "hasn't" if len(idle) == 1 else "haven't"
+            notes.append(
+                f"{who} {verb} played a {label} regular-season game yet, so there's no recent "
+                f"form to discuss for {'it' if len(idle) == 1 else 'them'}."
+            )
+    preseason = [
+        ctx.get(f"{side}_team", "")
+        for side in ("home", "away")
+        if ctx.get(f"{side}_lines_preseason")
+    ]
+    if preseason:
+        notes.append(
+            f"Lines marked as from {label} preseason games ({' and '.join(preseason)}) are "
+            f"exhibition groupings, not a confirmed lineup -- say so if you discuss them."
+        )
+    notes.append('Don\'t cite any stat marked "not available".')
+    return "\n".join(notes)
 
 
 # ---------------------------------------------------------------------------
@@ -439,15 +612,31 @@ def build_prediction_prompt(ctx: dict) -> str:
     return (
         f"Here is the pre-game data for an upcoming NHL game: {away} @ {home}.\n\n"
         f"{formatted}\n\n"
+        f"{_data_notes(ctx, form_keys=True)}\n\n"
         f"Write a pre-game prediction. Cover which team has the edge at even strength "
-        f"based on RAPM and deployment, recent form, and any notable matchup storylines. "
+        f"based on RAPM and deployment, recent form where there is any, and any notable "
+        f"matchup storylines. "
         f"Give a pick with reasoning — don't sit on the fence. "
         f"Plain text only, no bullet points."
     )
 
 
+def _format_unit(kind: str, i: int, unit: dict, prior_label: str) -> str:
+    xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% not available"
+    toi = f" | {unit['toiMins']}min together" if unit.get("toiMins") else ""
+    carried = (
+        f" (carried over from {prior_label}: this season's shifts can't fill this slot yet; "
+        f"its players are still on the roster)"
+        if unit.get("source") == "prior_season"
+        else ""
+    )
+    names = ", ".join(p["name"] for p in unit.get("players", []))
+    return f"  {kind} {i}: {names} | {xgf}{toi}{carried}"
+
+
 def format_matchup_context(ctx: dict) -> str:
     """Formats line combo + player scouting context for matchup analysis."""
+    label, prior_label = _season_labels(ctx)
     lines = []
 
     for side in ("home", "away"):
@@ -463,34 +652,35 @@ def format_matchup_context(ctx: dict) -> str:
 
         fwd_lines = combos.get("lines", [])
         d_pairs = combos.get("pairs", [])
+        preseason = ctx.get(f"{side}_lines_preseason")
+        source = f"{label} preseason games" if preseason else label
 
+        if preseason:
+            lines.append(
+                f"Line combinations (from {label} preseason games -- {team} hasn't played a "
+                f"regular-season game yet, so these may not match the opening-night lineup):"
+            )
         if fwd_lines:
-            lines.append("Forward lines (inferred from shift data):")
+            lines.append(f"Forward lines ({source}, inferred from 5v5 shift data):")
             for i, unit in enumerate(fwd_lines[:4], 1):
-                xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% —"
-                toi = f"{unit['toiMins']}min" if unit.get("toiMins") else ""
-                player_names = [p["name"] for p in unit.get("players", [])]
-                lines.append(f"  Line {i}: {', '.join(player_names)} | {xgf} | {toi}")
+                lines.append(_format_unit("Line", i, unit, prior_label))
                 for p in unit.get("players", []):
                     pid = str(p.get("id", ""))
                     if pid and pid in blurbs:
                         lines.append(f"    {p['name']}: {blurbs[pid]}")
+        else:
+            lines.append("Forward lines: not available")
 
         if d_pairs:
-            lines.append("Defence pairs:")
+            lines.append(f"Defence pairs ({source}):")
             for i, unit in enumerate(d_pairs[:3], 1):
-                xgf = f"xGF% {unit['xgfPct']:.1f}" if unit.get("xgfPct") is not None else "xGF% —"
-                player_names = [p["name"] for p in unit.get("players", [])]
-                lines.append(f"  Pair {i}: {', '.join(player_names)} | {xgf}")
+                lines.append(_format_unit("Pair", i, unit, prior_label))
+        else:
+            lines.append("Defence pairs: not available")
 
-        if players:
-            lines.append("Top skaters (regular season RAPM + xGF/60):")
-            for p in players[:6]:
-                rapm = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
-                xgf60 = f"xGF/60 {p['xgf_per60']:.2f}" if p.get("xgf_per60") is not None else ""
-                lines.append(
-                    f"  {p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A | {rapm} | {xgf60}"
-                )
+        lines += _format_players(
+            team, players, ctx.get(f"{side}_players_info") or {}, label, prior_label, limit=6
+        )
 
     return "\n".join(lines)
 
@@ -514,7 +704,8 @@ def build_matchup_prompt(ctx: dict) -> str:
         f"key individual players to watch from each team; defence pair matchups and possession battle; "
         f"special teams edge if relevant; a directional pick with one sentence of reasoning.\n\n"
         f"Always identify players by their team ({home} or {away}) when you name them. "
-        f"Plain prose paragraphs only. 200-300 words."
+        f"Plain prose paragraphs only. 200-300 words.\n\n"
+        f"{_data_notes(ctx, form_keys=False)}"
     )
 
 
