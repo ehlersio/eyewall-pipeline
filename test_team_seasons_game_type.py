@@ -311,7 +311,7 @@ class TestGoalieQualityStarts:
 
 
 class TestRapmPool:
-    def test_preseason_rows_are_not_rated(self):
+    def test_only_regular_season_rows_are_rated(self):
         client = FakeClient(
             shift_events=[
                 {"id": 1, "season": SEASON, "game_id": PRE, "player_id": 8},
@@ -325,11 +325,11 @@ class TestRapmPool:
             rapm.fetch_all_keyset, client, "shift_events", "game_id", {"season": SEASON}
         )
 
-        assert sorted(r["game_id"] for r in rows) == [REG, PLAYOFF]
+        assert [r["game_id"] for r in rows] == [REG]
 
     def test_reads_one_game_type_at_a_time(self):
         """Each read names a single game_type, so a keyset page walks the
-        (season, game_type, id) index in id order -- an in.(2,3) filter
+        (season, game_type, id) index in id order -- an in.(...) filter
         would need a sort first."""
         seen = []
 
@@ -339,10 +339,7 @@ class TestRapmPool:
 
         rapm.fetch_rated(fetch, None, "shot_events", "game_id", {"season": SEASON})
 
-        assert seen == [
-            {"season": SEASON, "game_type": 2},
-            {"season": SEASON, "game_type": 3},
-        ]
+        assert seen == [{"season": SEASON, "game_type": 2}]
 
 
 def mp_skater(pid, situation, **cols):

@@ -243,7 +243,7 @@ def run(season: int = NHL_SEASON):
     print("\n[2/3] Loading shifts...")
     all_shifts = []
     for s in POOL_SEASONS:
-        # Same games as rapm.py's pool -- preseason shifts are not rated.
+        # Same games as rapm.py's pool: regular season only.
         rows = fetch_rated(
             fetch_all_keyset,
             client,

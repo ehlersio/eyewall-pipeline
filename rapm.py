@@ -21,7 +21,7 @@ Scope:
   - 5v5 only (situationCode 1551 = both teams at full strength)
   - Minimum 150 minutes EV icetime across 3-season pool for display
   - League-wide shots and shifts (all 32 teams)
-  - Regular-season and playoff games; preseason games excluded (RAPM_GAME_TYPES)
+  - Regular-season games only (RAPM_GAME_TYPES); preseason and playoffs excluded
 """
 
 from collections import defaultdict
@@ -35,20 +35,22 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.
 from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
-from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON
+from pipeline_common import NHL_REGULAR_SEASON
 
-# Games the regression pool draws on. shot_events, shift_events and
-# zone_starts keep each season's preseason games too; until 2026-09 those
-# came into the pool (and into the 150-minute qualifying ice time),
-# preseason call-ups and split squads included. Playoffs stay in, as they
-# always have.
-RAPM_GAME_TYPES = (NHL_REGULAR_SEASON, NHL_PLAYOFFS)
+# Games the regression pool draws on: the regular season only. RAPM (and
+# the WAR built on it) is written to the game_type 2 rows, so it's a
+# regular-season number. shot_events, shift_events and zone_starts keep
+# each season's preseason and playoff games too. Until 2026-09 preseason
+# games were in the pool (and in the 150-minute qualifying ice time),
+# preseason call-ups and split squads included, and playoff games were in
+# until the game-type split's step 3. Playoff RAPM is its own model.
+RAPM_GAME_TYPES = (NHL_REGULAR_SEASON,)
 
 
 def fetch_rated(fetch, client, table, select, filters: dict) -> list:
     """`fetch`'s rows of `table` from the pool's game types only.
 
-    One read per game type (`game_type = T`, not `in.(2,3)`), so a keyset
+    One read per game type (`game_type = T`, never an `in.(...)` list), so a keyset
     page is a straight walk of the (season, game_type, id) index in id
     order -- see docs/game_type_column.sql. Rows come back grouped by game
     type; nothing here depends on their order across games."""

@@ -62,10 +62,10 @@ def get_season_data(season):
     if season in _season_cache:
         return _season_cache[season]
     print(f"  [cache miss] loading raw data for season {season}...")
-    # rapm.py's pool games (regular season and playoffs, no preseason). The
-    # test season is then cut to the game_log allowlist, which is regular
-    # season only; until 2026-09 the prior seasons here also carried their
-    # preseason games, which rapm.py itself had stopped rating.
+    # rapm.py's pool games (rapm.RAPM_GAME_TYPES: the regular season). The
+    # test season is then cut to the game_log allowlist. Until 2026-09 the
+    # prior seasons here also carried their preseason games, and their
+    # playoff games until the game-type split's step 3.
     shots = rapm.fetch_rated(
         rapm.fetch_all_keyset,
         client,
