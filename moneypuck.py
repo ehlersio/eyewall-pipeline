@@ -13,7 +13,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
-from pipeline_common import NHL_REGULAR_SEASON, nhl_game_type, select_all
+from pipeline_common import NHL_REGULAR_SEASON, select_all
 
 # MoneyPuck's URL scheme wants the season's START year (e.g. 2025 for the
 # 20252026 season), not the full YYYYYYYY season ID. This used to be a
@@ -336,9 +336,9 @@ def run_team_xgf_rollup(client, season: int, game_type: int = NHL_REGULAR_SEASON
     per-game percentages (which would weight short games equally).
 
     game_xg comes from MoneyPuck's game-by-game file, which has playoff
-    games as well as regular-season ones, and game_xg has no game type
-    column -- the type is read off each game_id (nhl_game_type). Until
-    2026-09 every season's game_type=2 xgf_pct included its playoff games.
+    games as well as regular-season ones, so the read filters on game_xg's
+    game_type (generated from game_id). Until 2026-09 every season's
+    game_type=2 xgf_pct included its playoff games.
 
     A team with a team_seasons row but no games of this type gets
     xgf_pct NULL (not 0.5, not a stale value).
@@ -347,38 +347,29 @@ def run_team_xgf_rollup(client, season: int, game_type: int = NHL_REGULAR_SEASON
     owned by nhl_stats.py and are not touched here.
     """
     print(f"\n--- Team XGF% rollup (game_xg -> team_seasons, game_type {game_type}) ---")
-    # Supabase project cap is 999 rows — paginate with .range()
     # OFFSET pagination accepted as-is (Session 47 audit #10 pass):
-    # ~2,624 rows/season (32 teams x 82 games), well under the cap --
-    # already paginated defensively, not because it's been observed slow.
-    rows = []
-    offset = 0
-    while True:
-        batch = (
+    # ~2,624 rows/season (32 teams x 82 games). Until 2026-09 this paged
+    # with .range(offset, offset + 999) but stepped by 999, and the row cap
+    # is 1,000, so the last row of every full page was read twice. Ordered
+    # on game_id then team, which is unique within a situation, so pages
+    # don't shuffle.
+    rows = select_all(
+        lambda: (
             client.table("game_xg")
             .select("game_id,team,xgf,xga")
             .eq("season", season)
+            .eq("game_type", game_type)
             .eq("situation", "5on5")
-            .range(offset, offset + 999)
-            .execute()
-            .data
-        )
-        if not batch:
-            break
-        rows.extend(batch)
-        if len(batch) < 999:
-            break
-        offset += 999
-
-    kept = [r for r in rows if nhl_game_type(r.get("game_id")) == game_type]
-    print(
-        f"  Fetched {len(rows)} game_xg rows, {len(kept)} from game_type {game_type} games "
-        f"({len(rows) - len(kept)} other game types excluded)"
+            .order("game_id")
+        ),
+        order="team",
     )
+
+    print(f"  Fetched {len(rows)} game_xg rows from game_type {game_type} games")
 
     # Sum xgf and xga per team
     totals: dict[str, dict] = {}
-    for r in kept:
+    for r in rows:
         team = r.get("team", "")
         if not team:
             continue
@@ -421,8 +412,8 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     then aggregates per goalie and upserts qs + qs_pct into goalie_seasons.
     No external CSV needed — uses data already in the DB.
 
-    Only games of `game_type` count (read off each game_id -- shot_events
-    has no game type column). Until 2026-09 preseason and playoff starts
+    Only games of `game_type` count (shot_events.game_type, generated from
+    game_id). Until 2026-09 preseason and playoff starts
     counted toward the game_type=2 row, and on 2026-09-28 this wrote QS%
     for 95 goalies from 2026-27 preseason games alone. A goalie whose row
     has a QS% but who has no start of this type now gets qs/qs_pct NULL.
@@ -439,12 +430,12 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     # 2026-07-04 statement-timeout incident that motivated this pattern.
     last_id = 0
     total_rows = 0
-    excluded_rows = 0
     while True:
         rows = (
             client.table("shot_events")
             .select("id,goalie_id,game_id,event_type")
             .eq("season", season)
+            .eq("game_type", game_type)
             .in_("event_type", ["goal", "shot-on-goal"])
             .not_.is_("goalie_id", "null")
             .gt("id", last_id)
@@ -456,9 +447,6 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
         if not rows:
             break
         for r in rows:
-            if nhl_game_type(r["game_id"]) != game_type:
-                excluded_rows += 1
-                continue
             key = (r["goalie_id"], r["game_id"])
             goalie_game_stats[key]["sa"] += 1
             if r["event_type"] == "shot-on-goal":
@@ -468,10 +456,7 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
         if len(rows) < 999:
             break
 
-    print(
-        f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs "
-        f"({excluded_rows} from other game types excluded)"
-    )
+    print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
 
     # Aggregate QS per goalie
     goalie_totals = defaultdict(lambda: {"starts": 0, "qs": 0})
@@ -721,8 +706,8 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
 
     Only games of `game_type` count toward the (season, game_type) row.
     shot_events holds a season's preseason and playoff games as well as its
-    regular season, with no game type column, so the type is read off each
-    game_id (nhl_game_type). Until 2026-09 this counted all three into
+    regular season, so the read filters on shot_events.game_type (generated
+    from game_id). Until 2026-09 this counted all three into
     game_type=2: on 2026-09-29, before 2026-27's first regular-season game,
     every team's row already had Corsi from 61 preseason games (CAR 46.05%,
     FLA 50.0%, UTA 50.34%), and every earlier season's included its
@@ -774,12 +759,12 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
     # motivated this pattern).
     last_id = 0
     total_rows = 0
-    excluded_rows = 0
     while True:
         rows = (
             client.table("shot_events")
             .select("id,game_id,team,event_type,situation_code")
             .eq("season", season)
+            .eq("game_type", game_type)
             .in_("event_type", list(CORSI_EVENT_TYPES))
             .gt("id", last_id)
             .order("id")
@@ -795,9 +780,6 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
             event_type = r.get("event_type")
             if not team or not game_id or not event_type:
                 continue
-            if nhl_game_type(game_id) != game_type:
-                excluded_rows += 1
-                continue
             game_totals[game_id][team][event_type] += 1
             if r.get("situation_code") == SITUATION_5V5:
                 game_totals_5v5[game_id][team][event_type] += 1
@@ -812,8 +794,7 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
             break
 
     print(
-        f"  Processed {total_rows} shot_events rows: {len(game_totals)} game_type {game_type} "
-        f"games, {excluded_rows} rows from other game types excluded"
+        f"  Processed {total_rows} shot_events rows: {len(game_totals)} game_type {game_type} games"
     )
 
     def _attempts(counts: dict, types: tuple) -> int:

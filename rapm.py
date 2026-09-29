@@ -35,19 +35,27 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.
 from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
-from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_game_type
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON
 
 # Games the regression pool draws on. shot_events, shift_events and
-# zone_starts keep each season's preseason games too, with no game type
-# column; until 2026-09 those came into the pool (and into the 150-minute
-# qualifying ice time), preseason call-ups and split squads included.
-# Playoffs stay in, as they always have.
+# zone_starts keep each season's preseason games too; until 2026-09 those
+# came into the pool (and into the 150-minute qualifying ice time),
+# preseason call-ups and split squads included. Playoffs stay in, as they
+# always have.
 RAPM_GAME_TYPES = (NHL_REGULAR_SEASON, NHL_PLAYOFFS)
 
 
-def rated_game(row) -> bool:
-    """Whether a shot/shift/zone-start row's game belongs in the pool."""
-    return nhl_game_type(row.get("game_id")) in RAPM_GAME_TYPES
+def fetch_rated(fetch, client, table, select, filters: dict) -> list:
+    """`fetch`'s rows of `table` from the pool's game types only.
+
+    One read per game type (`game_type = T`, not `in.(2,3)`), so a keyset
+    page is a straight walk of the (season, game_type, id) index in id
+    order -- see docs/game_type_column.sql. Rows come back grouped by game
+    type; nothing here depends on their order across games."""
+    rows = []
+    for game_type in RAPM_GAME_TYPES:
+        rows.extend(fetch(client, table, select, {**filters, "game_type": game_type}))
+    return rows
 
 
 # -- Score-state adjustment weights (Macdonald 2012) -----------
@@ -111,8 +119,10 @@ def fetch_all_keyset(client, table, select, filters: dict, page_size=999, cursor
     compounds with depth, and the failure mode is "one page times out, retry
     might work" rather than "guaranteed to get slower and eventually always
     fail" — but it is not a guaranteed fix without a supporting index. See
-    docs/session47_shift_events_index.sql for the recommended index; this
-    function does not depend on it existing, but reliability without it is
+    docs/session47_shift_events_index.sql for why the index has to be a
+    covering one, and docs/game_type_column.sql for the (season, game_type,
+    id) index that now serves these reads (via fetch_rated); this function
+    does not depend on it existing, but reliability without it is
     probabilistic, not certain.
 
     Not used for every fetch_all() call in this module — game_log has no
@@ -198,7 +208,8 @@ def run(season: int = NHL_SEASON):
     print("\n[1/5] Loading shot events...")
     all_shots = []
     for s in POOL_SEASONS:
-        rows = fetch_all_keyset(
+        rows = fetch_rated(
+            fetch_all_keyset,
             client,
             "shot_events",
             "game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code",
@@ -210,7 +221,6 @@ def run(season: int = NHL_SEASON):
             for r in rows
             if r.get("situation_code") == "1551"
             and r["event_type"] in ("goal", "shot-on-goal", "missed-shot", "blocked-shot")
-            and rated_game(r)
         ]
         all_shots.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shot events")
@@ -220,10 +230,13 @@ def run(season: int = NHL_SEASON):
     print("\n[2/5] Loading shift events...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all_keyset(
-            client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
+        rows = fetch_rated(
+            fetch_all_keyset,
+            client,
+            "shift_events",
+            "game_id,player_id,team,start_secs,end_secs",
+            {"season": s},
         )
-        rows = [r for r in rows if rated_game(r)]
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} shifts")
     print(f"  Total: {len(all_shifts):,} shifts")
@@ -268,10 +281,14 @@ def run(season: int = NHL_SEASON):
     # player_id -> {oz_starts, dz_starts, nz_starts} aggregated across pool seasons
     player_zone_starts = defaultdict(lambda: {"oz": 0, "dz": 0, "nz": 0})
     for s in POOL_SEASONS:
-        rows = fetch_all(
-            client, "zone_starts", "game_id,player_id,oz_starts,dz_starts,nz_starts", {"season": s}
+        rows = fetch_rated(
+            fetch_all,
+            client,
+            "zone_starts",
+            "game_id,player_id,oz_starts,dz_starts,nz_starts",
+            {"season": s},
         )
-        for r in filter(rated_game, rows):
+        for r in rows:
             pid = r["player_id"]
             player_zone_starts[pid]["oz"] += r["oz_starts"]
             player_zone_starts[pid]["dz"] += r["dz_starts"]

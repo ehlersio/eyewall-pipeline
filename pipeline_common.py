@@ -142,12 +142,13 @@ def nhl_game_type(game_id) -> int | None:
     type, then the game number -- 2026010010 is a 2026-27 preseason game,
     2026020001 the regular season's first, 2025030111 a playoff game.
 
-    shot_events, shift_events, zone_starts and game_xg carry `season` and
-    `game_id` but no game type, and every season holds its preseason and
-    playoff games alongside the regular season's. A season-scoped read of
-    any of them is therefore all three game types unless it filters on this.
-    That is how 61 preseason games became 2026-27's regular-season Corsi
-    (team_seasons, game_type 2) before a regular-season game had been played.
+    shot_events, shift_events, zone_starts and game_xg hold every season's
+    preseason and playoff games alongside the regular season's, and each has
+    a `game_type` column Postgres generates from game_id the same way
+    (docs/game_type_column.sql). Filter season-scoped reads of them on that
+    column in the query rather than decoding rows here: before it existed,
+    61 preseason games became 2026-27's regular-season Corsi (team_seasons,
+    game_type 2) before a regular-season game had been played.
     """
     try:
         gid = int(game_id)

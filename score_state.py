@@ -30,7 +30,7 @@ import sys
 from collections import defaultdict
 
 from db import NHL_SEASON, get_client
-from rapm import rated_game
+from rapm import fetch_rated
 
 PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
 SCORE_STATES = [-3, -2, -1, 0, 1, 2, 3]
@@ -73,7 +73,7 @@ def fetch_all_keyset(client, table, select, filters, page_size=999, cursor_col="
     verification against production showed individual pages can still hit
     a `57014` timeout even with keyset pagination — a large reliability
     improvement over OFFSET, not a guaranteed fix. See
-    docs/session47_shift_events_index.sql for the recommended index.
+    docs/game_type_column.sql for the index these reads now use.
     """
     rows, last_val = [], 0
     cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"
@@ -115,13 +115,14 @@ def build_goal_timeline(client, seasons):
             game_home[r["game_id"]] = r["home_team"]
 
     for s in seasons:
-        rows = fetch_all_keyset(
+        rows = fetch_rated(
+            fetch_all_keyset,
             client,
             "shot_events",
             "game_id,team,event_type,period,time_in_period",
             {"season": s, "event_type": "goal"},
         )
-        for r in filter(rated_game, rows):
+        for r in rows:
             period = r.get("period", 1) or 1
             tip = r.get("time_in_period", "0:00") or "0:00"
             parts = tip.split(":")
@@ -242,11 +243,14 @@ def run(season: int = NHL_SEASON):
     print("\n[2/3] Loading shifts...")
     all_shifts = []
     for s in POOL_SEASONS:
-        rows = fetch_all_keyset(
-            client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
-        )
         # Same games as rapm.py's pool -- preseason shifts are not rated.
-        rows = [r for r in rows if rated_game(r)]
+        rows = fetch_rated(
+            fetch_all_keyset,
+            client,
+            "shift_events",
+            "game_id,player_id,team,start_secs,end_secs",
+            {"season": s},
+        )
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shifts")
     print(f"  Total: {len(all_shifts):,} 5v5 shifts")
