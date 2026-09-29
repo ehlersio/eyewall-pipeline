@@ -953,6 +953,41 @@ def _run_substage(failures: list, label: str, fn, *args, **kwargs):
         failures.append(f"moneypuck.{label} ({type(e).__name__})")
 
 
+# WAR's replacement-level term: what a full regular season adds on top of
+# goals above average / GOALS_PER_WIN.
+REPLACEMENT_WAR = 0.5
+
+
+def war_from_rapm(row, ev_row, rapm, replacement: float = REPLACEMENT_WAR) -> float | None:
+    """RAPM-derived WAR (beta) for one MoneyPuck "all" row: the RAPM
+    coefficient (marginal xG/60 at 5v5) over the player's 5v5 hours, plus
+    penalties and finishing, in goals above average, then wins, plus the
+    replacement term. None under 6 minutes of 5v5 ice. The regular season's
+    replacement term is a full REPLACEMENT_WAR; a playoff one is scaled by
+    ice time (run_playoff_skaters)."""
+    it = n(ev_row.get("icetime", 0)) / 3600 if ev_row else 0.0  # hours of EV ice
+    if it < 0.1:
+        return None
+    pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
+    fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
+    ev_gaa = float(rapm) * it  # xG above average from EV RAPM
+    gaa = ev_gaa + pen * 0.3 + fin * 0.3
+    return round(gaa / GOALS_PER_WIN + replacement, 3)
+
+
+def full_season_ev_secs(all_map: dict, ev_map: dict, min_gp: int = 70) -> float | None:
+    """Average 5v5 ice time (seconds) of a skater who played a full regular
+    season -- at least `min_gp` games -- from the regular-season file.
+    Playoff WAR scales its replacement term by a player's playoff 5v5 time
+    over this. None when nobody has played `min_gp` games (mid-season)."""
+    secs = [
+        n(ev_map[pid].get("icetime", 0))
+        for pid, row in all_map.items()
+        if n(row.get("games_played", 0)) >= min_gp and pid in ev_map
+    ]
+    return sum(secs) / len(secs) if secs else None
+
+
 def skater_metric_fns(ev_map: dict, pp_map: dict, pk_map: dict) -> dict:
     """The per-player skater metrics, as functions of a MoneyPuck "all"
     situation row, reading the player's 5on5/5on4/4on5 rows from the maps.
@@ -1097,13 +1132,19 @@ def skater_rate_columns(pid, row, fns: dict, pp_map: dict, pk_map: dict) -> dict
     }
 
 
-def run_playoff_skaters(client, season: int):
+def run_playoff_skaters(client, season: int, full_season_secs: float | None = None):
     """MoneyPuck's playoff skaters file -> the game_type 3 player_seasons
-    rows: skater_rate_columns() only. Playoff WAR is its own model (pooled
-    across seasons, see the game-type split plan), and there are no playoff
-    percentiles -- the pool would be the few teams that went deep. Only
-    players nhl_stats.py already gave a playoff row are written. Skipped
-    until MoneyPuck publishes the season's playoff file."""
+    rows: skater_rate_columns() and playoff WAR. No playoff percentiles --
+    the pool would be the few teams that went deep. Only players
+    nhl_stats.py already gave a playoff row are written. Skipped until
+    MoneyPuck publishes the season's playoff file.
+
+    Playoff WAR is war_from_rapm() on the player's playoff RAPM (rapm.py's
+    run_playoffs, on the same game_type 3 row) with the replacement term
+    scaled by playoff 5v5 ice time: REPLACEMENT_WAR x (playoff 5v5 seconds /
+    full_season_secs, an average full regular season's). A player without a
+    playoff RAPM (under 60 playoff minutes in the pool), or a season with no
+    full-season reference, gets WAR NULL -- no xG-based fallback here."""
     print(f"\n--- Playoff skater analytics (MoneyPuck) — Season {season} ---")
     rows = fetch_season_csv(season, "skaters", NHL_PLAYOFFS)
     if rows is None:
@@ -1118,16 +1159,43 @@ def run_playoff_skaters(client, season: int):
     fns = skater_metric_fns(by_situation.get("5on5", {}), pp_map, pk_map)
 
     with_rows = season_player_ids(client, "player_seasons", season, NHL_PLAYOFFS)
+    playoff_rapm = {
+        r["player_id"]: r["rapm"]
+        for r in select_all(
+            lambda: (
+                client.table("player_seasons")
+                .select("player_id,rapm")
+                .eq("season", season)
+                .eq("game_type", NHL_PLAYOFFS)
+                .not_.is_("rapm", "null")
+            ),
+            order="player_id",
+        )
+    }
+    if not full_season_secs:
+        print("  No full-season 5v5 reference -- playoff WAR left NULL")
+
+    def playoff_war(pid, row):
+        rapm = playoff_rapm.get(int(pid))
+        ev_row = ev_map.get(pid)
+        if rapm is None or not ev_row or not full_season_secs:
+            return None
+        share = n(ev_row.get("icetime", 0)) / full_season_secs
+        return war_from_rapm(row, ev_row, rapm, REPLACEMENT_WAR * share)
+
+    ev_map = by_situation.get("5on5", {})
     updates = [
         {
             "player_id": int(pid),
             "season": season,
             "game_type": NHL_PLAYOFFS,
             **skater_rate_columns(pid, row, fns, pp_map, pk_map),
+            "war": playoff_war(pid, row),
         }
         for pid, row in all_map.items()
         if int(pid) in with_rows
     ]
+    print(f"  Playoff WAR for {sum(u['war'] is not None for u in updates)} players")
     skipped = len(all_map) - len(updates)
     print(
         f"  Upserting {len(updates)} playoff skater rows"
@@ -1359,25 +1427,21 @@ def run(season: int = NHL_SEASON) -> list[str]:
         if it < 0.1:
             return None
 
-        pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
-        fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
-
         rapm = rapm_map.get(int(row["playerId"]))
         if rapm is not None:
-            # RAPM-derived WAR (beta):
-            # Convert RAPM coefficient (marginal xG/60) to goals above average
-            # then to wins. PP/PK/finishing/penalty components unchanged.
-            ev_gaa = float(rapm) * it  # xG above average from EV RAPM
-        else:
-            # Fallback: xGoals-above-average method (original approach)
-            avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
-            avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
-            xgf60 = per60(ev.get("OnIce_F_xGoals", 0), n(ev["icetime"]))
-            xga60 = per60(ev.get("OnIce_A_xGoals", 0), n(ev["icetime"]))
-            ev_gaa = (xgf60 - avg_xgf) * it + (avg_xga - xga60) * it
+            return war_from_rapm(row, ev, rapm)
+
+        # Fallback: xGoals-above-average method (original approach)
+        pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
+        fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
+        avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
+        avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
+        xgf60 = per60(ev.get("OnIce_F_xGoals", 0), n(ev["icetime"]))
+        xga60 = per60(ev.get("OnIce_A_xGoals", 0), n(ev["icetime"]))
+        ev_gaa = (xgf60 - avg_xgf) * it + (avg_xga - xga60) * it
 
         gaa = ev_gaa + pen * 0.3 + fin * 0.3
-        war = gaa / GOALS_PER_WIN + 0.5
+        war = gaa / GOALS_PER_WIN + REPLACEMENT_WAR
         return round(war, 3)
 
     # ── Compute and upsert analytics for all NHL players ──────────
@@ -1510,7 +1574,14 @@ def run(season: int = NHL_SEASON) -> list[str]:
     # Playoffs: the same rollups for game_type 3. Each writes only rows
     # nhl_stats.py made for the playoffs, so before a season's playoffs
     # (or for a team that missed them) there is nothing to write.
-    _run_substage(failures, "playoff_skaters", run_playoff_skaters, client, season)
+    _run_substage(
+        failures,
+        "playoff_skaters",
+        run_playoff_skaters,
+        client,
+        season,
+        full_season_ev_secs(all_map, ev_map),
+    )
     _run_substage(failures, "playoff_goalies", run_goalies, client, season, NHL_PLAYOFFS)
     _run_substage(failures, "playoff_goalie_qs", run_goalie_qs, client, season, NHL_PLAYOFFS)
     _run_substage(

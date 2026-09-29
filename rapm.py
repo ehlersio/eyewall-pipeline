@@ -35,7 +35,7 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.
 from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
-from pipeline_common import NHL_REGULAR_SEASON, select_all
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, select_all
 
 # Games the regression pool draws on: the regular season only. RAPM (and
 # the WAR built on it) is written to the game_type 2 rows, so it's a
@@ -46,8 +46,21 @@ from pipeline_common import NHL_REGULAR_SEASON, select_all
 # until the game-type split's step 3. Playoff RAPM is its own model.
 RAPM_GAME_TYPES = (NHL_REGULAR_SEASON,)
 
+# Ice time in the pool a player needs to get a regular-season RAPM: 150 min.
+MIN_SECS = 9000
 
-def fetch_rated(fetch, client, table, select, filters: dict) -> list:
+# Playoff RAPM (run_playoffs): the same regression over the pool seasons'
+# playoff games, with each player's regular-season RAPM as the prior -- a
+# small playoff sample leaves a player near their regular-season number, a
+# deep run moves them. 60 minutes of playoff ice time to get one; below that
+# it would just be the regular-season value relabeled.
+PLAYOFF_MIN_SECS = 3600
+
+RAPM_ALPHA = 2500  # ridge penalty, shared by both fits
+SHOTS_PER_60 = 25.0  # model units (xG per shot) -> per 60 minutes
+
+
+def fetch_rated(fetch, client, table, select, filters: dict, game_types=None) -> list:
     """`fetch`'s rows of `table` from the pool's game types only.
 
     One read per game type (`game_type = T`, never an `in.(...)` list), so a keyset
@@ -55,7 +68,7 @@ def fetch_rated(fetch, client, table, select, filters: dict) -> list:
     order -- see docs/game_type_column.sql. Rows come back grouped by game
     type; nothing here depends on their order across games."""
     rows = []
-    for game_type in RAPM_GAME_TYPES:
+    for game_type in game_types or RAPM_GAME_TYPES:
         rows.extend(fetch(client, table, select, {**filters, "game_type": game_type}))
     return rows
 
@@ -181,11 +194,19 @@ def prior_season(season: int) -> int:
     return (start_year - 1) * 10000 + (end_year - 1)  # 20242025
 
 
-def write_rapm(client, season: int, rapm_by_pid: dict) -> dict:
-    """Write this run's RAPM to the season's game_type 2 player_seasons rows
-    and clear it on any row this run didn't rate. Returns player_id -> team
-    for the season's rows."""
-    print(f"\n  Upserting RAPM to player_seasons (season {season})...")
+def write_rapm(
+    client,
+    season: int,
+    rapm_by_pid: dict,
+    minutes_by_pid: dict | None = None,
+    game_type: int = NHL_REGULAR_SEASON,
+) -> dict:
+    """Write this run's RAPM (and each player's ice time in the pool,
+    rapm_toi_min) to the season's `game_type` player_seasons rows, and clear
+    both on any row this run didn't rate. Returns player_id -> team for the
+    season's rows."""
+    minutes_by_pid = minutes_by_pid or {}
+    print(f"\n  Upserting RAPM to player_seasons (season {season}, game_type {game_type})...")
     updates = 0
     errors = 0
 
@@ -197,7 +218,7 @@ def write_rapm(client, season: int, rapm_by_pid: dict) -> dict:
             client.table("player_seasons")
             .select("player_id,team,rapm")
             .eq("season", season)
-            .eq("game_type", NHL_REGULAR_SEASON)
+            .eq("game_type", game_type)
         ),
         order="player_id",
     )
@@ -207,9 +228,9 @@ def write_rapm(client, season: int, rapm_by_pid: dict) -> dict:
         if not season_map.get(pid):
             continue  # player not on current season roster
         try:
-            client.table("player_seasons").update({"rapm": rapm_val}).eq("player_id", pid).eq(
-                "season", season
-            ).eq("game_type", NHL_REGULAR_SEASON).execute()
+            client.table("player_seasons").update(
+                {"rapm": rapm_val, "rapm_toi_min": minutes_by_pid.get(pid)}
+            ).eq("player_id", pid).eq("season", season).eq("game_type", game_type).execute()
             updates += 1
         except Exception:
             errors += 1
@@ -227,38 +248,26 @@ def write_rapm(client, season: int, rapm_by_pid: dict) -> dict:
         if r.get("rapm") is not None and r["player_id"] not in rapm_by_pid
     ]
     for pid in stale:
-        client.table("player_seasons").update({"rapm": None}).eq("player_id", pid).eq(
-            "season", season
-        ).eq("game_type", NHL_REGULAR_SEASON).execute()
+        client.table("player_seasons").update({"rapm": None, "rapm_toi_min": None}).eq(
+            "player_id", pid
+        ).eq("season", season).eq("game_type", game_type).execute()
     print(f"  Cleared stale RAPM on {len(stale)} players not rated this run")
     return season_map
 
 
-def run(season: int = NHL_SEASON):
-    """Returns an explicit status string: "ok" on success, or one of the
-    "aborted_*" sentinels below on early exit. player_seasons.rapm is
-    updated in place per-player (never cleared first), so a mid-run abort
-    leaves prior values untouched rather than empty — callers must check
-    this return value directly rather than inferring success from whether
-    player_seasons.rapm is populated (stale != fresh)."""
-    try:
-        import numpy as np
-        from scipy.sparse import lil_matrix
-        from sklearn.linear_model import Ridge
-    except ImportError:
-        print("  ERROR Missing dependencies. Run:")
-        print("    pip install scikit-learn scipy --break-system-packages")
-        return "aborted_missing_deps"
+def build_regression(client, pool_seasons, game_types, min_secs):
+    """The RAPM regression's design matrix over `pool_seasons`' games of
+    `game_types`: one row per 5v5 shot attempt, one column per player with
+    at least `min_secs` of ice time in those games. Returns (X, y,
+    player_idx, player_icetime), or None when there are too few shots to
+    fit. Shared by the regular-season fit and the playoff one (run_playoffs).
 
-    client = get_client()
-    print(f"\n=== RAPM Pipeline -- Season {season} (3-year pool) ===")
+    Score-state weights always come from player_score_state_dist (built
+    from regular-season games); zone starts come from `game_types`' own
+    games."""
+    from scipy.sparse import lil_matrix
 
-    # -- Seasons to include in regression pool -----------------
-    s1 = prior_season(prior_season(season))  # 2 years ago
-    s2 = prior_season(season)  # 1 year ago
-    POOL_SEASONS = [s for s in [s1, s2, season] if s >= 20222023]
-    print(f"  Pool seasons: {POOL_SEASONS}")
-
+    POOL_SEASONS = pool_seasons
     # -- 1. Load shot events (5v5 only, all league teams) --------
     print("\n[1/5] Loading shot events...")
     all_shots = []
@@ -269,6 +278,7 @@ def run(season: int = NHL_SEASON):
             "shot_events",
             "game_id,player_id,team,x,y,event_type,period,time_in_period,situation_code",
             {"season": s},
+            game_types=game_types,
         )
         # Filter to 5v5 only — situation_code='1551' = both goalies, 5 skaters each
         rows = [
@@ -291,6 +301,7 @@ def run(season: int = NHL_SEASON):
             "shift_events",
             "game_id,player_id,team,start_secs,end_secs",
             {"season": s},
+            game_types=game_types,
         )
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} shifts")
@@ -342,6 +353,7 @@ def run(season: int = NHL_SEASON):
             "zone_starts",
             "game_id,player_id,oz_starts,dz_starts,nz_starts",
             {"season": s},
+            game_types=game_types,
         )
         for r in rows:
             pid = r["player_id"]
@@ -414,13 +426,12 @@ def run(season: int = NHL_SEASON):
         if teams:
             game_ref_team[gid] = sorted(teams)[0]  # alphabetically first = reference
 
-    # Build player index (only players with >= 9000 seconds = 150 min)
-    MIN_SECS = 9000
-    qualified = {pid for pid, secs in player_icetime.items() if secs >= MIN_SECS}
+    # Build player index (only players with >= min_secs in the pool)
+    qualified = {pid for pid, secs in player_icetime.items() if secs >= min_secs}
     player_ids = sorted(qualified)
     player_idx = {pid: i for i, pid in enumerate(player_ids)}
     n_players = len(player_ids)
-    print(f"  Qualified players (>=150 min): {n_players}")
+    print(f"  Qualified players (>={min_secs // 60} min): {n_players}")
 
     SHOT_TYPES = {"goal", "shot-on-goal", "missed-shot", "blocked-shot"}
 
@@ -511,7 +522,7 @@ def run(season: int = NHL_SEASON):
 
     if included < 1000:
         print("  ERROR Too few events for regression -- aborting")
-        return "aborted_insufficient_data"
+        return None
 
     # Build sparse matrix
     import numpy as np
@@ -527,13 +538,45 @@ def run(season: int = NHL_SEASON):
     X = X.tocsr()
     print(f"  Matrix shape: {X.shape}, non-zero: {X.nnz:,}")
 
+    return X, y, player_idx, player_icetime
+
+
+def run(season: int = NHL_SEASON):
+    """Returns an explicit status string: "ok" on success, or one of the
+    "aborted_*" sentinels below on early exit. player_seasons.rapm is
+    updated in place per-player (never cleared first), so a mid-run abort
+    leaves prior values untouched rather than empty — callers must check
+    this return value directly rather than inferring success from whether
+    player_seasons.rapm is populated (stale != fresh)."""
+    try:
+        import numpy as np  # noqa: F401 -- availability check; used in build_regression
+        from scipy.sparse import lil_matrix  # noqa: F401 -- same
+        from sklearn.linear_model import Ridge
+    except ImportError:
+        print("  ERROR Missing dependencies. Run:")
+        print("    pip install scikit-learn scipy --break-system-packages")
+        return "aborted_missing_deps"
+
+    client = get_client()
+    print(f"\n=== RAPM Pipeline -- Season {season} (3-year pool) ===")
+
+    # -- Seasons to include in regression pool -----------------
+    s1 = prior_season(prior_season(season))  # 2 years ago
+    s2 = prior_season(season)  # 1 year ago
+    POOL_SEASONS = [s for s in [s1, s2, season] if s >= 20222023]
+    print(f"  Pool seasons: {POOL_SEASONS}")
+
+    built = build_regression(client, POOL_SEASONS, RAPM_GAME_TYPES, MIN_SECS)
+    if built is None:
+        return "aborted_insufficient_data"
+    X, y, player_idx, player_icetime = built
+
     # -- 5. Fit ridge regression --------------------------------
-    print("\n[5/5] Fitting ridge regression (alpha=2500)...")
-    model = Ridge(alpha=2500, fit_intercept=True, max_iter=10000)
+    print(f"\n[5/5] Fitting ridge regression (alpha={RAPM_ALPHA})...")
+    model = Ridge(alpha=RAPM_ALPHA, fit_intercept=True, max_iter=10000)
     model.fit(X, y)
 
     # Scale to per-60 minutes
-    SHOTS_PER_60 = 25.0
     coefs = model.coef_ * SHOTS_PER_60
 
     # Mean-center so distribution is relative performance (mean = 0)
@@ -548,7 +591,8 @@ def run(season: int = NHL_SEASON):
 
     # -- 6. Upsert rapm to player_seasons ----------------------
     rapm_by_pid = {pid: round(float(coefs[idx]), 3) for pid, idx in player_idx.items()}
-    season_map = write_rapm(client, season, rapm_by_pid)
+    minutes_by_pid = {pid: round(player_icetime[pid] / 60, 1) for pid in player_idx}
+    season_map = write_rapm(client, season, rapm_by_pid, minutes_by_pid)
 
     # Print top/bottom 5 for the primary team as a sanity check
     primary_players = [
@@ -573,7 +617,66 @@ def run(season: int = NHL_SEASON):
         for pid, val in bottom5:
             print(f"    {names.get(pid, pid)}: {val:+.3f}")
 
+    playoff_status = run_playoffs(client, season, POOL_SEASONS, rapm_by_pid)
+    if playoff_status != "ok":
+        # Surfaced as a bad status in run.py's summary; the regular-season
+        # values above are already written.
+        print(f"\n!! Playoff RAPM: {playoff_status}")
+        return f"playoffs_{playoff_status}"
+
     print("\nDONE RAPM pipeline complete")
+    return "ok"
+
+
+def playoff_rapm(X, y, player_idx, regular_rapm: dict) -> dict:
+    """Playoff RAPM: the ridge fit over the playoff design matrix, shrunk
+    toward each player's regular-season RAPM instead of toward zero.
+
+    Fitting the residual y - X @ prior with an ordinary ridge penalty is a
+    ridge regression whose prior mean is `prior` (each player's
+    regular-season RAPM in model units): the penalty pulls a player toward
+    their regular-season number, and the playoff shots move them away from
+    it only as far as they support. A player with no regular-season RAPM (under
+    150 regular-season minutes) starts at 0, league average -- the same
+    prior the regular-season fit uses for everyone. Returns player_id ->
+    RAPM per 60, on the regular season's scale.
+    """
+    import numpy as np
+    from sklearn.linear_model import Ridge
+
+    order = sorted(player_idx, key=player_idx.get)
+    prior = np.array([regular_rapm.get(pid, 0.0) / SHOTS_PER_60 for pid in order])
+    model = Ridge(alpha=RAPM_ALPHA, fit_intercept=True, max_iter=10000)
+    model.fit(X, y - X @ prior)
+    coefs = (prior + model.coef_) * SHOTS_PER_60
+    return {pid: round(float(coefs[player_idx[pid]]), 3) for pid in order}
+
+
+def run_playoffs(client, season: int, pool_seasons: list, regular_rapm: dict) -> str:
+    """Playoff RAPM for `season`'s game_type 3 rows: the pool seasons'
+    playoff games (the same three seasons as the regular-season fit),
+    shrunk toward regular_rapm (this run's regular-season values). Players
+    need PLAYOFF_MIN_SECS of playoff ice time in the pool. Returns "ok", or
+    "aborted_insufficient_data" when the pool's playoffs are too thin to fit
+    (a season whose pool has no playoffs yet is "ok": nothing to write)."""
+    print(f"\n=== Playoff RAPM -- Season {season} (playoffs of {pool_seasons}) ===")
+    built = build_regression(client, pool_seasons, (NHL_PLAYOFFS,), PLAYOFF_MIN_SECS)
+    if built is None:
+        return "aborted_insufficient_data"
+    X, y, player_idx, player_icetime = built
+    if not player_idx:
+        print("  No player has playoff ice time in the pool -- nothing to write")
+        return "ok"
+
+    print(f"\n  Fitting playoff ridge (alpha={RAPM_ALPHA}) toward regular-season RAPM...")
+    rapm_by_pid = playoff_rapm(X, y, player_idx, regular_rapm)
+    moved = [abs(v - regular_rapm.get(pid, 0.0)) for pid, v in rapm_by_pid.items()]
+    print(
+        f"  {len(rapm_by_pid)} players; median |playoff - regular| "
+        f"{sorted(moved)[len(moved) // 2]:.4f}, max {max(moved):.4f}"
+    )
+    minutes_by_pid = {pid: round(player_icetime[pid] / 60, 1) for pid in player_idx}
+    write_rapm(client, season, rapm_by_pid, minutes_by_pid, game_type=NHL_PLAYOFFS)
     return "ok"
 
 
