@@ -103,9 +103,7 @@ notify pgrst, 'reload schema';
 -- order by 1, 2;
 
 -- ============================================================================
--- Step 2: the indexes. Also before merging. One statement per run --
--- CONCURRENTLY can't share a submission or run in a transaction, and it
--- builds without blocking reads or writes.
+-- Step 2: the indexes. Also before merging. Run when the nightly isn't.
 -- ============================================================================
 -- Readers page with `season = S and game_type = T and id > N order by id`
 -- (keyset pagination). An index on (season, <game type expression>, id)
@@ -118,21 +116,33 @@ notify pgrst, 'reload schema';
 -- ~9s a page, which timed out rapm's shift load. game_id is in the INCLUDE
 -- list, which is what lets an Index Only Scan evaluate the expression.
 --
--- If a build fails partway (disk again), it leaves an INVALID index behind:
--- `drop index concurrently if exists <name>;` before retrying.
+-- Plain CREATE INDEX, not CONCURRENTLY: the Supabase SQL editor wraps a
+-- multi-statement run in a transaction, which CONCURRENTLY refuses
+-- (`25001`, 2026-09-29). A plain build lets reads through and only holds
+-- writes to that table until it finishes. The nightly pipeline is the only
+-- writer of these four tables (the poller only reads them), so run this
+-- outside the nightly and nothing waits. The timeout is raised for the
+-- shift_events build.
 
-create index concurrently if not exists shift_events_season_type_id_covering_idx
+set statement_timeout = '30min';
+
+create index if not exists shift_events_season_type_id_covering_idx
   on public.shift_events (season, (((game_id / 10000) % 100)::smallint), id)
   include (game_id, player_id, team, start_secs, end_secs);
 
-create index concurrently if not exists shot_events_season_type_id_idx
+create index if not exists shot_events_season_type_id_idx
   on public.shot_events (season, (((game_id / 10000) % 100)::smallint), id);
 
-create index concurrently if not exists zone_starts_season_type_id_idx
+create index if not exists zone_starts_season_type_id_idx
   on public.zone_starts (season, (((game_id / 10000) % 100)::smallint), id);
 
-create index concurrently if not exists game_xg_season_type_idx
+create index if not exists game_xg_season_type_idx
   on public.game_xg (season, (((game_id / 10000) % 100)::smallint));
+
+analyze public.shift_events;
+analyze public.shot_events;
+analyze public.zone_starts;
+analyze public.game_xg;
 
 -- Check the shift_events plan uses the new index (expect
 -- "Index Only Scan using shift_events_season_type_id_covering_idx" and a
@@ -153,4 +163,4 @@ create index concurrently if not exists game_xg_season_type_idx
 -- index is only write overhead and disk. Leave it until then: before the
 -- merge, rapm.py's season-only shift load depends on it.
 --
--- drop index concurrently if exists public.shift_events_season_id_covering_idx;
+-- drop index if exists public.shift_events_season_id_covering_idx;
