@@ -31,6 +31,17 @@ alter table public.line_combinations
   add constraint line_combinations_source_check
   check (source in ('current', 'prior_season', 'regular_season'));
 
+-- line_combinations also has a unique index on (season, team, unit_type,
+-- rank), created outside this repo's SQL files. With playoff units stored
+-- alongside the regular season's, a team's playoff Line 1 collides with
+-- its regular-season Line 1 (23505, found rebuilding 2023-24..2025-26 on
+-- 2026-09-29), so game_type joins the key. Dropped as a constraint or as a
+-- plain index, whichever it is.
+alter table public.line_combinations drop constraint if exists line_combinations_unit_idx;
+drop index if exists public.line_combinations_unit_idx;
+create unique index line_combinations_unit_idx
+  on public.line_combinations (season, team, game_type, unit_type, rank);
+
 alter table public.special_teams_units
   add column if not exists game_type smallint not null default 2
   check (game_type in (2, 3));
