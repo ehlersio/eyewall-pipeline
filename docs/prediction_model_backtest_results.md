@@ -6,6 +6,22 @@
 
 ---
 
+## Re-run 2026-09-29 (after the RAPM sign fix and the game-type split)
+
+The numbers further down predate two changes to the RAPM this backtest rebuilds: #168 (each shot's row was signed from the alphabetically-first team, biasing every coefficient) and the game-type split (preseason games out of the pool in #170/#172, playoff games out in #175). Re-run twice on the same data, 2,298 full-pool games:
+
+| Full pool, all games | Brier ↓ | Log loss ↓ | Accuracy ↑ |
+|---|---|---|---|
+| RAPM/Log5, pool = regular season + playoffs | 0.2846 | 0.7797 | 0.506 |
+| RAPM/Log5, pool = regular season only (#175) | 0.2845 | 0.7792 | 0.507 |
+| Standings scorecard | 0.3232 | 2.5078 | 0.563 |
+
+The regular-season-only pool is marginally better on Brier and log loss in every segment: early season (n=92), mid/late, and the degraded pool (n=2,174). Accuracy moves by a game or two either way. So dropping playoff games from RAPM costs nothing here; the reason for it is that RAPM and WAR are written as regular-season numbers.
+
+Both models are still worse than predicting 50% for every game, which scores Brier 0.25 and log loss 0.693. RAPM/Log5 is now better than the scorecard on both, but picks winners at chance. The conclusions in §4 stand.
+
+---
+
 ## Data-quality finding (discovered running this, not previously known)
 
 **`game_log` has zero rows for season 2022-23** (confirmed directly: `count=0` for both `game_type=2` and `3`), even though `shot_events`/`shift_events` were backfilled for that season per `RAPM_SPEC.md`. Consequence:
