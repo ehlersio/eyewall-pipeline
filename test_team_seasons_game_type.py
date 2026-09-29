@@ -406,8 +406,50 @@ class TestPlayoffPlayerAnalytics:
         assert row["game_type"] == 3
         assert row["ev_off_pct"] == 0.55
         assert row["game_score"] == 4.2
-        assert "war" not in row
+        assert row["war"] is None  # no playoff RAPM stored for this player
         assert not [k for k in row if k.startswith("pct_")]
+
+    def test_playoff_war_scales_the_replacement_term_by_ice_time(self, monkeypatch):
+        """Playoff WAR = war_from_rapm() on the playoff RAPM, with the +0.5
+        replacement term scaled by playoff 5v5 time over a full season's."""
+        files = {
+            (SEASON, "skaters", 3): [mp_skater(8478427, sit) for sit in ("all", "5on5")],
+        }
+        monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: files.get(k))
+        client = FakeClient(
+            player_seasons=[
+                {"player_id": 8478427, "season": SEASON, "game_type": 3, "rapm": 0.05},
+            ]
+        )
+        # 12,000 s of playoff 5v5 against a 60,000 s full season: a fifth of
+        # the replacement term.
+        moneypuck.run_playoff_skaters(client, SEASON, full_season_secs=60000)
+
+        (row,) = client.tables["player_seasons"].upserts
+        hours = 12000 / 3600
+        gaa = 0.05 * hours + (4 * moneypuck.PEN_MIN_VALUE * -1) * 0.3 + (5 - 3.5) * 0.3
+        assert row["war"] == round(gaa / moneypuck.GOALS_PER_WIN + 0.5 * 0.2, 3)
+
+    def test_no_full_season_reference_leaves_playoff_war_null(self, monkeypatch):
+        files = {(SEASON, "skaters", 3): [mp_skater(8478427, s) for s in ("all", "5on5")]}
+        monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: files.get(k))
+        client = FakeClient(
+            player_seasons=[{"player_id": 8478427, "season": SEASON, "game_type": 3, "rapm": 0.05}]
+        )
+        moneypuck.run_playoff_skaters(client, SEASON, full_season_secs=None)
+        assert client.tables["player_seasons"].upserts[0]["war"] is None
+
+
+class TestFullSeasonReference:
+    def test_averages_skaters_with_a_full_season(self):
+        all_map = {
+            "1": {"games_played": "82"},
+            "2": {"games_played": "70"},
+            "3": {"games_played": "12"},
+        }
+        ev_map = {"1": {"icetime": "70000"}, "2": {"icetime": "50000"}, "3": {"icetime": "9000"}}
+        assert moneypuck.full_season_ev_secs(all_map, ev_map) == 60000
+        assert moneypuck.full_season_ev_secs({"3": {"games_played": "12"}}, ev_map) is None
 
     def test_no_playoff_file_yet_writes_nothing(self, monkeypatch):
         monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: None)

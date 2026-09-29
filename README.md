@@ -167,6 +167,13 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 
 The pool is regular-season games only: preseason and playoff games are left out of the shots, the shifts (and so the 150-minute qualifying ice time) and the zone starts, and `score_state.py` drops them the same way. RAPM, and the WAR `moneypuck.py` builds on it, are written to the `game_type` 2 rows, so they're regular-season numbers; playoff RAPM/WAR is a separate model. Until 2026-09 preseason games were in the pool, and playoff games were in until step 3 of the game-type split, since `shot_events`/`shift_events`/`zone_starts` keep a season's preseason and playoff games. Each read now filters on those tables' `game_type` computed field, one game type per read (`rapm.fetch_rated()`), so a keyset page stays on the `(season, game_type, id)` index.
 
+**Playoff RAPM and WAR (2026-09):** after the regular-season fit, `rapm.run()` fits the same regression (`build_regression()`) over the pool seasons' playoff games and writes it to the `game_type` 3 rows (`run_playoffs()`).
+- **Shrunk toward the regular season:** the ridge is fit on the residual `y - X @ prior`, where `prior` is each player's regular-season RAPM from the same run (`playoff_rapm()`). That is a ridge regression whose prior mean is the regular-season value rather than zero. A small playoff sample leaves a player near their regular-season number; a deep run moves them.
+- **Floor:** 60 minutes of playoff ice time in the pool (`PLAYOFF_MIN_SECS`). Same alpha (`RAPM_ALPHA`) as the regular season.
+- **Sample size:** on 2025-26's pool, 549 players qualify; the median playoff value sits 0.008 xG/60 from the regular-season one, and the largest move is 0.043.
+- **`rapm_toi_min`** (`docs/rapm_toi_min.sql`) holds the ice time behind each row's RAPM, for the regular-season and playoff rows alike.
+- **Playoff WAR** (`moneypuck.run_playoff_skaters()`) is `war_from_rapm()` on the playoff RAPM. The +0.5 replacement term (`REPLACEMENT_WAR`) is scaled by the player's playoff 5v5 ice time over an average full regular season's (`full_season_ev_secs()`: skaters with 70+ GP). A player without a playoff RAPM gets playoff WAR NULL; there's no xG-based fallback.
+
 ### `nhl_shot_xg.py` (2026-09)
 The NHL shot-quality proxy -- one attempt's expected goals from where it was taken -- shared by `rapm.py` (the outcome it regresses) and `line_combinations.py` (the Scouting tab's line xGF%). MoneyPuck's per-shot xG isn't stored in `shot_events`, so distance to the net stands in: high (<= 15 ft) 0.094, medium (<= 30 ft) 0.061, low 0.030.
 
