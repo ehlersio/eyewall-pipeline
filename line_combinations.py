@@ -79,7 +79,7 @@ from db import NHL_SEASON, get_client
 # A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
 # rapm.py (this file used to keep its own copy).
 from nhl_shot_xg import shot_xg
-from pipeline_common import FetchError
+from pipeline_common import NHL_PRESEASON, FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
@@ -550,12 +550,25 @@ def compute_current_season_rows(client, team, season):
     # game_log has one row per team per game, so filtering by team here gives
     # exactly the games this team played (home or away) — not shot_events.car_game,
     # which only ever flags CAR's own games (see module docstring).
+    # Preseason games (game_type 1) share the new season's `season` value but
+    # are exhibitions dressing prospects and camp invites -- 2026-27's first
+    # run wrote CAR's "Line 1" as three prospects from September games. Only
+    # regular-season and playoff games count toward a team's real units.
     game_rows = fetch_all(
-        client, "game_log", "game_id", {"season": season, "team": team}, cursor_col="game_id"
+        client,
+        "game_log",
+        "game_id,game_type",
+        {"season": season, "team": team},
+        cursor_col="game_id",
     )
-    game_ids = [g["game_id"] for g in game_rows]
+    game_ids = [g["game_id"] for g in game_rows if g.get("game_type") != NHL_PRESEASON]
     if not game_ids:
-        print("  no games in game_log yet — leaving this to the prior-season blend")
+        print("  no regular-season games in game_log yet — leaving this to the prior-season blend")
+        return []
+    real_games = set(game_ids)
+    raw_shifts = [s for s in raw_shifts if s["game_id"] in real_games]
+    if not raw_shifts:
+        print("  no regular-season shift data yet — leaving this to the prior-season blend")
         return []
 
     raw_shots = fetch_all(
