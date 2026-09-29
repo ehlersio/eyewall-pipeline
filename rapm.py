@@ -21,6 +21,7 @@ Scope:
   - 5v5 only (situationCode 1551 = both teams at full strength)
   - Minimum 150 minutes EV icetime across 3-season pool for display
   - League-wide shots and shifts (all 32 teams)
+  - Regular-season and playoff games; preseason games excluded (RAPM_GAME_TYPES)
 """
 
 from collections import defaultdict
@@ -34,6 +35,20 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.
 from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_game_type
+
+# Games the regression pool draws on. shot_events, shift_events and
+# zone_starts keep each season's preseason games too, with no game type
+# column; until 2026-09 those came into the pool (and into the 150-minute
+# qualifying ice time), preseason call-ups and split squads included.
+# Playoffs stay in, as they always have.
+RAPM_GAME_TYPES = (NHL_REGULAR_SEASON, NHL_PLAYOFFS)
+
+
+def rated_game(row) -> bool:
+    """Whether a shot/shift/zone-start row's game belongs in the pool."""
+    return nhl_game_type(row.get("game_id")) in RAPM_GAME_TYPES
+
 
 # -- Score-state adjustment weights (Macdonald 2012) -----------
 # Teams trailing outshooot; teams leading turtle.
@@ -195,6 +210,7 @@ def run(season: int = NHL_SEASON):
             for r in rows
             if r.get("situation_code") == "1551"
             and r["event_type"] in ("goal", "shot-on-goal", "missed-shot", "blocked-shot")
+            and rated_game(r)
         ]
         all_shots.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shot events")
@@ -207,6 +223,7 @@ def run(season: int = NHL_SEASON):
         rows = fetch_all_keyset(
             client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
         )
+        rows = [r for r in rows if rated_game(r)]
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} shifts")
     print(f"  Total: {len(all_shifts):,} shifts")
@@ -252,9 +269,9 @@ def run(season: int = NHL_SEASON):
     player_zone_starts = defaultdict(lambda: {"oz": 0, "dz": 0, "nz": 0})
     for s in POOL_SEASONS:
         rows = fetch_all(
-            client, "zone_starts", "player_id,oz_starts,dz_starts,nz_starts", {"season": s}
+            client, "zone_starts", "game_id,player_id,oz_starts,dz_starts,nz_starts", {"season": s}
         )
-        for r in rows:
+        for r in filter(rated_game, rows):
             pid = r["player_id"]
             player_zone_starts[pid]["oz"] += r["oz_starts"]
             player_zone_starts[pid]["dz"] += r["dz_starts"]

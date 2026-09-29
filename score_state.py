@@ -30,6 +30,7 @@ import sys
 from collections import defaultdict
 
 from db import NHL_SEASON, get_client
+from rapm import rated_game
 
 PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
 SCORE_STATES = [-3, -2, -1, 0, 1, 2, 3]
@@ -120,7 +121,7 @@ def build_goal_timeline(client, seasons):
             "game_id,team,event_type,period,time_in_period",
             {"season": s, "event_type": "goal"},
         )
-        for r in rows:
+        for r in filter(rated_game, rows):
             period = r.get("period", 1) or 1
             tip = r.get("time_in_period", "0:00") or "0:00"
             parts = tip.split(":")
@@ -244,6 +245,8 @@ def run(season: int = NHL_SEASON):
         rows = fetch_all_keyset(
             client, "shift_events", "game_id,player_id,team,start_secs,end_secs", {"season": s}
         )
+        # Same games as rapm.py's pool -- preseason shifts are not rated.
+        rows = [r for r in rows if rated_game(r)]
         all_shifts.extend(rows)
         print(f"  Season {s}: {len(rows):,} 5v5 shifts")
     print(f"  Total: {len(all_shifts):,} 5v5 shifts")

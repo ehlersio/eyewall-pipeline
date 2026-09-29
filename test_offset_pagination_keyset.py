@@ -96,18 +96,22 @@ class TestShotEventsGetAlreadyProcessed:
 
 
 class TestMoneypuckGoalieQS:
-    def test_paginates_shot_events_past_page_boundary(self):
-        # 1200 shot-on-goal rows across 2 goalies -- exceeds one 999-row page
+    def test_paginates_shot_events_past_page_boundary(self, monkeypatch):
+        # 1200 shot-on-goal rows across 2 goalies -- exceeds one 999-row page.
+        # A real regular-season game id: QS% counts only game_type 2 games,
+        # read off the id.
         rows = [
             {
                 "id": i,
                 "goalie_id": 1 if i % 2 == 0 else 2,
-                "game_id": 500,
+                "game_id": 2025020500,
                 "event_type": "shot-on-goal",
             }
             for i in range(1, 1201)
         ]
         client = _paged_client({"shot_events": rows})
+        # No goalie_seasons rows with a stale QS% to clear.
+        monkeypatch.setattr(moneypuck, "select_all", lambda *_a, **_k: [])
 
         # run_goalie_qs prints and upserts -- just confirm it doesn't crash
         # and processes every row (visible via the printed row count).

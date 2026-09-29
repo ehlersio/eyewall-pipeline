@@ -126,3 +126,33 @@ def select_all(
     raise RuntimeError(
         f"select_all: still getting rows after {max_pages} pages -- is .range() ignored?"
     )
+
+
+# NHL gameType values, as the NHL API and game_log.game_type use them.
+NHL_PRESEASON = 1
+NHL_REGULAR_SEASON = 2
+NHL_PLAYOFFS = 3
+
+
+def nhl_game_type(game_id) -> int | None:
+    """The NHL gameType encoded in an NHL game id, or None if `game_id`
+    isn't one.
+
+    NHL game ids are YYYYTTNNNN: the season's start year, the two-digit game
+    type, then the game number -- 2026010010 is a 2026-27 preseason game,
+    2026020001 the regular season's first, 2025030111 a playoff game.
+
+    shot_events, shift_events, zone_starts and game_xg carry `season` and
+    `game_id` but no game type, and every season holds its preseason and
+    playoff games alongside the regular season's. A season-scoped read of
+    any of them is therefore all three game types unless it filters on this.
+    That is how 61 preseason games became 2026-27's regular-season Corsi
+    (team_seasons, game_type 2) before a regular-season game had been played.
+    """
+    try:
+        gid = int(game_id)
+    except (TypeError, ValueError):
+        return None
+    if not 1_000_000_000 <= gid <= 9_999_999_999:
+        return None
+    return gid // 10_000 % 100
