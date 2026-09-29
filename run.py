@@ -316,11 +316,14 @@ if __name__ == "__main__":
     # Only a numeric second argument is a season -- `injury_impact --full` and
     # `validate eh.csv` pass something else there, and int() would crash on it.
     season = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
+    # Every stage whose run() takes a season gets it. Until 2026-09 nhl,
+    # rapm, moneypuck and playoffs dropped it, so `run.py moneypuck
+    # 20242025` quietly recomputed the live season instead.
 
     if arg == "nhl":
         import nhl_stats
 
-        nhl_stats.run()
+        nhl_stats.run(*([season] if season else []))
     elif arg == "injuries":
         import injuries
 
@@ -370,7 +373,7 @@ if __name__ == "__main__":
     elif arg == "playoffs":
         import playoff_race
 
-        playoff_race.run()
+        playoff_race.run(*([season] if season else []))
     elif arg == "shots":
         import shot_events
 
@@ -386,7 +389,7 @@ if __name__ == "__main__":
     elif arg == "rapm":
         import rapm
 
-        rapm.run()
+        rapm.run(*([season] if season else []))
     elif arg == "elo":
         import elo_ratings
 
@@ -394,7 +397,7 @@ if __name__ == "__main__":
     elif arg == "moneypuck":
         import moneypuck
 
-        if moneypuck.run():
+        if moneypuck.run(*([season] if season else [])):
             sys.exit(1)
     elif arg == "lines":
         import line_combinations
