@@ -35,7 +35,7 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.
 from nhl_shot_xg import DANGER_XG, REAL_SHOT_TYPES, shot_xg  # noqa: F401
-from pipeline_common import NHL_REGULAR_SEASON
+from pipeline_common import NHL_REGULAR_SEASON, select_all
 
 # Games the regression pool draws on: the regular season only. RAPM (and
 # the WAR built on it) is written to the game_type 2 rows, so it's a
@@ -179,6 +179,59 @@ def prior_season(season: int) -> int:
     end_year = season % 10000  # 2026
     start_year = season // 10000  # 2025
     return (start_year - 1) * 10000 + (end_year - 1)  # 20242025
+
+
+def write_rapm(client, season: int, rapm_by_pid: dict) -> dict:
+    """Write this run's RAPM to the season's game_type 2 player_seasons rows
+    and clear it on any row this run didn't rate. Returns player_id -> team
+    for the season's rows."""
+    print(f"\n  Upserting RAPM to player_seasons (season {season})...")
+    updates = 0
+    errors = 0
+
+    # Ordered on player_id so the pages can't shuffle: an unordered offset
+    # read of ~1,000 rows could skip a row, and that player's RAPM was then
+    # never written.
+    season_rows = select_all(
+        lambda: (
+            client.table("player_seasons")
+            .select("player_id,team,rapm")
+            .eq("season", season)
+            .eq("game_type", NHL_REGULAR_SEASON)
+        ),
+        order="player_id",
+    )
+    season_map = {r["player_id"]: r["team"] for r in season_rows}
+
+    for pid, rapm_val in rapm_by_pid.items():
+        if not season_map.get(pid):
+            continue  # player not on current season roster
+        try:
+            client.table("player_seasons").update({"rapm": rapm_val}).eq("player_id", pid).eq(
+                "season", season
+            ).eq("game_type", NHL_REGULAR_SEASON).execute()
+            updates += 1
+        except Exception:
+            errors += 1
+
+    print(f"  OK Updated {updates} players, {errors} errors")
+
+    # A RAPM on a player this run didn't rate is left over from an older
+    # pool -- e.g. a player who only cleared 150 minutes with playoff ice
+    # time, before the pool became regular-season only (~25 a season on
+    # 2026-09-29). Clear it rather than show a number this model no longer
+    # produces; that player's WAR then uses the xG-based fallback.
+    stale = [
+        r["player_id"]
+        for r in season_rows
+        if r.get("rapm") is not None and r["player_id"] not in rapm_by_pid
+    ]
+    for pid in stale:
+        client.table("player_seasons").update({"rapm": None}).eq("player_id", pid).eq(
+            "season", season
+        ).eq("game_type", NHL_REGULAR_SEASON).execute()
+    print(f"  Cleared stale RAPM on {len(stale)} players not rated this run")
+    return season_map
 
 
 def run(season: int = NHL_SEASON):
@@ -494,30 +547,8 @@ def run(season: int = NHL_SEASON):
     print(f"  Mean RAPM:  {coefs.mean():.4f} (should be ~0)")
 
     # -- 6. Upsert rapm to player_seasons ----------------------
-    print(f"\n  Upserting RAPM to player_seasons (season {season})...")
-    updates = 0
-    errors = 0
-
-    # Get team mapping for current season
-    season_rows = fetch_all(
-        client, "player_seasons", "player_id,team,game_type", {"season": season, "game_type": 2}
-    )
-    season_map = {r["player_id"]: r["team"] for r in season_rows}
-
-    for pid, idx in player_idx.items():
-        rapm_val = round(float(coefs[idx]), 3)
-        team = season_map.get(pid, "")
-        if not team:
-            continue  # player not on current season roster
-        try:
-            client.table("player_seasons").update({"rapm": rapm_val}).eq("player_id", pid).eq(
-                "season", season
-            ).eq("game_type", 2).execute()
-            updates += 1
-        except Exception:
-            errors += 1
-
-    print(f"  OK Updated {updates} players, {errors} errors")
+    rapm_by_pid = {pid: round(float(coefs[idx]), 3) for pid, idx in player_idx.items()}
+    season_map = write_rapm(client, season, rapm_by_pid)
 
     # Print top/bottom 5 for the primary team as a sanity check
     primary_players = [

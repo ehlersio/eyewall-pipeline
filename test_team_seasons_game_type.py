@@ -453,3 +453,37 @@ class TestPlayoffTeamRollups:
         assert set(written) == {"CAR", "FLA"}
         assert {r["game_type"] for r in written.values()} == {3}
         assert (written["CAR"]["corsi_for"], written["CAR"]["corsi_against"]) == (3, 1)
+
+
+class FakeUpdateQuery(FakeQuery):
+    """FakeQuery plus .update(): applies the change to matching rows."""
+
+    def update(self, values):
+        self._update = values
+        return self
+
+    def execute(self):
+        if getattr(self, "_update", None) is not None:
+            for r in self._rows:
+                r.update(self._update)
+            return SimpleNamespace(data=self._rows)
+        return super().execute()
+
+
+class TestWriteRapm:
+    def test_writes_rated_players_and_clears_stale_ones(self):
+        rows = [
+            {"player_id": 1, "season": SEASON, "game_type": 2, "team": "CAR", "rapm": 0.01},
+            # Only qualified with playoff ice time under the old pool.
+            {"player_id": 2, "season": SEASON, "game_type": 2, "team": "CAR", "rapm": 0.05},
+            {"player_id": 3, "season": SEASON, "game_type": 2, "team": "FLA", "rapm": None},
+            # A playoff row keeps whatever it has.
+            {"player_id": 2, "season": SEASON, "game_type": 3, "team": "CAR", "rapm": 0.05},
+        ]
+        client = FakeClient(player_seasons=rows)
+        client.table = lambda name: FakeUpdateQuery(client.tables[name])
+
+        rapm.write_rapm(client, SEASON, {1: 0.02, 3: -0.01})
+
+        got = {(r["player_id"], r["game_type"]): r["rapm"] for r in rows}
+        assert got == {(1, 2): 0.02, (2, 2): None, (3, 2): -0.01, (2, 3): 0.05}
