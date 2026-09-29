@@ -144,7 +144,7 @@ def nhl_game_type(game_id) -> int | None:
 
     shot_events, shift_events, zone_starts and game_xg hold every season's
     preseason and playoff games alongside the regular season's, and each has
-    a `game_type` column Postgres generates from game_id the same way
+    a `game_type` PostgREST computed field that decodes game_id the same way
     (docs/game_type_column.sql). Filter season-scoped reads of them on that
     column in the query rather than decoding rows here: before it existed,
     61 preseason games became 2026-27's regular-season Corsi (team_seasons,

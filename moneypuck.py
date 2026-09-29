@@ -337,7 +337,7 @@ def run_team_xgf_rollup(client, season: int, game_type: int = NHL_REGULAR_SEASON
 
     game_xg comes from MoneyPuck's game-by-game file, which has playoff
     games as well as regular-season ones, so the read filters on game_xg's
-    game_type (generated from game_id). Until 2026-09 every season's
+    game_type (computed from game_id). Until 2026-09 every season's
     game_type=2 xgf_pct included its playoff games.
 
     A team with a team_seasons row but no games of this type gets
@@ -412,7 +412,7 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     then aggregates per goalie and upserts qs + qs_pct into goalie_seasons.
     No external CSV needed — uses data already in the DB.
 
-    Only games of `game_type` count (shot_events.game_type, generated from
+    Only games of `game_type` count (shot_events.game_type, computed from
     game_id). Until 2026-09 preseason and playoff starts
     counted toward the game_type=2 row, and on 2026-09-28 this wrote QS%
     for 95 goalies from 2026-27 preseason games alone. A goalie whose row
@@ -706,7 +706,7 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
 
     Only games of `game_type` count toward the (season, game_type) row.
     shot_events holds a season's preseason and playoff games as well as its
-    regular season, so the read filters on shot_events.game_type (generated
+    regular season, so the read filters on shot_events.game_type (computed
     from game_id). Until 2026-09 this counted all three into
     game_type=2: on 2026-09-29, before 2026-27's first regular-season game,
     every team's row already had Corsi from 61 preseason games (CAR 46.05%,
