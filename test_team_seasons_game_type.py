@@ -1,0 +1,286 @@
+"""
+test_team_seasons_game_type.py -- preseason (and playoff) games must not be
+counted into a season's regular-season (game_type 2) aggregates.
+
+shot_events, shift_events, zone_starts and game_xg have `season` and
+`game_id` but no game type, and a season's rows include its preseason and
+playoff games. moneypuck.py's rollups read them by season alone, so on
+2026-09-29 -- Opening Night, before any 2026-27 regular-season game --
+team_seasons (game_type 2) already had Corsi from 61 preseason games: CAR
+corsi_for_pct 0.4605 / 5v5 0.484, FLA 0.5 / 0.4983, UTA 0.5034 / 0.4985,
+with games_played 0. Goalie QS% had been written for 95 goalies the same
+way. The fixtures below mirror that: preseason ids like 2026010001, a
+regular-season 2026020001, a playoff 2026030111.
+"""
+
+import os
+from types import SimpleNamespace
+
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+
+import moneypuck
+import rapm
+from pipeline_common import nhl_game_type
+
+SEASON = 20262027
+PRE = 2026010001
+PRE_2 = 2026010002
+REG = 2026020001
+PLAYOFF = 2026030111
+
+
+class FakeQuery:
+    """A PostgREST-ish query over one table's rows: honours the filters,
+    ordering and paging these modules use, and records upserts."""
+
+    def __init__(self, table):
+        self._table = table
+        self._rows = list(table.rows)
+        self._order = None
+        self._limit = None
+        self._range = None
+        self._negate = False
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, col, val):
+        self._rows = [r for r in self._rows if r.get(col) == val]
+        return self
+
+    def in_(self, col, vals):
+        self._rows = [r for r in self._rows if r.get(col) in vals]
+        return self
+
+    def gt(self, col, val):
+        self._rows = [r for r in self._rows if r[col] > val]
+        return self
+
+    @property
+    def not_(self):
+        self._negate = True
+        return self
+
+    def is_(self, col, _null):
+        want_null = not self._negate
+        self._negate = False
+        self._rows = [r for r in self._rows if (r.get(col) is None) == want_null]
+        return self
+
+    def order(self, col, desc=False):
+        self._order = (col, desc)
+        return self
+
+    def limit(self, n):
+        self._limit = n
+        return self
+
+    def range(self, start, end):
+        self._range = (start, end)
+        return self
+
+    def upsert(self, rows, on_conflict=None):
+        self._table.upserts.extend(rows)
+        self._rows = []
+        return self
+
+    def execute(self):
+        rows = self._rows
+        if self._order:
+            col, desc = self._order
+            rows = sorted(rows, key=lambda r: r[col], reverse=desc)
+        if self._range:
+            start, end = self._range
+            rows = rows[start : end + 1]
+        if self._limit is not None:
+            rows = rows[: self._limit]
+        return SimpleNamespace(data=rows)
+
+
+class FakeTable:
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+        self.upserts = []
+
+
+class FakeClient:
+    def __init__(self, **tables):
+        self.tables = {name: FakeTable(rows) for name, rows in tables.items()}
+
+    def table(self, name):
+        return FakeQuery(self.tables.setdefault(name, FakeTable()))
+
+
+def shots(game_id, team, n, start_id, situation="1551", event_type="shot-on-goal"):
+    return [
+        {
+            "id": start_id + i,
+            "season": SEASON,
+            "game_id": game_id,
+            "team": team,
+            "event_type": event_type,
+            "situation_code": situation,
+        }
+        for i in range(n)
+    ]
+
+
+def team_rows(*teams):
+    return [{"team": t, "season": SEASON, "game_type": 2} for t in teams]
+
+
+def by_team(upserts):
+    return {u["team"]: u for u in upserts}
+
+
+class TestNhlGameType:
+    def test_reads_the_type_digits(self):
+        assert nhl_game_type(2026010010) == 1
+        assert nhl_game_type(2026020001) == 2
+        assert nhl_game_type(2025030111) == 3
+        assert nhl_game_type("2026020001") == 2
+
+    def test_not_an_nhl_game_id(self):
+        assert nhl_game_type(500) is None
+        assert nhl_game_type(None) is None
+        assert nhl_game_type("abc") is None
+
+
+class TestTeamCorsiRollup:
+    def test_preseason_only_season_writes_null_not_preseason_corsi(self):
+        """The 2026-09-29 state: only preseason shot_events exist. Every
+        team's game_type 2 row must come out NULL, not the preseason share."""
+        client = FakeClient(
+            shot_events=shots(PRE, "CAR", 7, 1) + shots(PRE, "FLA", 5, 100),
+            team_seasons=team_rows("CAR", "FLA", "UTA"),
+        )
+
+        moneypuck.run_team_corsi_rollup(client, SEASON)
+
+        written = by_team(client.tables["team_seasons"].upserts)
+        assert set(written) == {"CAR", "FLA", "UTA"}
+        for row in written.values():
+            assert row["game_type"] == 2
+            for col in moneypuck.CORSI_COLUMNS:
+                assert row[col] is None, (row["team"], col)
+
+    def test_counts_only_regular_season_games(self):
+        client = FakeClient(
+            shot_events=(
+                shots(PRE, "CAR", 50, 1)  # preseason blowout -- must not count
+                + shots(PRE, "FLA", 1, 100)
+                + shots(REG, "CAR", 3, 200)
+                + shots(REG, "CAR", 1, 210, situation="1451")  # CAR power play
+                + shots(REG, "FLA", 2, 300)
+                + shots(PLAYOFF, "CAR", 1, 400)  # playoffs -- not game_type 2
+                + shots(PLAYOFF, "FLA", 40, 500)
+                + shots(PRE_2, "UTA", 9, 600)  # UTA: preseason only
+                + shots(PRE_2, "DAL", 9, 700)
+            ),
+            team_seasons=team_rows("CAR", "FLA", "UTA", "DAL"),
+        )
+
+        moneypuck.run_team_corsi_rollup(client, SEASON)
+
+        written = by_team(client.tables["team_seasons"].upserts)
+        car, fla = written["CAR"], written["FLA"]
+        assert (car["corsi_for"], car["corsi_against"]) == (4, 2)
+        assert car["corsi_for_pct"] == round(4 / 6, 4)
+        assert (car["corsi_for_5v5"], car["corsi_against_5v5"]) == (3, 2)
+        assert car["corsi_for_pct_5v5"] == 0.6
+        assert (fla["corsi_for"], fla["corsi_against"]) == (2, 4)
+        assert fla["corsi_for_pct"] == round(2 / 6, 4)
+        for team in ("UTA", "DAL"):
+            for col in moneypuck.CORSI_COLUMNS:
+                assert written[team][col] is None, (team, col)
+
+
+class TestTeamXgfRollup:
+    def test_excludes_playoff_games_and_nulls_teams_without_games(self):
+        game_xg = [
+            {
+                "game_id": REG,
+                "season": SEASON,
+                "situation": "5on5",
+                "team": "CAR",
+                "xgf": 3.0,
+                "xga": 1.0,
+            },
+            {
+                "game_id": REG,
+                "season": SEASON,
+                "situation": "5on5",
+                "team": "FLA",
+                "xgf": 1.0,
+                "xga": 3.0,
+            },
+            {
+                "game_id": PLAYOFF,
+                "season": SEASON,
+                "situation": "5on5",
+                "team": "CAR",
+                "xgf": 0.0,
+                "xga": 9.0,
+            },
+            {
+                "game_id": PLAYOFF,
+                "season": SEASON,
+                "situation": "5on5",
+                "team": "FLA",
+                "xgf": 9.0,
+                "xga": 0.0,
+            },
+        ]
+        client = FakeClient(game_xg=game_xg, team_seasons=team_rows("CAR", "FLA", "UTA"))
+
+        moneypuck.run_team_xgf_rollup(client, SEASON)
+
+        written = by_team(client.tables["team_seasons"].upserts)
+        assert written["CAR"]["xgf_pct"] == 0.75
+        assert written["FLA"]["xgf_pct"] == 0.25
+        assert written["UTA"]["xgf_pct"] is None
+        assert {r["game_type"] for r in written.values()} == {2}
+
+
+class TestGoalieQualityStarts:
+    def test_preseason_starts_do_not_count_and_stale_qs_is_cleared(self):
+        def faced(goalie_id, game_id, saves, goals, start_id):
+            return [
+                {
+                    "id": start_id + i,
+                    "season": SEASON,
+                    "goalie_id": goalie_id,
+                    "game_id": game_id,
+                    "event_type": "shot-on-goal" if i < saves else "goal",
+                }
+                for i in range(saves + goals)
+            ]
+
+        client = FakeClient(
+            shot_events=(
+                faced(31, PRE, 30, 0, 1)  # a preseason shutout -- not a start
+                + faced(35, REG, 20, 4, 100)  # .833: not a quality start
+                + faced(35, PRE_2, 25, 0, 200)  # would have made it 1-of-2
+            ),
+            goalie_seasons=[
+                # Written from preseason games before this fix.
+                {"player_id": 31, "season": SEASON, "game_type": 2, "qs": 2, "qs_pct": 1.0},
+                {"player_id": 35, "season": SEASON, "game_type": 2, "qs": 1, "qs_pct": 1.0},
+            ],
+        )
+
+        moneypuck.run_goalie_qs(client, SEASON)
+
+        written = {u["player_id"]: u for u in client.tables["goalie_seasons"].upserts}
+        assert written[35]["qs"] == 0
+        assert written[35]["qs_pct"] == 0.0
+        assert written[31]["qs"] is None
+        assert written[31]["qs_pct"] is None
+
+
+class TestRapmPool:
+    def test_preseason_rows_are_not_rated(self):
+        assert not rapm.rated_game({"game_id": PRE})
+        assert rapm.rated_game({"game_id": REG})
+        assert rapm.rated_game({"game_id": PLAYOFF})

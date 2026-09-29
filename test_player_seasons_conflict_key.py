@@ -59,6 +59,9 @@ class _FakeQuery:
     def limit(self, *_a, **_kw):
         return self
 
+    def range(self, *_a, **_kw):
+        return self
+
     @property
     def not_(self):
         return self
@@ -92,13 +95,14 @@ class TestRunGoalieQSConflictKey:
         # sa (shots-against) must clear the sa>=5 "real workload" floor in
         # run_goalie_qs -- fewer than that is treated as garbage-time/
         # backup and skipped entirely, which would leave nothing to
-        # upsert and make this fixture prove nothing.
+        # upsert and make this fixture prove nothing. A regular-season game
+        # id, for the same reason: only game_type 2 games count.
         shot_events_pages = [
             [
-                {"id": i, "goalie_id": 555, "game_id": 1, "event_type": "shot-on-goal"}
+                {"id": i, "goalie_id": 555, "game_id": 2025020001, "event_type": "shot-on-goal"}
                 for i in range(1, 6)
             ]
-            + [{"id": 6, "goalie_id": 555, "game_id": 1, "event_type": "goal"}],
+            + [{"id": 6, "goalie_id": 555, "game_id": 2025020001, "event_type": "goal"}],
             [],
         ]
         goalie_seasons = _FakeQuery()

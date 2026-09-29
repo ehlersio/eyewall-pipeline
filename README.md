@@ -165,6 +165,8 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 ### `rapm.py`
 3-year rolling ridge regression RAPM (alpha=2500). 5v5 only. Zone-start adjusted. Signed xG differential formulation. Writes `rapm` column to `player_seasons`. See RAPM methodology section.
 
+The pool is regular-season and playoff games; preseason games are left out of the shots, the shifts (and so the 150-minute qualifying ice time) and the zone starts, and `score_state.py` drops them the same way. Until 2026-09 they were in, since `shot_events`/`shift_events`/`zone_starts` keep a season's preseason games and have no game-type column -- the type is read off the game id (`pipeline_common.nhl_game_type()`: `YYYYTTNNNN`, `TT` = 01 preseason, 02 regular season, 03 playoffs).
+
 ### `nhl_shot_xg.py` (2026-09)
 The NHL shot-quality proxy -- one attempt's expected goals from where it was taken -- shared by `rapm.py` (the outcome it regresses) and `line_combinations.py` (the Scouting tab's line xGF%). MoneyPuck's per-shot xG isn't stored in `shot_events`, so distance to the net stands in: high (<= 15 ft) 0.094, medium (<= 30 ft) 0.061, low 0.030.
 
@@ -200,6 +202,8 @@ Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run man
 
 ### `moneypuck.py`
 WAR (RAPM-derived EV component), percentile rankings, goalie GSAX, per-game xG, `team_seasons.xgf_pct`. Accepts season argument.
+
+**Team and goalie rollups count regular-season games only (2026-09):** `run_team_corsi_rollup` (Corsi/Fenwick, all situations and 5v5), `run_team_xgf_rollup` (`xgf_pct`) and `run_goalie_qs` (`qs`/`qs_pct`) write the `game_type` 2 rows, and now count only games whose id says regular season (`pipeline_common.nhl_game_type()`). `shot_events` and `game_xg` hold each season's preseason and playoff games too, with no game-type column, and these used to read them by season alone: every season's team Corsi and goalie QS% included its preseason and playoffs, and its `xgf_pct` its playoffs (2025-26 team CF% moved by up to 1.2 points once corrected). On 2026-09-29, before 2026-27's first regular-season game, all 32 teams had Corsi from 61 preseason games and 95 goalies had a QS% from preseason starts alone. A team with a `team_seasons` row but no regular-season game yet now gets `NULL` in every Corsi/Fenwick column and in `xgf_pct`, and a goalie with a QS% but no regular-season start gets `qs`/`qs_pct` `NULL`, instead of keeping an older value.
 
 **`MP_URL` fix (2026-07):** used to hardcode `"2025"` directly in the MoneyPuck CSV URL, completely decoupled from `NHL_SEASON` — meaning a correct `NHL_SEASON` flip alone would NOT have fixed this fetch each October. Now derived as `MP_START_YEAR = int(str(NHL_SEASON)[:4])`, so there's exactly one place this needs to be right. The URL itself is split into `MP_SKATERS_URL`/`MP_GOALIES_URL` (both built from `MP_START_YEAR`), not a single `MP_URL`.
 

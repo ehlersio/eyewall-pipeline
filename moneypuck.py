@@ -13,6 +13,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
+from pipeline_common import NHL_REGULAR_SEASON, nhl_game_type, select_all
 
 # MoneyPuck's URL scheme wants the season's START year (e.g. 2025 for the
 # 20252026 season), not the full YYYYYYYY season ID. This used to be a
@@ -307,17 +308,45 @@ def run_game_xg(client, season: int):
     print(f"  OK game_xg: {len(upserts)} rows upserted")
 
 
-def run_team_xgf_rollup(client, season: int):
-    """Aggregate game_xg into team_seasons.xgf_pct.
+def team_seasons_teams(client, season: int, game_type: int) -> set[str]:
+    """Teams with a team_seasons row for (season, game_type).
 
-    Sums xgf and xga across all 5v5 games per team, then computes
-    xgf_pct = xgf / (xgf + xga). This avoids the error of averaging
+    The team rollups below write every one of these, not only the teams they
+    found games for. A team with no games of that type yet gets NULLs, so
+    nothing written earlier -- such as preseason-derived Corsi from before
+    the rollups filtered by game type -- survives as if it were current.
+    """
+    rows = select_all(
+        lambda: (
+            client.table("team_seasons")
+            .select("team")
+            .eq("season", season)
+            .eq("game_type", game_type)
+        ),
+        order="team",
+    )
+    return {r["team"] for r in rows if r.get("team")}
+
+
+def run_team_xgf_rollup(client, season: int, game_type: int = NHL_REGULAR_SEASON):
+    """Aggregate game_xg into team_seasons.xgf_pct for one game type.
+
+    Sums xgf and xga across the team's 5v5 games of `game_type`, then
+    computes xgf_pct = xgf / (xgf + xga). This avoids the error of averaging
     per-game percentages (which would weight short games equally).
+
+    game_xg comes from MoneyPuck's game-by-game file, which has playoff
+    games as well as regular-season ones, and game_xg has no game type
+    column -- the type is read off each game_id (nhl_game_type). Until
+    2026-09 every season's game_type=2 xgf_pct included its playoff games.
+
+    A team with a team_seasons row but no games of this type gets
+    xgf_pct NULL (not 0.5, not a stale value).
 
     Writes only the xgf_pct column — other team_seasons columns are
     owned by nhl_stats.py and are not touched here.
     """
-    print("\n--- Team XGF% rollup (game_xg -> team_seasons) ---")
+    print(f"\n--- Team XGF% rollup (game_xg -> team_seasons, game_type {game_type}) ---")
     # Supabase project cap is 999 rows — paginate with .range()
     # OFFSET pagination accepted as-is (Session 47 audit #10 pass):
     # ~2,624 rows/season (32 teams x 82 games), well under the cap --
@@ -327,7 +356,7 @@ def run_team_xgf_rollup(client, season: int):
     while True:
         batch = (
             client.table("game_xg")
-            .select("team,xgf,xga")
+            .select("game_id,team,xgf,xga")
             .eq("season", season)
             .eq("situation", "5on5")
             .range(offset, offset + 999)
@@ -341,15 +370,15 @@ def run_team_xgf_rollup(client, season: int):
             break
         offset += 999
 
-    if not rows:
-        print("  No game_xg rows found — skipping rollup")
-        return
-
-    print(f"  Fetched {len(rows)} game_xg rows")
+    kept = [r for r in rows if nhl_game_type(r.get("game_id")) == game_type]
+    print(
+        f"  Fetched {len(rows)} game_xg rows, {len(kept)} from game_type {game_type} games "
+        f"({len(rows) - len(kept)} other game types excluded)"
+    )
 
     # Sum xgf and xga per team
     totals: dict[str, dict] = {}
-    for r in rows:
+    for r in kept:
         team = r.get("team", "")
         if not team:
             continue
@@ -357,25 +386,31 @@ def run_team_xgf_rollup(client, season: int):
         t["xgf"] += r.get("xgf") or 0.0
         t["xga"] += r.get("xga") or 0.0
 
+    teams = set(totals) | team_seasons_teams(client, season, game_type)
+    if not teams:
+        print("  No game_xg rows and no team_seasons rows — skipping rollup")
+        return
+
     upserts = []
-    for team, t in totals.items():
+    for team in sorted(teams):
+        t = totals.get(team, {"xgf": 0.0, "xga": 0.0})
         total = t["xgf"] + t["xga"]
         xgf_pct = round(t["xgf"] / total, 4) if total > 0 else None
         upserts.append(
             {
                 "team": team,
                 "season": season,
-                "game_type": 2,
+                "game_type": game_type,
                 "xgf_pct": xgf_pct,
             }
         )
 
-    print(f"  Upserting xgf_pct for {len(upserts)} teams...")
+    print(f"  Upserting xgf_pct for {len(upserts)} teams ({len(totals)} with games)...")
     client.table("team_seasons").upsert(upserts, on_conflict="team,season,game_type").execute()
     print(f"  OK team_seasons.xgf_pct: {len(upserts)} rows updated")
 
 
-def run_goalie_qs(client, season: int):
+def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     """Compute Quality Start % from shot_events in Supabase.
 
     A quality start is defined as:
@@ -385,8 +420,14 @@ def run_goalie_qs(client, season: int):
     Groups shot_events by (goalie_id, game_id) to get per-game SA/SV,
     then aggregates per goalie and upserts qs + qs_pct into goalie_seasons.
     No external CSV needed — uses data already in the DB.
+
+    Only games of `game_type` count (read off each game_id -- shot_events
+    has no game type column). Until 2026-09 preseason and playoff starts
+    counted toward the game_type=2 row, and on 2026-09-28 this wrote QS%
+    for 95 goalies from 2026-27 preseason games alone. A goalie whose row
+    has a QS% but who has no start of this type now gets qs/qs_pct NULL.
     """
-    print("\n--- Goalie Quality Start % ---")
+    print(f"\n--- Goalie Quality Start % (game_type {game_type}) ---")
     print("  Fetching shot_events for goalie QS computation...")
     from collections import defaultdict
 
@@ -398,6 +439,7 @@ def run_goalie_qs(client, season: int):
     # 2026-07-04 statement-timeout incident that motivated this pattern.
     last_id = 0
     total_rows = 0
+    excluded_rows = 0
     while True:
         rows = (
             client.table("shot_events")
@@ -414,6 +456,9 @@ def run_goalie_qs(client, season: int):
         if not rows:
             break
         for r in rows:
+            if nhl_game_type(r["game_id"]) != game_type:
+                excluded_rows += 1
+                continue
             key = (r["goalie_id"], r["game_id"])
             goalie_game_stats[key]["sa"] += 1
             if r["event_type"] == "shot-on-goal":
@@ -423,11 +468,10 @@ def run_goalie_qs(client, season: int):
         if len(rows) < 999:
             break
 
-    print(f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs")
-
-    if not goalie_game_stats:
-        print("  No shot event data — skipping")
-        return
+    print(
+        f"  Processed {total_rows} shot events across {len(goalie_game_stats)} goalie-game pairs "
+        f"({excluded_rows} from other game types excluded)"
+    )
 
     # Aggregate QS per goalie
     goalie_totals = defaultdict(lambda: {"starts": 0, "qs": 0})
@@ -460,11 +504,42 @@ def run_goalie_qs(client, season: int):
             {
                 "player_id": int(goalie_id),
                 "season": season,
-                "game_type": 2,
+                "game_type": game_type,
                 "qs": g["qs"],
                 "qs_pct": round(g["qs"] / g["starts"], 4),
             }
         )
+
+    # A QS% already on a row whose goalie has no start of this type is
+    # left over from before this filtered by game type -- clear it.
+    rated = {int(u["player_id"]) for u in upserts}
+    stale = select_all(
+        lambda: (
+            client.table("goalie_seasons")
+            .select("player_id")
+            .eq("season", season)
+            .eq("game_type", game_type)
+            .not_.is_("qs_pct", "null")
+        ),
+        order="player_id",
+    )
+    for r in stale:
+        pid = int(r["player_id"])
+        if pid not in rated:
+            rated.add(pid)
+            upserts.append(
+                {
+                    "player_id": pid,
+                    "season": season,
+                    "game_type": game_type,
+                    "qs": None,
+                    "qs_pct": None,
+                }
+            )
+
+    if not upserts:
+        print("  No starts of this game type and no QS% to clear — skipping")
+        return
 
     print(f"  Upserting QS% for {len(upserts)} goalies...")
     for i in range(0, len(upserts), 500):
@@ -622,12 +697,41 @@ CORSI_EVENT_TYPES = ("shot-on-goal", "missed-shot", "blocked-shot", "goal")
 FENWICK_EVENT_TYPES = ("shot-on-goal", "missed-shot", "goal")  # excludes blocked-shot
 SITUATION_5V5 = "1551"  # both teams at full strength — same convention rapm.py
 # and line_combinations.py already use for 5v5-only filtering.
+# Every team_seasons column run_team_corsi_rollup owns.
+CORSI_COLUMNS = (
+    "corsi_for",
+    "corsi_against",
+    "corsi_for_pct",
+    "fenwick_for",
+    "fenwick_against",
+    "fenwick_for_pct",
+    "corsi_for_5v5",
+    "corsi_against_5v5",
+    "corsi_for_pct_5v5",
+    "fenwick_for_5v5",
+    "fenwick_against_5v5",
+    "fenwick_for_pct_5v5",
+)
 
 
-def run_team_corsi_rollup(client, season: int):
+def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     """Compute team-level Corsi/Fenwick (all-situations AND 5v5-filtered)
     from shot_events and upsert to team_seasons. Replaces the SOG-share-only
     proxy previously used by nhl.js's /prediction/analyze (Session 52).
+
+    Only games of `game_type` count toward the (season, game_type) row.
+    shot_events holds a season's preseason and playoff games as well as its
+    regular season, with no game type column, so the type is read off each
+    game_id (nhl_game_type). Until 2026-09 this counted all three into
+    game_type=2: on 2026-09-29, before 2026-27's first regular-season game,
+    every team's row already had Corsi from 61 preseason games (CAR 46.05%,
+    FLA 50.0%, UTA 50.34%), and every earlier season's included its
+    preseason and playoffs.
+
+    Every team with a team_seasons row for (season, game_type) is written,
+    not only teams with games: one with no games of this type gets NULL in
+    every Corsi/Fenwick column -- no attempts counted, no share -- rather
+    than keeping an older, wrongly-sourced value.
 
     Unlike PWHL's version (pwhl_stats.py::run_team_shot_totals /
     run_team_shot_totals_5v5), which has to reconstruct 5v5 strength state
@@ -670,6 +774,7 @@ def run_team_corsi_rollup(client, season: int):
     # motivated this pattern).
     last_id = 0
     total_rows = 0
+    excluded_rows = 0
     while True:
         rows = (
             client.table("shot_events")
@@ -690,6 +795,9 @@ def run_team_corsi_rollup(client, season: int):
             event_type = r.get("event_type")
             if not team or not game_id or not event_type:
                 continue
+            if nhl_game_type(game_id) != game_type:
+                excluded_rows += 1
+                continue
             game_totals[game_id][team][event_type] += 1
             if r.get("situation_code") == SITUATION_5V5:
                 game_totals_5v5[game_id][team][event_type] += 1
@@ -703,11 +811,10 @@ def run_team_corsi_rollup(client, season: int):
         if len(rows) < 999:
             break
 
-    print(f"  Processed {total_rows} shot_events rows across {len(game_totals)} games")
-
-    if not game_totals:
-        print("  No shot_events rows found — skipping Corsi rollup")
-        return
+    print(
+        f"  Processed {total_rows} shot_events rows: {len(game_totals)} game_type {game_type} "
+        f"games, {excluded_rows} rows from other game types excluded"
+    )
 
     def _attempts(counts: dict, types: tuple) -> int:
         return sum(counts.get(t, 0) for t in types)
@@ -744,15 +851,29 @@ def run_team_corsi_rollup(client, season: int):
         return round(numerator / denominator, 4) if denominator > 0 else None
 
     upserts = []
-    all_teams = set(all_totals) | set(totals_5v5)
-    for team in all_teams:
+    teams_with_games = set(all_totals) | set(totals_5v5)
+    all_teams = teams_with_games | team_seasons_teams(client, season, game_type)
+    if not all_teams:
+        print("  No shot_events games and no team_seasons rows — skipping Corsi rollup")
+        return
+    for team in sorted(all_teams):
+        if team not in teams_with_games:
+            upserts.append(
+                {
+                    "team": team,
+                    "season": season,
+                    "game_type": game_type,
+                    **dict.fromkeys(CORSI_COLUMNS),
+                }
+            )
+            continue
         t = all_totals.get(team, {"cf": 0, "ca": 0, "ff": 0, "fa": 0, "gp": 0})
         t5 = totals_5v5.get(team, {"cf": 0, "ca": 0, "ff": 0, "fa": 0, "gp": 0})
         upserts.append(
             {
                 "team": team,
                 "season": season,
-                "game_type": 2,
+                "game_type": game_type,
                 "corsi_for": t["cf"],
                 "corsi_against": t["ca"],
                 "corsi_for_pct": _pct(t["cf"], t["cf"] + t["ca"]),
@@ -768,7 +889,10 @@ def run_team_corsi_rollup(client, season: int):
             }
         )
 
-    print(f"  Upserting Corsi/Fenwick for {len(upserts)} teams...")
+    print(
+        f"  Upserting Corsi/Fenwick for {len(upserts)} teams "
+        f"({len(upserts) - len(teams_with_games)} with no games, written as NULL)..."
+    )
     client.table("team_seasons").upsert(upserts, on_conflict="team,season,game_type").execute()
 
     sample = sorted(upserts, key=lambda x: x["corsi_for_pct"] or 0, reverse=True)[:5]
