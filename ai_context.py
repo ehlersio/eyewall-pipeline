@@ -1321,6 +1321,15 @@ def build_matchup_context(home_team: str, away_team: str, season: int = None) ->
     Extends build_prediction_context with line combos and scouting blurbs;
     players are built the same way (last season's stats early on, labeled
     via {side}_players_info).
+
+    {side}_lines_preseason is True when the team hasn't played a
+    regular-season game this season but has stored units of its own:
+    line_combinations.py builds a season's units from every game_log game
+    of that season, preseason included, so before the opener those units
+    are exhibition groupings (units it carried over from last season are
+    tagged source="prior_season" and labeled separately). They are kept --
+    preseason groupings predicted opening-night linemates better than last
+    season's units (docs/opening_night_backtest_results.md) -- but labeled.
     """
     season = season or NHL_SEASON
     ctx = {
@@ -1330,9 +1339,14 @@ def build_matchup_context(home_team: str, away_team: str, season: int = None) ->
         "prior_season": prior_season(season),
     }
     for side, team in (("home", home_team), ("away", away_team)):
-        _, _, players = _team_player_context(team, season)
+        team_gp, _, players = _team_player_context(team, season)
+        combos = get_line_combos(team=team, season=season)
+        units = combos["lines"] + combos["pairs"]
         ctx[f"{side}_players"] = players.pop("players")
         ctx[f"{side}_players_info"] = players
-        ctx[f"{side}_lines"] = get_line_combos(team=team, season=season)
+        ctx[f"{side}_lines"] = combos
+        ctx[f"{side}_lines_preseason"] = team_gp == 0 and any(
+            u.get("source") != "prior_season" for u in units
+        )
         ctx[f"{side}_blurbs"] = get_scouting_blurbs(team=team, season=season)
     return ctx

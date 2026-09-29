@@ -516,6 +516,16 @@ def _data_notes(ctx: dict, form_keys: bool) -> str:
                 f"{who} {verb} played a {label} regular-season game yet, so there's no recent "
                 f"form to discuss for {'it' if len(idle) == 1 else 'them'}."
             )
+    preseason = [
+        ctx.get(f"{side}_team", "")
+        for side in ("home", "away")
+        if ctx.get(f"{side}_lines_preseason")
+    ]
+    if preseason:
+        notes.append(
+            f"Lines marked as from {label} preseason games ({' and '.join(preseason)}) are "
+            f"exhibition groupings, not a confirmed lineup -- say so if you discuss them."
+        )
     notes.append('Don\'t cite any stat marked "not available".')
     return "\n".join(notes)
 
@@ -642,9 +652,16 @@ def format_matchup_context(ctx: dict) -> str:
 
         fwd_lines = combos.get("lines", [])
         d_pairs = combos.get("pairs", [])
+        preseason = ctx.get(f"{side}_lines_preseason")
+        source = f"{label} preseason games" if preseason else label
 
+        if preseason:
+            lines.append(
+                f"Line combinations (from {label} preseason games -- {team} hasn't played a "
+                f"regular-season game yet, so these may not match the opening-night lineup):"
+            )
         if fwd_lines:
-            lines.append(f"Forward lines ({label}, inferred from 5v5 shift data):")
+            lines.append(f"Forward lines ({source}, inferred from 5v5 shift data):")
             for i, unit in enumerate(fwd_lines[:4], 1):
                 lines.append(_format_unit("Line", i, unit, prior_label))
                 for p in unit.get("players", []):
@@ -655,7 +672,7 @@ def format_matchup_context(ctx: dict) -> str:
             lines.append("Forward lines: not available")
 
         if d_pairs:
-            lines.append("Defence pairs:")
+            lines.append(f"Defence pairs ({source}):")
             for i, unit in enumerate(d_pairs[:3], 1):
                 lines.append(_format_unit("Pair", i, unit, prior_label))
         else:

@@ -26,7 +26,6 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 import ai_context
 import ai_predictions as ap
-import line_combinations
 from ai_persona import (
     build_matchup_prompt,
     build_prediction_prompt,
@@ -484,31 +483,67 @@ class TestPredictionPrompt:
         assert "Corsi For% (5-on-5 shot-attempt share): 55.0%" in prompt
 
 
+def unit_row(unit_type, rank, names, source, xgf_pct=0.5616):
+    a, b, c = [*names, None][:3]
+    return {
+        "team": "CAR",
+        "season": SEASON,
+        "unit_type": unit_type,
+        "rank": rank,
+        "name_a": a,
+        "name_b": b,
+        "name_c": c,
+        "pos_a": "C",
+        "pos_b": "R",
+        "pos_c": "C" if c else None,
+        "toi_secs": 6000,
+        "xgf_pct": xgf_pct,
+        "source": source,
+    }
+
+
 class TestMatchupPrompt:
     def test_carried_over_units_and_xgf_scale(self, db):
         db.tables["line_combinations"] = [
-            {
-                "team": "CAR",
-                "season": SEASON,
-                "unit_type": "F",
-                "rank": 1,
-                "name_a": "Carl Center",
-                "name_b": "Wes Wing",
-                "name_c": "Rookie Rick",
-                "pos_a": "C",
-                "pos_b": "R",
-                "pos_c": "C",
-                "toi_secs": 6000,
-                "xgf_pct": 0.5616,
-                "source": "prior_season",
-            }
+            unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "prior_season")
         ]
         ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON)
         out = format_matchup_context(ctx)
         assert "Line 1: Carl Center, Wes Wing, Rookie Rick | xGF% 56.2" in out
         assert "carried over from 2025-26" in out
         assert "Defence pairs: not available" in out
+        assert "preseason games" not in out  # nothing built from this season's games
         assert "it's early in the 2026-27 season" in build_matchup_prompt(ctx)
+
+    def test_units_before_the_opener_are_labeled_preseason(self, db):
+        """line_combinations.py builds a season's units from every game_log
+        game of the season, preseason included; before a team's first
+        regular-season game those units are exhibition groupings."""
+        db.tables["line_combinations"] = [
+            unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "current"),
+            unit_row("D", 1, ("Dee Fence", "Other Olaf"), "current"),
+        ]
+        ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON)
+        assert ctx["home_lines_preseason"] is True
+        prompt = build_matchup_prompt(ctx)
+        assert (
+            "Line combinations (from 2026-27 preseason games -- CAR hasn't played a "
+            "regular-season game yet, so these may not match the opening-night lineup):"
+        ) in prompt
+        assert "Forward lines (2026-27 preseason games, inferred from 5v5 shift data):" in prompt
+        assert "Defence pairs (2026-27 preseason games):" in prompt
+        assert "Lines marked as from 2026-27 preseason games (CAR) are exhibition" in prompt
+
+    def test_units_after_the_opener_are_this_seasons(self, db):
+        add_current_games(db, "CAR", 1)
+        db.tables["line_combinations"] = [
+            unit_row("F", 1, ("Carl Center", "Wes Wing", "Rookie Rick"), "current")
+        ]
+        ctx = ai_context.build_matchup_context("CAR", "BOS", season=SEASON)
+        assert ctx["home_lines_preseason"] is False
+        prompt = build_matchup_prompt(ctx)
+        assert "Forward lines (2026-27, inferred from 5v5 shift data):" in prompt
+        assert "preseason games" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -561,20 +596,3 @@ def test_process_game_builds_context_for_the_games_own_season(monkeypatch):
     assert ap.process_game(game_)
     assert seen == {"prediction": SEASON, "matchup": SEASON}
     assert saved["season"] == SEASON
-
-
-# ---------------------------------------------------------------------------
-# line_combinations: preseason games no longer build a season's units
-# ---------------------------------------------------------------------------
-
-
-def test_line_combinations_ignore_preseason_games(monkeypatch):
-    def fake_fetch_all(client, table, select, filters, **_):
-        if table == "shift_events":
-            return [{"game_id": 2026010001, "player_id": 1, "team": "CAR"}]
-        if table == "game_log":
-            return [{"game_id": 2026010001, "game_type": 1}]
-        raise AssertionError(f"unexpected fetch of {table}")
-
-    monkeypatch.setattr(line_combinations, "fetch_all", fake_fetch_all)
-    assert line_combinations.compute_current_season_rows(None, "CAR", SEASON) == []
