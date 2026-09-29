@@ -13,7 +13,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
-from pipeline_common import NHL_REGULAR_SEASON, select_all
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, select_all
 
 # MoneyPuck's URL scheme wants the season's START year (e.g. 2025 for the
 # 20252026 season), not the full YYYYYYYY season ID. This used to be a
@@ -24,16 +24,18 @@ from pipeline_common import NHL_REGULAR_SEASON, select_all
 MP_START_YEAR = int(str(NHL_SEASON)[:4])
 
 
-def mp_season_url(season: int, kind: str) -> str:
+def mp_season_url(season: int, kind: str, game_type: int = NHL_REGULAR_SEASON) -> str:
     """MoneyPuck's season-summary CSV ("skaters" or "goalies") for a
-    YYYYYYYY season. From the season being run, not NHL_SEASON: with the
-    URLs fixed at import, `python moneypuck.py 20252026` fetched 2026-27's
-    file (header only on 2026-09-28) and wrote no player analytics at all,
-    so re-running a past season -- e.g. to recompute WAR after the RAPM
-    fix -- silently did nothing."""
+    YYYYYYYY season and game type (its /regular/ or /playoffs/ file). From
+    the season being run, not NHL_SEASON: with the URLs fixed at import,
+    `python moneypuck.py 20252026` fetched 2026-27's file (header only on
+    2026-09-28) and wrote no player analytics at all, so re-running a past
+    season -- e.g. to recompute WAR after the RAPM fix -- silently did
+    nothing. A season's playoff file is a 404 until its playoffs start."""
     start_year = int(str(season)[:4])
+    part = "playoffs" if game_type == NHL_PLAYOFFS else "regular"
     return (
-        f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{start_year}/regular/{kind}.csv"
+        f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{start_year}/{part}/{kind}.csv"
     )
 
 
@@ -78,6 +80,35 @@ def fetch_csv(url: str = MP_SKATERS_URL) -> list[dict]:
     rows = list(reader)
     print(f"  Parsed {len(rows)} rows")
     return rows
+
+
+def fetch_season_csv(season: int, kind: str, game_type: int) -> list[dict] | None:
+    """fetch_csv() of mp_season_url(), or None when MoneyPuck has no such
+    file (404): a season's playoffs before they start, or a season before
+    its first game. Any other HTTP error raises."""
+    try:
+        return fetch_csv(mp_season_url(season, kind, game_type))
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            print(
+                f"  MoneyPuck has no {kind} file for season {season}, game_type {game_type} (404)"
+            )
+            return None
+        raise
+
+
+def season_player_ids(client, table: str, season: int, game_type: int) -> set[int]:
+    """player_ids that have a (season, game_type) row in `table` --
+    nhl_stats.py's box-score rows. Playoff analytics only fill these in;
+    an upsert for anyone else would create a row with analytics and no box
+    score, like the 184 preseason-QS-only goalie_seasons rows."""
+    rows = select_all(
+        lambda: (
+            client.table(table).select("player_id").eq("season", season).eq("game_type", game_type)
+        ),
+        order="player_id",
+    )
+    return {r["player_id"] for r in rows}
 
 
 def n(v):
@@ -534,9 +565,15 @@ def run_goalie_qs(client, season: int, game_type: int = NHL_REGULAR_SEASON):
     print(f"  OK goalie_seasons: QS% updated for {len(upserts)} goalies")
 
 
-def run_goalies(client, season: int = NHL_SEASON):
+def run_goalies(client, season: int = NHL_SEASON, game_type: int = NHL_REGULAR_SEASON):
     """Fetch MoneyPuck's goalies.csv and write goalie GSAX/save-pct analytics
-    to goalie_seasons. This is real, externally-modeled GSAX (Goals Saved
+    to goalie_seasons, for one game type (MoneyPuck's /regular/ or
+    /playoffs/ file).
+
+    Playoff rows get the GSAX and save-pct values but no percentiles (a
+    pool of a few playoff goalies isn't one to rank against), and only for
+    goalies nhl_stats.py already gave a playoff row. A season whose file
+    MoneyPuck hasn't published (404) is skipped. This is real, externally-modeled GSAX (Goals Saved
     Above Expected, from MoneyPuck's flurry-adjusted xGoals model) -- distinct
     from run_goalie_qs() above, which derives Quality Start % from our own
     shot_events data. Both write to goalie_seasons on the same conflict key
@@ -552,8 +589,16 @@ def run_goalies(client, season: int = NHL_SEASON):
     substage signature and its n()/build_sorted_pool()/percentile_rank()
     helpers.
     """
-    print(f"\n--- Goalie GSAX / save% analytics (MoneyPuck) — Season {season} ---")
-    rows = fetch_csv(mp_season_url(season, "goalies"))
+    print(
+        f"\n--- Goalie GSAX / save% analytics (MoneyPuck) — Season {season}, "
+        f"game_type {game_type} ---"
+    )
+    rows = fetch_season_csv(season, "goalies", game_type)
+    if rows is None:
+        return
+    playoffs = game_type == NHL_PLAYOFFS
+    if playoffs:
+        with_rows = season_player_ids(client, "goalie_seasons", season, game_type)
 
     # Split by situation
     by_situation = {}
@@ -636,6 +681,8 @@ def run_goalies(client, season: int = NHL_SEASON):
     print("  Computing goalie analytics...")
     updates = []
     for pid, row in all_map.items():
+        if playoffs and int(pid) not in with_rows:
+            continue
         gsax_val = gsax(row)
         gsax60_val = gsax_per60(row)
         ev_sv_val = ev_sv_pct(row)
@@ -643,19 +690,20 @@ def run_goalies(client, season: int = NHL_SEASON):
         md_sv_val = md_sv_pct(row)
         pk_sv_val = pk_sv_pct(row)
 
-        updates.append(
-            {
-                "player_id": int(pid),
-                "season": season,
-                "game_type": 2,
-                # Analytics
-                "gsax": round(gsax_val, 2),
-                "gsax_per60": round(gsax60_val, 3) if gsax60_val is not None else None,
-                "ev_sv_pct": round(ev_sv_val, 4) if ev_sv_val is not None else None,
-                "hd_sv_pct": round(hd_sv_val, 4) if hd_sv_val is not None else None,
-                "md_sv_pct": round(md_sv_val, 4) if md_sv_val is not None else None,
-                "pk_sv_pct": round(pk_sv_val, 4) if pk_sv_val is not None else None,
-                # Percentiles
+        update = {
+            "player_id": int(pid),
+            "season": season,
+            "game_type": game_type,
+            # Analytics
+            "gsax": round(gsax_val, 2),
+            "gsax_per60": round(gsax60_val, 3) if gsax60_val is not None else None,
+            "ev_sv_pct": round(ev_sv_val, 4) if ev_sv_val is not None else None,
+            "hd_sv_pct": round(hd_sv_val, 4) if hd_sv_val is not None else None,
+            "md_sv_pct": round(md_sv_val, 4) if md_sv_val is not None else None,
+            "pk_sv_pct": round(pk_sv_val, 4) if pk_sv_val is not None else None,
+        }
+        if not playoffs:
+            update |= {
                 "pct_gsax": percentile_rank(gsax_val, pools["gsax"]),
                 "pct_gsax60": percentile_rank(gsax60_val, pools["gsax60"]),
                 "pct_ev_sv": percentile_rank(ev_sv_val, pools["ev_sv_pct"]),
@@ -663,7 +711,7 @@ def run_goalies(client, season: int = NHL_SEASON):
                 "pct_md_sv": percentile_rank(md_sv_val, pools["md_sv_pct"]),
                 "pct_pk_sv": percentile_rank(pk_sv_val, pools["pk_sv_pct"]),
             }
-        )
+        updates.append(update)
 
     if not updates:
         print("  No goalie rows to upsert — skipping")
@@ -744,7 +792,9 @@ def run_team_corsi_rollup(client, season: int, game_type: int = NHL_REGULAR_SEAS
     single pass over shot_events (situation_code is already on every row),
     to avoid scanning the ~800k-row league-wide table twice.
     """
-    print("\n--- Team Corsi/Fenwick rollup (shot_events -> team_seasons) ---")
+    print(
+        f"\n--- Team Corsi/Fenwick rollup (shot_events -> team_seasons, game_type {game_type}) ---"
+    )
     from collections import defaultdict
 
     # game_totals[game_id][team] = {event_type: count}, all-situations
@@ -903,58 +953,12 @@ def _run_substage(failures: list, label: str, fn, *args, **kwargs):
         failures.append(f"moneypuck.{label} ({type(e).__name__})")
 
 
-def run(season: int = NHL_SEASON) -> list[str]:
-    """Returns a list of any internal sub-stage failure labels (empty on
-    full success). run.py's run_stage() only sees whether this function
-    raised at all -- a non-empty return here means run() itself completed,
-    just with one or more of its internal pieces degraded or skipped. See
-    run.py's run_all(), which folds this list into its own failed_stages
-    report so a partial moneypuck failure isn't silently treated as green.
-    """
-    failures: list[str] = []
-    client = get_client()
-    print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
+def skater_metric_fns(ev_map: dict, pp_map: dict, pk_map: dict) -> dict:
+    """The per-player skater metrics, as functions of a MoneyPuck "all"
+    situation row, reading the player's 5on5/5on4/4on5 rows from the maps.
+    Shared by the regular-season and playoff files, which have the same
+    columns."""
 
-    try:
-        rows = fetch_csv(mp_season_url(season, "skaters"))
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            # MoneyPuck doesn't publish a season's CSV until real games have
-            # been played -- an early NHL_SEASON flip (KV override, ahead of
-            # the real schedule) makes this a normal, expected condition for
-            # weeks/months, not a pipeline failure. Everything below depends
-            # on `rows` existing, so there's nothing partial to salvage --
-            # skip the whole stage cleanly rather than letting run.py mark
-            # the nightly job red every night until the season starts.
-            print(
-                f"  MoneyPuck has no data published yet for season {season} "
-                "(404) -- skipping MoneyPuck analytics this run."
-            )
-            return failures
-        raise
-
-    # Split by situation
-    by_situation = {}
-    for r in rows:
-        sit = r.get("situation", "")
-        by_situation.setdefault(sit, {})[r["playerId"]] = r
-
-    all_map = by_situation.get("all", {})
-    ev_map = by_situation.get("5on5", {})
-    pp_map = by_situation.get("5on4", {})  # MoneyPuck uses 5on4, not powerPlay
-    pk_map = by_situation.get("4on5", {})  # MoneyPuck uses 4on5, not penaltyKill
-
-    # Qualified players for percentile pools
-    qualified = [
-        r
-        for r in all_map.values()
-        if n(r.get("games_played", 0)) >= MIN_GP and n(r.get("icetime", 0)) >= 300
-    ]
-    fwds = [r for r in qualified if r.get("position") in ("C", "L", "R", "F")]
-    defs = [r for r in qualified if r.get("position") == "D"]
-    print(f"  Pool: {len(fwds)} forwards, {len(defs)} defensemen (min {MIN_GP} GP)")
-
-    # ── Metric functions ───────────────────────────────────────────
     def ev_off(row):
         ev = ev_map.get(row["playerId"])
         return n(ev["onIce_xGoalsPercentage"]) if ev else None
@@ -1033,6 +1037,172 @@ def run(season: int = NHL_SEASON) -> list[str]:
         above) -- deliberately not duplicated under a second column name."""
         ev = ev_map.get(row["playerId"])
         return compute_on_ice_gf_pct(ev)
+
+    return {
+        "ev_off": ev_off,
+        "ev_def": ev_def,
+        "xga_per60": xga_per60,
+        "hdca_per60": hdca_per60,
+        "pp_off": pp_off,
+        "pk_def": pk_def,
+        "finishing": finishing,
+        "goals60": goals60,
+        "a1_60": a1_60,
+        "xgf_per60": xgf_per60,
+        "penalties60": penalties60,
+        "competition": competition,
+        "teammates": teammates,
+        "on_ice_gf_pct": on_ice_gf_pct,
+    }
+
+
+def skater_rate_columns(pid, row, fns: dict, pp_map: dict, pk_map: dict) -> dict:
+    """One skater's MoneyPuck rate columns for player_seasons: everything
+    but WAR and the percentiles, which are regular-season only. `fns` is
+    skater_metric_fns() over the same file's maps."""
+    ev_off_val = fns["ev_off"](row)
+    ev_def_val = fns["ev_def"](row)
+    pp_val = fns["pp_off"](row)
+    pk_val = fns["pk_def"](row)
+    fin_val = fns["finishing"](row)
+    pen_val = fns["penalties60"](row)
+    comp_val = fns["competition"](row)
+    tm_val = fns["teammates"](row)
+    gf_pct_val, rvp_diff_val = apply_results_vs_process_guardrail(
+        n(row.get("games_played", 0)), fns["on_ice_gf_pct"](row), ev_off_val
+    )
+    return {
+        "ev_off_pct": round(ev_off_val, 4) if ev_off_val is not None else None,
+        "ev_def_inv": round(ev_def_val, 5) if ev_def_val is not None else None,
+        "pp_xgf60": round(pp_val, 4) if pp_val is not None else None,
+        "pk_xga60_inv": round(pk_val, 5) if pk_val is not None else None,
+        "pp_icetime": round(n(pp_map.get(pid, {}).get("icetime", 0)) / 60, 1)
+        if pp_map.get(pid)
+        else None,
+        "pk_icetime": round(n(pk_map.get(pid, {}).get("icetime", 0)) / 60, 1)
+        if pk_map.get(pid)
+        else None,
+        "finishing": round(fin_val, 4) if fin_val is not None else None,
+        "goals_per60": round(fns["goals60"](row), 4),
+        "a1_per60": round(fns["a1_60"](row), 4),
+        "xgf_per60": round(fns["xgf_per60"](row), 4),
+        "penalties_per60": round(pen_val, 4) if pen_val is not None else None,
+        "competition": round(comp_val, 4) if comp_val is not None else None,
+        "teammates": round(tm_val, 4) if tm_val is not None else None,
+        "game_score": round(n(row.get("gameScore", 0)), 3),
+        "xga_per60": fns["xga_per60"](row),
+        "hdca_per60": fns["hdca_per60"](row),
+        "on_ice_gf_pct": round(gf_pct_val, 4) if gf_pct_val is not None else None,
+        "results_vs_process_diff": round(rvp_diff_val, 4) if rvp_diff_val is not None else None,
+    }
+
+
+def run_playoff_skaters(client, season: int):
+    """MoneyPuck's playoff skaters file -> the game_type 3 player_seasons
+    rows: skater_rate_columns() only. Playoff WAR is its own model (pooled
+    across seasons, see the game-type split plan), and there are no playoff
+    percentiles -- the pool would be the few teams that went deep. Only
+    players nhl_stats.py already gave a playoff row are written. Skipped
+    until MoneyPuck publishes the season's playoff file."""
+    print(f"\n--- Playoff skater analytics (MoneyPuck) — Season {season} ---")
+    rows = fetch_season_csv(season, "skaters", NHL_PLAYOFFS)
+    if rows is None:
+        return
+
+    by_situation = {}
+    for r in rows:
+        by_situation.setdefault(r.get("situation", ""), {})[r["playerId"]] = r
+    all_map = by_situation.get("all", {})
+    pp_map = by_situation.get("5on4", {})
+    pk_map = by_situation.get("4on5", {})
+    fns = skater_metric_fns(by_situation.get("5on5", {}), pp_map, pk_map)
+
+    with_rows = season_player_ids(client, "player_seasons", season, NHL_PLAYOFFS)
+    updates = [
+        {
+            "player_id": int(pid),
+            "season": season,
+            "game_type": NHL_PLAYOFFS,
+            **skater_rate_columns(pid, row, fns, pp_map, pk_map),
+        }
+        for pid, row in all_map.items()
+        if int(pid) in with_rows
+    ]
+    skipped = len(all_map) - len(updates)
+    print(
+        f"  Upserting {len(updates)} playoff skater rows"
+        + (f" ({skipped} in MoneyPuck's file with no playoff row, skipped)" if skipped else "")
+    )
+    for i in range(0, len(updates), 500):
+        client.table("player_seasons").upsert(
+            updates[i : i + 500], on_conflict="player_id,season,game_type"
+        ).execute()
+    print(f"  OK player_seasons: {len(updates)} playoff rows updated")
+
+
+def run(season: int = NHL_SEASON) -> list[str]:
+    """Returns a list of any internal sub-stage failure labels (empty on
+    full success). run.py's run_stage() only sees whether this function
+    raised at all -- a non-empty return here means run() itself completed,
+    just with one or more of its internal pieces degraded or skipped. See
+    run.py's run_all(), which folds this list into its own failed_stages
+    report so a partial moneypuck failure isn't silently treated as green.
+    """
+    failures: list[str] = []
+    client = get_client()
+    print(f"\n=== MoneyPuck Analytics Pipeline — Season {season} ===")
+
+    try:
+        rows = fetch_csv(mp_season_url(season, "skaters"))
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            # MoneyPuck doesn't publish a season's CSV until real games have
+            # been played -- an early NHL_SEASON flip (KV override, ahead of
+            # the real schedule) makes this a normal, expected condition for
+            # weeks/months, not a pipeline failure. Everything below depends
+            # on `rows` existing, so there's nothing partial to salvage --
+            # skip the whole stage cleanly rather than letting run.py mark
+            # the nightly job red every night until the season starts.
+            print(
+                f"  MoneyPuck has no data published yet for season {season} "
+                "(404) -- skipping MoneyPuck analytics this run."
+            )
+            return failures
+        raise
+
+    # Split by situation
+    by_situation = {}
+    for r in rows:
+        sit = r.get("situation", "")
+        by_situation.setdefault(sit, {})[r["playerId"]] = r
+
+    all_map = by_situation.get("all", {})
+    ev_map = by_situation.get("5on5", {})
+    pp_map = by_situation.get("5on4", {})  # MoneyPuck uses 5on4, not powerPlay
+    pk_map = by_situation.get("4on5", {})  # MoneyPuck uses 4on5, not penaltyKill
+
+    # Qualified players for percentile pools
+    qualified = [
+        r
+        for r in all_map.values()
+        if n(r.get("games_played", 0)) >= MIN_GP and n(r.get("icetime", 0)) >= 300
+    ]
+    fwds = [r for r in qualified if r.get("position") in ("C", "L", "R", "F")]
+    defs = [r for r in qualified if r.get("position") == "D"]
+    print(f"  Pool: {len(fwds)} forwards, {len(defs)} defensemen (min {MIN_GP} GP)")
+
+    # ── Metric functions ───────────────────────────────────────────
+    metric_fns = skater_metric_fns(ev_map, pp_map, pk_map)
+    ev_off = metric_fns["ev_off"]
+    ev_def = metric_fns["ev_def"]
+    pp_off = metric_fns["pp_off"]
+    pk_def = metric_fns["pk_def"]
+    finishing = metric_fns["finishing"]
+    goals60 = metric_fns["goals60"]
+    a1_60 = metric_fns["a1_60"]
+    penalties60 = metric_fns["penalties60"]
+    competition = metric_fns["competition"]
+    teammates = metric_fns["teammates"]
 
     # ── NHL box-score stats (GP, +/-, SHG, GWG, Shots, TOI/G, FO%, Hits,
     # Blocks, Takeaways, Giveaways) -- these live on player_seasons via
@@ -1224,18 +1394,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
         fin_val = finishing(row)
         goals_val = goals60(row)
         a1_val = a1_60(row)
-        xgf_val = xgf_per60(row)
         pen_val = penalties60(row)
         comp_val = competition(row)
         tm_val = teammates(row)
         war_val = compute_war(row, is_fwd)
-        xga_val = xga_per60(row)
-        hdca_val = hdca_per60(row)
-
-        gp_val = n(row.get("games_played", 0))
-        gf_pct_val, rvp_diff_val = apply_results_vs_process_guardrail(
-            gp_val, on_ice_gf_pct(row), ev_off_val
-        )
         toi_ok = meets_toi_floor(is_fwd, row.get("icetime", 0))
 
         box_vals = {stat: fn(row) for stat, fn in box_fns.items()}
@@ -1270,33 +1432,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
             {
                 "player_id": int(pid),
                 "season": season,
-                "game_type": 2,  # MoneyPuck = regular season
+                "game_type": NHL_REGULAR_SEASON,  # the /regular/ file
                 # Analytics
                 "war": war_val,
-                "ev_off_pct": round(ev_off_val, 4) if ev_off_val is not None else None,
-                "ev_def_inv": round(ev_def_val, 5) if ev_def_val is not None else None,
-                "pp_xgf60": round(pp_val, 4) if pp_val is not None else None,
-                "pk_xga60_inv": round(pk_val, 5) if pk_val is not None else None,
-                "pp_icetime": round(n(pp_map.get(pid, {}).get("icetime", 0)) / 60, 1)
-                if pp_map.get(pid)
-                else None,
-                "pk_icetime": round(n(pk_map.get(pid, {}).get("icetime", 0)) / 60, 1)
-                if pk_map.get(pid)
-                else None,
-                "finishing": round(fin_val, 4) if fin_val is not None else None,
-                "goals_per60": round(goals_val, 4),
-                "a1_per60": round(a1_val, 4),
-                "xgf_per60": round(xgf_val, 4),
-                "penalties_per60": round(pen_val, 4) if pen_val is not None else None,
-                "competition": round(comp_val, 4) if comp_val is not None else None,
-                "teammates": round(tm_val, 4) if tm_val is not None else None,
-                "game_score": round(n(row.get("gameScore", 0)), 3),
-                "xga_per60": xga_val,
-                "hdca_per60": hdca_val,
-                "on_ice_gf_pct": round(gf_pct_val, 4) if gf_pct_val is not None else None,
-                "results_vs_process_diff": round(rvp_diff_val, 4)
-                if rvp_diff_val is not None
-                else None,
+                **skater_rate_columns(pid, row, metric_fns, pp_map, pk_map),
                 # Percentiles -- all nulled below MIN_TOI_MINUTES (see toi_ok
                 # above) regardless of pool membership; a player can still be
                 # counted in the pool for others while showing no badge of
@@ -1367,6 +1506,19 @@ def run(season: int = NHL_SEASON) -> list[str]:
     _run_substage(failures, "goalie_qs", run_goalie_qs, client, season)
     _run_substage(failures, "goalies", run_goalies, client, season)
     _run_substage(failures, "team_corsi_rollup", run_team_corsi_rollup, client, season)
+
+    # Playoffs: the same rollups for game_type 3. Each writes only rows
+    # nhl_stats.py made for the playoffs, so before a season's playoffs
+    # (or for a team that missed them) there is nothing to write.
+    _run_substage(failures, "playoff_skaters", run_playoff_skaters, client, season)
+    _run_substage(failures, "playoff_goalies", run_goalies, client, season, NHL_PLAYOFFS)
+    _run_substage(failures, "playoff_goalie_qs", run_goalie_qs, client, season, NHL_PLAYOFFS)
+    _run_substage(
+        failures, "playoff_team_xgf_rollup", run_team_xgf_rollup, client, season, NHL_PLAYOFFS
+    )
+    _run_substage(
+        failures, "playoff_team_corsi_rollup", run_team_corsi_rollup, client, season, NHL_PLAYOFFS
+    )
 
     if failures:
         print(

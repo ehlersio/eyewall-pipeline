@@ -343,3 +343,116 @@ class TestRapmPool:
             {"season": SEASON, "game_type": 2},
             {"season": SEASON, "game_type": 3},
         ]
+
+
+def mp_skater(pid, situation, **cols):
+    base = {
+        "playerId": str(pid),
+        "situation": situation,
+        "position": "C",
+        "games_played": "12",
+        "icetime": "12000",
+        "gameScore": "4.2",
+        "I_F_goals": "5",
+        "I_F_xGoals": "3.5",
+        "I_F_primaryAssists": "2",
+        "I_F_penalityMinutes": "4",
+        "onIce_xGoalsPercentage": "0.55",
+        "offIce_xGoalsPercentage": "0.5",
+        "OnIce_F_xGoals": "6",
+        "OnIce_A_xGoals": "4",
+        "OnIce_F_goals": "5",
+        "OnIce_A_goals": "3",
+        "OnIce_A_highDangerShots": "7",
+    }
+    return base | {k: str(v) for k, v in cols.items()}
+
+
+def mp_goalie(pid, situation, **cols):
+    base = {
+        "playerId": str(pid),
+        "situation": situation,
+        "games_played": "14",
+        "icetime": "50000",
+        "xGoals": "40",
+        "flurryAdjustedxGoals": "38",
+        "goals": "33",
+        "ongoal": "400",
+        "highDangerShots": "60",
+        "highDangerGoals": "12",
+        "mediumDangerShots": "90",
+        "mediumDangerGoals": "9",
+    }
+    return base | {k: str(v) for k, v in cols.items()}
+
+
+class TestPlayoffPlayerAnalytics:
+    """MoneyPuck's /playoffs/ files -> game_type 3 rows: rates, no WAR, no
+    percentiles, and only for players nhl_stats.py gave a playoff row."""
+
+    def test_playoff_skaters_write_rates_only_for_players_with_a_playoff_row(self, monkeypatch):
+        files = {
+            (SEASON, "skaters", 3): [
+                mp_skater(8478427, sit) for sit in ("all", "5on5", "5on4", "4on5")
+            ]
+            + [mp_skater(8400001, "all")]  # no playoff row in player_seasons
+        }
+        monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: files.get(k))
+        client = FakeClient(
+            player_seasons=[{"player_id": 8478427, "season": SEASON, "game_type": 3}]
+        )
+
+        moneypuck.run_playoff_skaters(client, SEASON)
+
+        (row,) = client.tables["player_seasons"].upserts
+        assert row["player_id"] == 8478427
+        assert row["game_type"] == 3
+        assert row["ev_off_pct"] == 0.55
+        assert row["game_score"] == 4.2
+        assert "war" not in row
+        assert not [k for k in row if k.startswith("pct_")]
+
+    def test_no_playoff_file_yet_writes_nothing(self, monkeypatch):
+        monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: None)
+        client = FakeClient(player_seasons=[])
+        moneypuck.run_playoff_skaters(client, SEASON)
+        assert client.tables["player_seasons"].upserts == []
+
+    def test_playoff_goalies_get_gsax_without_percentiles(self, monkeypatch):
+        files = {
+            (SEASON, "goalies", 3): [mp_goalie(31, "all"), mp_goalie(35, "all")],
+            (SEASON, "goalies", 2): [mp_goalie(31, "all"), mp_goalie(35, "all")],
+        }
+        monkeypatch.setattr(moneypuck, "fetch_season_csv", lambda *k: files.get(k))
+        client = FakeClient(
+            goalie_seasons=[{"player_id": 31, "season": SEASON, "game_type": 3}]  # 35 missed
+        )
+
+        moneypuck.run_goalies(client, SEASON, 3)
+        playoff = client.tables["goalie_seasons"].upserts
+        assert [(r["player_id"], r["game_type"]) for r in playoff] == [(31, 3)]
+        assert playoff[0]["gsax"] == 5.0
+        assert not [k for k in playoff[0] if k.startswith("pct_")]
+
+        client.tables["goalie_seasons"].upserts.clear()
+        moneypuck.run_goalies(client, SEASON)
+        regular = client.tables["goalie_seasons"].upserts
+        assert {r["player_id"] for r in regular} == {31, 35}
+        assert all(r["game_type"] == 2 and "pct_gsax" in r for r in regular)
+
+
+class TestPlayoffTeamRollups:
+    def test_corsi_rollup_counts_only_playoff_games_for_playoff_teams(self):
+        client = FakeClient(
+            shot_events=shots(REG, "CAR", 9, 1)
+            + shots(PLAYOFF, "CAR", 3, 100)
+            + shots(PLAYOFF, "FLA", 1, 200),
+            team_seasons=[{"team": t, "season": SEASON, "game_type": 3} for t in ("CAR", "FLA")],
+        )
+
+        moneypuck.run_team_corsi_rollup(client, SEASON, 3)
+
+        written = by_team(client.tables["team_seasons"].upserts)
+        assert set(written) == {"CAR", "FLA"}
+        assert {r["game_type"] for r in written.values()} == {3}
+        assert (written["CAR"]["corsi_for"], written["CAR"]["corsi_against"]) == (3, 1)
