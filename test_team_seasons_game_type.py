@@ -2,9 +2,10 @@
 test_team_seasons_game_type.py -- preseason (and playoff) games must not be
 counted into a season's regular-season (game_type 2) aggregates.
 
-shot_events, shift_events, zone_starts and game_xg have `season` and
-`game_id` but no game type, and a season's rows include its preseason and
-playoff games. moneypuck.py's rollups read them by season alone, so on
+shot_events, shift_events, zone_starts and game_xg hold a season's
+preseason and playoff games alongside its regular season. Until they got a
+game_type (a computed field on game_id, docs/game_type_column.sql),
+moneypuck.py's rollups read them by season alone, so on
 2026-09-29 -- Opening Night, before any 2026-27 regular-season game --
 team_seasons (game_type 2) already had Corsi from 61 preseason games: CAR
 corsi_for_pct 0.4605 / 5v5 0.484, FLA 0.5 / 0.4983, UTA 0.5034 / 0.4985,
@@ -98,15 +99,24 @@ class FakeQuery:
         return SimpleNamespace(data=rows)
 
 
+# Tables with a game_type computed field; PostgREST filters on it like a column.
+GENERATED_GAME_TYPE = {"shot_events", "shift_events", "zone_starts", "game_xg"}
+
+
 class FakeTable:
-    def __init__(self, rows=()):
-        self.rows = list(rows)
+    def __init__(self, rows=(), generated_game_type=False):
+        self.rows = [
+            {**r, "game_type": nhl_game_type(r["game_id"])} if generated_game_type else r
+            for r in rows
+        ]
         self.upserts = []
 
 
 class FakeClient:
     def __init__(self, **tables):
-        self.tables = {name: FakeTable(rows) for name, rows in tables.items()}
+        self.tables = {
+            name: FakeTable(rows, name in GENERATED_GAME_TYPE) for name, rows in tables.items()
+        }
 
     def table(self, name):
         return FakeQuery(self.tables.setdefault(name, FakeTable()))
@@ -242,6 +252,27 @@ class TestTeamXgfRollup:
         assert written["UTA"]["xgf_pct"] is None
         assert {r["game_type"] for r in written.values()} == {2}
 
+    def test_reads_each_row_once_across_pages(self):
+        """The row cap is 1,000; the old loop asked for 1,000 rows but
+        stepped by 999, reading the last row of each full page twice."""
+        game_xg = [
+            {
+                "game_id": REG + i,
+                "season": SEASON,
+                "situation": "5on5",
+                "team": "CAR",
+                "xgf": 10.0 if i == 999 else 1.0,
+                "xga": 0.0 if i == 999 else 1.0,
+            }
+            for i in range(1500)
+        ]
+        client = FakeClient(game_xg=game_xg, team_seasons=team_rows("CAR"))
+
+        moneypuck.run_team_xgf_rollup(client, SEASON)
+
+        written = by_team(client.tables["team_seasons"].upserts)
+        assert written["CAR"]["xgf_pct"] == round(1509 / (1509 + 1499), 4)
+
 
 class TestGoalieQualityStarts:
     def test_preseason_starts_do_not_count_and_stale_qs_is_cleared(self):
@@ -281,6 +312,34 @@ class TestGoalieQualityStarts:
 
 class TestRapmPool:
     def test_preseason_rows_are_not_rated(self):
-        assert not rapm.rated_game({"game_id": PRE})
-        assert rapm.rated_game({"game_id": REG})
-        assert rapm.rated_game({"game_id": PLAYOFF})
+        client = FakeClient(
+            shift_events=[
+                {"id": 1, "season": SEASON, "game_id": PRE, "player_id": 8},
+                {"id": 2, "season": SEASON, "game_id": REG, "player_id": 8},
+                {"id": 3, "season": SEASON, "game_id": PLAYOFF, "player_id": 8},
+                {"id": 4, "season": SEASON, "game_id": PRE_2, "player_id": 9},
+            ]
+        )
+
+        rows = rapm.fetch_rated(
+            rapm.fetch_all_keyset, client, "shift_events", "game_id", {"season": SEASON}
+        )
+
+        assert sorted(r["game_id"] for r in rows) == [REG, PLAYOFF]
+
+    def test_reads_one_game_type_at_a_time(self):
+        """Each read names a single game_type, so a keyset page walks the
+        (season, game_type, id) index in id order -- an in.(2,3) filter
+        would need a sort first."""
+        seen = []
+
+        def fetch(_client, _table, _select, filters):
+            seen.append(filters)
+            return []
+
+        rapm.fetch_rated(fetch, None, "shot_events", "game_id", {"season": SEASON})
+
+        assert seen == [
+            {"season": SEASON, "game_type": 2},
+            {"season": SEASON, "game_type": 3},
+        ]
