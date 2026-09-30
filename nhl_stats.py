@@ -263,7 +263,31 @@ def fetch_team_stats(season: int, game_type: int) -> list:
     return data.get("data", [])
 
 
-def fetch_standings() -> dict:
+def standings_date(season: int) -> str:
+    """The standings date to read for `season`: "now" for the current
+    season, or a finished season's last standings date.
+
+    standings/now only ever returns the current standings, and run()'s
+    stale-season guard (quite rightly) won't write them into another
+    season, so a season ingested after it ended never got its regular-season
+    record: 2022-23's team_seasons rows had hits and penalties and nothing
+    else. /standings-season lists every season's standingsEnd; a season with
+    a later one after it is finished, and standings/{standingsEnd} is its
+    final table. The latest season always reads "now" -- its standingsEnd
+    moves every day, and a dated read of it would be a day stale."""
+    try:
+        seasons = nhl_get(f"{NHL_BASE}/standings-season").get("seasons", [])
+    except FetchError as e:
+        print(f"  WARNING: {e} -- reading standings/now")
+        return "now"
+    ids = [s.get("id") for s in seasons]
+    for s in seasons:
+        if s.get("id") == season and s.get("standingsEnd") and any(i > season for i in ids):
+            return s["standingsEnd"]
+    return "now"
+
+
+def fetch_standings(date: str = "now") -> dict:
     """
     Fetches full current standings from the NHL API, keyed by team abbr.
     Only meaningful for regular season (game_type=2) — standings/now has no
@@ -289,7 +313,7 @@ def fetch_standings() -> dict:
     unconditionally — see run()'s use of it below.
     """
     try:
-        data = nhl_get(f"{NHL_BASE}/standings/now")
+        data = nhl_get(f"{NHL_BASE}/standings/{date}")
     except FetchError as e:
         print(f"  ERROR: {e}")
         return {}
@@ -350,6 +374,21 @@ def period_end_of(game: dict) -> int:
     return _LAST_PERIOD_TYPE_TO_PERIOD.get(last, 3)
 
 
+def teams_not_in(games: list, seen: set) -> list:
+    """Teams a schedule's regular-season and playoff games name that aren't
+    in `seen`, in order of appearance. Preseason is left out: it can include
+    non-NHL exhibition opponents."""
+    found = []
+    for g in games:
+        if g.get("gameType") not in (2, 3):
+            continue
+        for side in ("homeTeam", "awayTeam"):
+            abbr = (g.get(side) or {}).get("abbrev")
+            if abbr and abbr not in seen and abbr not in found:
+                found.append(abbr)
+    return found
+
+
 def fetch_schedule(team: str, season: int) -> list:
     try:
         data = nhl_get(f"{NHL_BASE}/club-schedule-season/{team}/{season}")
@@ -364,139 +403,17 @@ def _known_player_ids(client) -> set:
     return {r["id"] for r in select_all(lambda: client.table("players").select("id"), order="id")}
 
 
-def run(season: int = NHL_SEASON):
-    client = get_client()
-    print(f"\n=== NHL Stats Pipeline — Season {season} ===")
-
-    # ── 1. Players (roster for all teams) ────────────────────────
-    print("\n[1/5] Fetching rosters...")
-    all_players = {}
-    for team in ALL_TEAMS:
-        for p in fetch_roster(team, season):
-            all_players[p["id"]] = p
-        time.sleep(0.1)  # be polite to NHL API
-    print(f"  Found {len(all_players)} unique players")
-    upsert(client, "players", list(all_players.values()), "id")
-
-    # ── 2. Skater stats ───────────────────────────────────────────
-    print("\n[2/5] Fetching skater stats...")
-    for game_type in [2, 3]:
-        label = "Regular Season" if game_type == 2 else "Playoffs"
-        print(f"  {label}...")
-        summary = fetch_skater_stats(season, game_type)
-        scoring = fetch_skater_scoring(season, game_type)
-        realtime = fetch_skater_realtime(season, game_type)
-
-        rows = []
-        for s in summary:
-            pid = s["playerId"]
-            sc = scoring.get(pid, {})
-            rt = realtime.get(pid, {})
-            rows.append(
-                {
-                    "player_id": pid,
-                    "season": season,
-                    "team": s.get("teamAbbrevs", ""),
-                    "game_type": game_type,
-                    "games_played": s.get("gamesPlayed"),
-                    "goals": s.get("goals"),
-                    "assists": s.get("assists"),
-                    "primary_assists": sc.get("totalPrimaryAssists"),
-                    "secondary_assists": sc.get("totalSecondaryAssists"),
-                    "points": s.get("points"),
-                    "plus_minus": s.get("plusMinus"),
-                    "pim": s.get("penaltyMinutes"),
-                    "pp_goals": s.get("ppGoals"),
-                    "pp_points": s.get("ppPoints"),
-                    "sh_goals": s.get("shGoals"),
-                    "sh_points": s.get("shPoints"),
-                    "gw_goals": s.get("gameWinningGoals"),
-                    "shots": s.get("shots"),
-                    "shooting_pct": s.get("shootingPct"),
-                    "toi_per_game": int(s.get("timeOnIcePerGame", 0)),
-                    "ev_goals": s.get("evGoals"),
-                    "ev_points": s.get("evPoints"),
-                    "faceoff_win_pct": s.get("faceoffWinPct"),
-                    # Defensive / physical (from realtime endpoint)
-                    "hits": rt.get("hits"),
-                    "blocked_shots": rt.get("blockedShots"),
-                    "takeaways": rt.get("takeaways"),
-                    "giveaways": rt.get("giveaways"),
-                }
-            )
-        # Ensure all players exist — fetch names from NHL API for any missing
-        known_ids = _known_player_ids(client)
-        missing_ids = [s["playerId"] for s in summary if s["playerId"] not in known_ids]
-        if missing_ids:
-            print(f"  Fetching names for {len(missing_ids)} unlisted players...")
-            missing_players = []
-            for pid in missing_ids:
-                try:
-                    data = nhl_get(f"{NHL_BASE}/player/{pid}/landing")
-                    missing_players.append(
-                        {
-                            "id": pid,
-                            "name": f"{data.get('firstName', {}).get('default', '')} {data.get('lastName', {}).get('default', '')}".strip(),
-                            "position": data.get("position"),
-                        }
-                    )
-                except FetchError as e:
-                    print(f"  ERROR: {e}")
-                finally:
-                    time.sleep(0.1)
-            if missing_players:
-                upsert(client, "players", missing_players, "id")
-
-        # Conflict key deliberately excludes `team` (Session 81 fix) -- it
-        # used to be part of this key, but `team` here (a possibly
-        # comma-joined trade-history string, e.g. "VAN,SJS") doesn't
-        # reliably match what moneypuck.py's own upsert writes for the
-        # same player (MoneyPuck's CSV only ever has their current team).
-        # That mismatch silently forked a traded player into two rows --
-        # one with real box-score stats, one with WAR/percentiles -- 338
-        # such pairs found and merged in production before this fix
-        # landed. See docs/session81_new_columns.sql for the matching
-        # unique-constraint migration this requires.
-        upsert(client, "player_seasons", rows, "player_id,season,game_type")
-    print("\n[3/5] Fetching goalie stats...")
-    for game_type in [2, 3]:
-        label = "Regular Season" if game_type == 2 else "Playoffs"
-        print(f"  {label}...")
-        goalies = fetch_goalie_stats(season, game_type)
-        rows = []
-        for g in goalies:
-            rows.append(
-                {
-                    "player_id": g["playerId"],
-                    "season": season,
-                    "team": g.get("teamAbbrevs", ""),
-                    "game_type": game_type,
-                    "games_played": g.get("gamesPlayed"),
-                    "games_started": g.get("gamesStarted"),
-                    "wins": g.get("wins"),
-                    "losses": g.get("losses"),
-                    "ot_losses": g.get("otLosses"),
-                    "shots_against": g.get("shotsAgainst"),
-                    "saves": g.get("saves"),
-                    "goals_against": g.get("goalsAgainst"),
-                    "sv_pct": g.get("savePctg"),
-                    "gaa": g.get("goalsAgainstAverage"),
-                    "shutouts": g.get("shutouts"),
-                    "toi": int(g.get("timeOnIce", 0)),
-                }
-            )
-        # Same team-mismatch fork as player_seasons above (Session 81) --
-        # goalies get traded too, just less often (2 duplicate pairs found
-        # vs. 338 for skaters).
-        upsert(client, "goalie_seasons", rows, "player_id,season,game_type")
-
+def write_team_seasons(client, season: int):
+    """Stage 4 of run(): team_seasons' box-score/standings columns for the
+    regular season and the playoffs. Safe for a past season on its own (see
+    run_teams_only()), unlike run() as a whole."""
     # ── 4. Team stats ─────────────────────────────────────────────
     print("\n[4/5] Fetching team stats...")
 
     # Standings (L10, division/conference/wildcard/clinch/ROW) is only in
     # the standings endpoint, not the summary endpoint. Fetch once — keyed
     # by team abbr — and use as the canonical source for game_type=2 rows.
-    standings_map = fetch_standings()
+    standings_map = fetch_standings(standings_date(season))
     stale_standings_abbrs = _stale_standings_abbrs(standings_map, season)
     if stale_standings_abbrs:
         print(
@@ -651,13 +568,27 @@ def run(season: int = NHL_SEASON):
                 deduped.append(r)
         upsert(client, "team_seasons", deduped, "team,season,game_type")
 
+
+def write_game_log(client, season: int):
+    """Stage 5 of run(): game_log for every team that played the season,
+    its PBP enrichment, and the hits/penalties rollup."""
     # ── 5. Game log (all 32 teams) ────────────────────────────────
     # One row per team per game — each team gets its own perspective
     # (team_score, opp_score, opponent, team_scored_first, PP/PK).
-    print("\n[5/5] Fetching game log for all 32 teams...")
+    # Today's 32 teams, plus any team the season's schedules name that isn't
+    # one of them -- a franchise that has since moved. ALL_TEAMS has UTA,
+    # not ARI, so until 2026-09 Arizona's 2022-23 and 2023-24 games had no
+    # game_log rows from Arizona's side (its opponents' were there).
+    print("\n[5/5] Fetching game log for every team that played this season...")
     total_rows = 0
-    for team in ALL_TEAMS:
+    teams = list(ALL_TEAMS)
+    seen = set(teams)
+    for team in teams:  # grows as schedules name teams outside ALL_TEAMS
         games = fetch_schedule(team, season)
+        for abbr in teams_not_in(games, seen):
+            seen.add(abbr)
+            teams.append(abbr)
+            print(f"  {abbr} played this season but isn't a current team -- adding it")
         rows = []
         for g in games:
             if g.get("gameState") not in ("OFF", "FINAL"):
@@ -702,6 +633,149 @@ def run(season: int = NHL_SEASON):
     # per-game Hits/Penalties on their own only cover the single-game view.
     for game_type in [2, 3]:
         run_team_hits_penalties_rollup(client, season, game_type)
+
+
+def run_teams_only(season: int):
+    """Just the team stages -- team_seasons and game_log -- for `season`.
+
+    For backfilling a finished season. run() as a whole isn't safe for one:
+    its first stage upserts `players` from that season's rosters, which
+    would overwrite every player's current team with an old one."""
+    client = get_client()
+    print(f"\n=== NHL team stages only -- Season {season} ===")
+    write_team_seasons(client, season)
+    write_game_log(client, season)
+    print("\nOK NHL team stages complete")
+
+
+def run(season: int = NHL_SEASON):
+    client = get_client()
+    print(f"\n=== NHL Stats Pipeline — Season {season} ===")
+
+    # ── 1. Players (roster for all teams) ────────────────────────
+    print("\n[1/5] Fetching rosters...")
+    all_players = {}
+    for team in ALL_TEAMS:
+        for p in fetch_roster(team, season):
+            all_players[p["id"]] = p
+        time.sleep(0.1)  # be polite to NHL API
+    print(f"  Found {len(all_players)} unique players")
+    upsert(client, "players", list(all_players.values()), "id")
+
+    # ── 2. Skater stats ───────────────────────────────────────────
+    print("\n[2/5] Fetching skater stats...")
+    for game_type in [2, 3]:
+        label = "Regular Season" if game_type == 2 else "Playoffs"
+        print(f"  {label}...")
+        summary = fetch_skater_stats(season, game_type)
+        scoring = fetch_skater_scoring(season, game_type)
+        realtime = fetch_skater_realtime(season, game_type)
+
+        rows = []
+        for s in summary:
+            pid = s["playerId"]
+            sc = scoring.get(pid, {})
+            rt = realtime.get(pid, {})
+            rows.append(
+                {
+                    "player_id": pid,
+                    "season": season,
+                    "team": s.get("teamAbbrevs", ""),
+                    "game_type": game_type,
+                    "games_played": s.get("gamesPlayed"),
+                    "goals": s.get("goals"),
+                    "assists": s.get("assists"),
+                    "primary_assists": sc.get("totalPrimaryAssists"),
+                    "secondary_assists": sc.get("totalSecondaryAssists"),
+                    "points": s.get("points"),
+                    "plus_minus": s.get("plusMinus"),
+                    "pim": s.get("penaltyMinutes"),
+                    "pp_goals": s.get("ppGoals"),
+                    "pp_points": s.get("ppPoints"),
+                    "sh_goals": s.get("shGoals"),
+                    "sh_points": s.get("shPoints"),
+                    "gw_goals": s.get("gameWinningGoals"),
+                    "shots": s.get("shots"),
+                    "shooting_pct": s.get("shootingPct"),
+                    "toi_per_game": int(s.get("timeOnIcePerGame", 0)),
+                    "ev_goals": s.get("evGoals"),
+                    "ev_points": s.get("evPoints"),
+                    "faceoff_win_pct": s.get("faceoffWinPct"),
+                    # Defensive / physical (from realtime endpoint)
+                    "hits": rt.get("hits"),
+                    "blocked_shots": rt.get("blockedShots"),
+                    "takeaways": rt.get("takeaways"),
+                    "giveaways": rt.get("giveaways"),
+                }
+            )
+        # Ensure all players exist — fetch names from NHL API for any missing
+        known_ids = _known_player_ids(client)
+        missing_ids = [s["playerId"] for s in summary if s["playerId"] not in known_ids]
+        if missing_ids:
+            print(f"  Fetching names for {len(missing_ids)} unlisted players...")
+            missing_players = []
+            for pid in missing_ids:
+                try:
+                    data = nhl_get(f"{NHL_BASE}/player/{pid}/landing")
+                    missing_players.append(
+                        {
+                            "id": pid,
+                            "name": f"{data.get('firstName', {}).get('default', '')} {data.get('lastName', {}).get('default', '')}".strip(),
+                            "position": data.get("position"),
+                        }
+                    )
+                except FetchError as e:
+                    print(f"  ERROR: {e}")
+                finally:
+                    time.sleep(0.1)
+            if missing_players:
+                upsert(client, "players", missing_players, "id")
+
+        # Conflict key deliberately excludes `team` (Session 81 fix) -- it
+        # used to be part of this key, but `team` here (a possibly
+        # comma-joined trade-history string, e.g. "VAN,SJS") doesn't
+        # reliably match what moneypuck.py's own upsert writes for the
+        # same player (MoneyPuck's CSV only ever has their current team).
+        # That mismatch silently forked a traded player into two rows --
+        # one with real box-score stats, one with WAR/percentiles -- 338
+        # such pairs found and merged in production before this fix
+        # landed. See docs/session81_new_columns.sql for the matching
+        # unique-constraint migration this requires.
+        upsert(client, "player_seasons", rows, "player_id,season,game_type")
+    print("\n[3/5] Fetching goalie stats...")
+    for game_type in [2, 3]:
+        label = "Regular Season" if game_type == 2 else "Playoffs"
+        print(f"  {label}...")
+        goalies = fetch_goalie_stats(season, game_type)
+        rows = []
+        for g in goalies:
+            rows.append(
+                {
+                    "player_id": g["playerId"],
+                    "season": season,
+                    "team": g.get("teamAbbrevs", ""),
+                    "game_type": game_type,
+                    "games_played": g.get("gamesPlayed"),
+                    "games_started": g.get("gamesStarted"),
+                    "wins": g.get("wins"),
+                    "losses": g.get("losses"),
+                    "ot_losses": g.get("otLosses"),
+                    "shots_against": g.get("shotsAgainst"),
+                    "saves": g.get("saves"),
+                    "goals_against": g.get("goalsAgainst"),
+                    "sv_pct": g.get("savePctg"),
+                    "gaa": g.get("goalsAgainstAverage"),
+                    "shutouts": g.get("shutouts"),
+                    "toi": int(g.get("timeOnIce", 0)),
+                }
+            )
+        # Same team-mismatch fork as player_seasons above (Session 81) --
+        # goalies get traded too, just less often (2 duplicate pairs found
+        # vs. 338 for skaters).
+        upsert(client, "goalie_seasons", rows, "player_id,season,game_type")
+
+    write_team_seasons(client, season)
+    write_game_log(client, season)
 
     print("\nOK NHL stats pipeline complete")
 
@@ -908,5 +982,9 @@ def run_team_hits_penalties_rollup(client, season: int, game_type: int = 2) -> i
 if __name__ == "__main__":
     import sys
 
-    season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
-    run(season_arg)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    season_arg = int(args[0]) if args else NHL_SEASON
+    if "--teams-only" in sys.argv:
+        run_teams_only(season_arg)
+    else:
+        run(season_arg)

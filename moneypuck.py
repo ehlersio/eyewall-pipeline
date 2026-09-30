@@ -1445,9 +1445,20 @@ def run(season: int = NHL_SEASON) -> list[str]:
         return round(war, 3)
 
     # ── Compute and upsert analytics for all NHL players ──────────
+    # Only players nhl_stats.py gave a regular-season row: an upsert for
+    # anyone else creates a row with analytics and no box score. 149 such
+    # 2024-25 rows existed until 2026-09 -- copies of 2025-26 numbers, from
+    # a 2024-25 run that read the live season's file (#169) -- for players
+    # who hadn't played in 2024-25. Same rule as run_playoff_skaters().
     print("  Computing analytics for all NHL players...")
+    with_rows = season_player_ids(client, "player_seasons", season, NHL_REGULAR_SEASON)
+    skipped = [pid for pid in all_map if int(pid) not in with_rows]
+    if skipped:
+        print(f"  {len(skipped)} players in MoneyPuck's file have no regular-season row -- skipped")
     updates = []
     for pid, row in all_map.items():
+        if int(pid) not in with_rows:
+            continue
         is_fwd = row.get("position") in ("C", "L", "R", "F")
         pools = fwd_pools if is_fwd else def_pools
 

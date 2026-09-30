@@ -11,9 +11,13 @@ had 59, so 2025-26 UTA rows from that endpoint were silently dropped
 nhl_stats.py (both ids now mapped); this script backfills the rows that
 were already written null before that fix.
 
-Only touches the 9 summary-endpoint-derived columns -- doesn't re-upsert
-standings-derived fields (wins/losses/points/etc.) or corsi/xgf, which
-were already correct (they come from different endpoints/rollups).
+Only touches the summary-endpoint-derived columns -- doesn't re-upsert
+standings-derived fields or corsi/xgf, which come from different
+endpoints/rollups. The exception is the playoff row: nhl_stats.py takes a
+playoff row's record (games_played, wins, losses, ot_losses, points) from
+this same summary endpoint -- standings don't cover the playoffs -- so the
+game_type 3 row gets those too. The first version left them out, and UTA's
+2025-26 playoff row had goals and PP% but no games played (fixed 2026-09).
 
 Run: python backfill_uta_2025_team_stats.py
 """
@@ -48,6 +52,14 @@ def run() -> int:
             "shots_ag_pg": uta.get("shotsAgainstPerGame"),
             "faceoff_win_pct": uta.get("faceoffWinPct"),
         }
+        if game_type == 3:
+            row |= {
+                "games_played": uta.get("gamesPlayed"),
+                "wins": uta.get("wins"),
+                "losses": uta.get("losses"),
+                "ot_losses": uta.get("otLosses"),
+                "points": uta.get("points"),
+            }
         upsert(client, "team_seasons", [row], "team,season,game_type")
         print(
             f"  game_type={game_type}: backfilled from teamId={uta.get('teamId')} ({uta.get('teamFullName')})"
