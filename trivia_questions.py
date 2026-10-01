@@ -131,11 +131,11 @@ def generate_question_text(category_label: str, scope_label: str, locale: str = 
 # ---------------------------------------------------------------------------
 
 
-def get_qualified_nhl_players(stat: str, team: str | None) -> list[dict]:
+def get_qualified_nhl_players(stat: str, team: str | None, season: int = NHL_SEASON) -> list[dict]:
     q = (
         supabase.table("player_seasons")
         .select(f"player_id, team, games_played, {stat}")
-        .eq("season", int(NHL_SEASON))
+        .eq("season", int(season))
         .eq("game_type", 2)
         .gte("games_played", NHL_MIN_GP)
     )
@@ -156,6 +156,55 @@ def get_qualified_nhl_players(stat: str, team: str | None) -> list[dict]:
             continue
         out.append({"name": name, "value": r[stat] or 0})
     return out
+
+
+def previous_nhl_season(season: int) -> int:
+    """20262027 -> 20252026."""
+    start = int(season) // 10000
+    return (start - 1) * 10000 + start
+
+
+def season_label(season: int, locale: str = "en") -> str:
+    """20252026 -> "2025-26" (en, with an en dash) / "2025-2026" (fr)."""
+    start = int(season) // 10000
+    return f"{start}-{start + 1}" if locale == "fr" else f"{start}\u2013{str(start + 1)[2:]}"
+
+
+def for_season(category: dict, season: int) -> dict:
+    """
+    The category's labels about a finished season instead of "this season".
+    `past_season` also tells build_question_row to word the question itself
+    from a template: asked to phrase "points in 2025-26", the model wrote
+    "this season" anyway, which would be false.
+    """
+    return {
+        **category,
+        "past_season": True,
+        "label": category["label"].replace("this season", f"in {season_label(season)}"),
+        "label_fr": category["label_fr"].replace(
+            "cette saison", f"en {season_label(season, 'fr')}"
+        ),
+    }
+
+
+def nhl_question_source(category: dict, team: str | None) -> tuple[dict, list[dict]]:
+    """
+    This season's qualified players, or last season's while this one is too
+    young to ask about. From the rollover (the Worker resolves the new
+    season once its first game is near) until enough players reach
+    NHL_MIN_GP -- late October -- the new season has no one who qualifies,
+    and every NHL easy/medium question was skipped. Last season's numbers
+    are real; the category is relabeled "in 2025-26" so the question and
+    its explanation say which season they're about.
+    """
+    players = get_qualified_nhl_players(category["key"], team)
+    if build_options(players):
+        return category, players
+    prior = previous_nhl_season(NHL_SEASON)
+    prior_players = get_qualified_nhl_players(category["key"], team, prior)
+    if build_options(prior_players):
+        return for_season(category, prior), prior_players
+    return category, players
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +292,14 @@ def build_question_row(
     names, correct_index = built
 
     category_label = category["label_fr"] if locale == "fr" else category["label"]
-    question_text = generate_question_text(category_label, scope_label, locale)
+    if category.get("past_season"):
+        question_text = (
+            f"Lequel de ces quatre {scope_label} a mené pour les {category_label}?"
+            if locale == "fr"
+            else f"Which of these four {scope_label} led in {category_label}?"
+        )
+    else:
+        question_text = generate_question_text(category_label, scope_label, locale)
     if not question_text:
         return None
 
@@ -300,10 +356,10 @@ def run_easy(question_date: date, sport: str, dry_run: bool, locale: str = "en")
     ok = fail = 0
 
     if sport in ("nhl", "both"):
-        nhl_players = get_qualified_nhl_players(category["key"], team=None)
+        nhl_category, nhl_players = nhl_question_source(category, team=None)
         scope_label = "patineurs de la LNH" if locale == "fr" else "NHL skaters"
         row = build_question_row(
-            question_date, "easy", "nhl", "ALL", category, nhl_players, scope_label, locale
+            question_date, "easy", "nhl", "ALL", nhl_category, nhl_players, scope_label, locale
         )
         if row and upsert_question(row, dry_run):
             ok += 1
@@ -351,9 +407,9 @@ def run_medium(
     if sport in ("nhl", "both"):
         scope_label = "patineurs de cette équipe" if locale == "fr" else "skaters on this team"
         for abbr in NHL_TEAMS:
-            players = get_qualified_nhl_players(category["key"], team=abbr)
+            team_category, players = nhl_question_source(category, team=abbr)
             row = build_question_row(
-                question_date, "medium", "nhl", abbr, category, players, scope_label, locale
+                question_date, "medium", "nhl", abbr, team_category, players, scope_label, locale
             )
             if row and upsert_question(row, dry_run):
                 ok += 1
