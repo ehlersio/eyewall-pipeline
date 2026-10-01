@@ -29,7 +29,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
-from pipeline_common import FetchError
+from pipeline_common import NHL_PLAYOFFS, NHL_PRESEASON, NHL_REGULAR_SEASON, FetchError
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 CAR_ABBR = "CAR"
@@ -105,26 +105,36 @@ def get_already_processed(client, season):
     """Get game IDs already in shot_events (keyset-paginated -- see
     line_combinations.py::fetch_all's docstring for why OFFSET pagination
     is a timeout risk on this table as it grows every game of every
-    season; this query walks the whole table's depth every run)."""
+    season).
+
+    Pages one game type at a time so each page is served by
+    shot_events_season_type_id_idx (season, game type, id) -- see
+    docs/game_type_column.sql. Filtering on season alone has no index in
+    id order, so Postgres walks the primary key from the oldest row and
+    discards every other season's rows on the way. A new season's rows are
+    all at the end of the table, which is how the first page timed out
+    (57014) on 2026-09-30 and left 2026-27's regular-season games out."""
     all_ids = set()
-    last_id = 0
-    while True:
-        rows = (
-            client.table("shot_events")
-            .select("id,game_id")
-            .eq("season", season)
-            .gt("id", last_id)
-            .order("id")
-            .limit(999)
-            .execute()
-            .data
-        )
-        if not rows:
-            break
-        all_ids.update(r["game_id"] for r in rows)
-        last_id = rows[-1]["id"]
-        if len(rows) < 999:
-            break
+    for game_type in (NHL_PRESEASON, NHL_REGULAR_SEASON, NHL_PLAYOFFS):
+        last_id = 0
+        while True:
+            rows = (
+                client.table("shot_events")
+                .select("id,game_id")
+                .eq("season", season)
+                .eq("game_type", game_type)
+                .gt("id", last_id)
+                .order("id")
+                .limit(999)
+                .execute()
+                .data
+            )
+            if not rows:
+                break
+            all_ids.update(r["game_id"] for r in rows)
+            last_id = rows[-1]["id"]
+            if len(rows) < 999:
+                break
     return all_ids
 
 
