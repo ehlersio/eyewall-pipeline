@@ -101,7 +101,7 @@ class TestShotEventsFetchFailedVsCrashedSplit:
     def test_fetch_failure_counted_separately_from_crash(self, monkeypatch, capsys):
         games = [{"id": 1}, {"id": 2}]
 
-        def process_game(game, season):
+        def process_game(game, season, roster_out=None):
             if game["id"] == 1:
                 raise FetchError("nhl_get failed after 1 attempt")
             raise KeyError("unexpected PBP shape")
@@ -114,7 +114,7 @@ class TestShotEventsFetchFailedVsCrashedSplit:
     def test_all_fetch_failures_does_not_touch_crashed_counter(self, monkeypatch, capsys):
         games = [{"id": 1}, {"id": 2}]
 
-        def process_game(game, season):
+        def process_game(game, season, roster_out=None):
             raise FetchError("nhl_get failed after 3 attempts")
 
         out = self._run_with_games(monkeypatch, games, process_game, capsys)
