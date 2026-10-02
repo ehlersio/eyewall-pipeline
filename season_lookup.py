@@ -96,6 +96,96 @@ def get_pwhl_season() -> dict:
         return fallback
 
 
+def _pwhl_season_entry(raw) -> dict | None:
+    """One PWHL season object from /config/seasons ({seasonId, seasonType,
+    startYear, startDate}) -> {'season_id', 'season_type', 'start_year',
+    'start_date'}, or None for null/malformed. start_date can be None (an
+    override or an older cached Worker answer may not carry it)."""
+    try:
+        return {
+            "season_id": int(raw["seasonId"]),
+            "season_type": raw["seasonType"],
+            "start_year": int(raw["startYear"]),
+            "start_date": raw.get("startDate"),
+        }
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def get_pwhl_next_season() -> dict | None:
+    """The upcoming PWHL regular season -- the one the Worker's 14-day
+    lookahead is still holding back (seasons.js pickPWHLSeasonContext()) --
+    as {'season_id', 'season_type', 'start_year', 'start_date',
+    'preseason'}, where 'preseason' is the same shape or None. None when
+    there isn't one, or when the Worker can't say (unreachable, or a
+    version that predates `pwhl.next`)."""
+    try:
+        pwhl = _fetch_config()["pwhl"]
+        raw = pwhl["next"]
+    except FetchError as e:
+        print(f"  WARNING: {e}")
+        return None
+    except (KeyError, TypeError):
+        return None
+    entry = _pwhl_season_entry(raw)
+    if entry is not None:
+        entry["preseason"] = _pwhl_season_entry(raw.get("preseason"))
+    return entry
+
+
+def get_pwhl_upcoming_seasons() -> list[dict] | None:
+    """Every PWHL season besides the current one whose schedule the nightly
+    run should ingest: the current season's preseason, the next regular
+    season and the next season's preseason (from /config/seasons'
+    pwhl.preseason / pwhl.next / pwhl.next.preseason), each as
+    {'season_id', 'season_type', 'start_year', 'start_date'}, preseason
+    first. [] when there are none.
+
+    None -- "we don't know", not "there are none" -- when the Worker is
+    unreachable or doesn't serve these fields yet; callers should treat
+    that as a failure to report, not as an empty list."""
+    try:
+        pwhl = _fetch_config()["pwhl"]
+        current_id = int(pwhl["seasonId"])
+        raw_next = pwhl["next"]
+        raw_pre = pwhl["preseason"]
+    except FetchError as e:
+        print(f"  WARNING: {e}")
+        return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    raw = [raw_pre]
+    if isinstance(raw_next, dict):
+        raw += [raw_next.get("preseason"), raw_next]
+    seasons, seen = [], {current_id}
+    for entry in map(_pwhl_season_entry, raw):
+        if entry is not None and entry["season_id"] not in seen:
+            seen.add(entry["season_id"])
+            seasons.append(entry)
+    return seasons
+
+
+def get_pwhl_season_start_date(season_id: str | int) -> str | None:
+    """HockeyTech's start_date ("YYYY-MM-DD") for a PWHL season the Worker's
+    /config/seasons describes -- the current one, its preseason, the next
+    one and its preseason. None for any other season, or when the Worker
+    is unreachable."""
+    try:
+        pwhl = _fetch_config()["pwhl"]
+    except (FetchError, KeyError, TypeError) as e:
+        if isinstance(e, FetchError):
+            print(f"  WARNING: {e}")
+        return None
+    if not isinstance(pwhl, dict):
+        return None
+    nxt = pwhl.get("next") if isinstance(pwhl.get("next"), dict) else {}
+    for raw in (pwhl, pwhl.get("preseason"), nxt, nxt.get("preseason")):
+        if isinstance(raw, dict) and str(raw.get("seasonId")) == str(season_id):
+            start = raw.get("startDate")
+            return start if isinstance(start, str) and start else None
+    return None
+
+
 def get_hockeytech_season(league: str, default_season_id: int) -> dict:
     """Returns {'season_id': int, 'season_type': str} for "ahl" or "echl".
 

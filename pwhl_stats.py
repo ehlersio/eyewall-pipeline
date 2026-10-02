@@ -38,18 +38,21 @@ Usage:
         # ingested that season's goals, same ordering reasoning as
         # --toi-rollup-only above. See pwhl-nightly.yml.
     python pwhl_stats.py --game-log-only [season_id]
-        # Runs fetch_game_log() only, for a season_id that resolve_pwhl_season()
-        # deliberately does NOT pick as "current" -- namely preseason. Preseason
-        # isn't swept by the main run() (which always targets PWHL_SEASON, the
-        # live-resolved most-recent REGULAR season) or any of the *-only modes
-        # above, so without this it needs the same kind of manual backfill
-        # playoffs already needs (see pwhl_pbp_events.py's backfill comment).
-        # Unlike playoffs, preseason is a several-week window with new games
-        # completing day to day, so pwhl-nightly.yml runs this unconditionally
-        # every night against the current preseason season_id (hardcoded below,
-        # bump it once a year) rather than leaving it fully manual -- harmless
-        # no-op (fetch_game_log() upserts zero rows) until PWHL actually
-        # publishes that season's schedule.
+        # Runs fetch_game_log() only, for an explicit season_id that
+        # resolve_pwhl_season() deliberately does NOT pick as "current" --
+        # preseason, playoffs, a past season being backfilled. Manual use;
+        # the nightly run uses --upcoming-game-logs below.
+    python pwhl_stats.py --upcoming-game-logs
+        # Runs fetch_game_log() for every season around the current one that
+        # the main run() doesn't sweep: the current season's preseason and
+        # the next regular season with its preseason, as the Worker's
+        # /config/seasons names them (pwhl.preseason / pwhl.next). Nothing to
+        # bump each year. pwhl-nightly.yml runs it every night, so the next
+        # season's schedule (2026-27's Dec 5 opener) is in pwhl_game_log
+        # before the Worker switches to it, and the preseason keeps updating
+        # after the switch. Exits 1 if the Worker can't say which seasons
+        # those are, or if a season's dates fail the weekday check
+        # (GameDateError) -- that season writes nothing.
 
 Season IDs:
     1 = 2024 Regular Season (inaugural, 72 games — the real first season)
@@ -61,9 +64,9 @@ Season IDs:
     7 = 2025-26 Preseason
     8 = 2025-26 Regular Season (120 games, current)
     9 = 2025-26 Playoffs
-    10 = 2026-27 Preseason (confirmed live 2026-09 via HockeyTech bootstrap;
-         zero games as of this writing -- PWHL hasn't published this
-         schedule yet)
+    10 = 2026-27 Preseason (12 games, Nov 22-30 2026)
+    11 = 2026-27 Regular Season (starts Dec 4 2026; listed by HockeyTech
+         since 2026-09-28, the Worker's pwhl.next until ~Nov 20)
 
 Response structure note:
     HockeyTech returns a list of {sections: [{title, headers, data: [{row: {...}}]}]}
@@ -76,7 +79,7 @@ import os
 import re
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -84,7 +87,12 @@ from supabase import create_client
 from pipeline_common import FetchError, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
-from season_lookup import get_pwhl_season, get_season_type
+from season_lookup import (
+    get_pwhl_season,
+    get_pwhl_season_start_date,
+    get_pwhl_upcoming_seasons,
+    get_season_type,
+)
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -610,6 +618,11 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
 # computed date's weekday: seasons 3 and 6 had been entered as their
 # playoff year (2024/2025), dating every 2023-24 and 2024-25 playoff game
 # a year late, and season 10 was missing entirely (fell through to 2025).
+# Since 2026-10, seasons the Worker's /config/seasons describes (current,
+# next, and their preseasons) are dated from their real start_date
+# instead (_season_date_floor()), and every date is checked against the
+# weekday HockeyTech prints -- so a season missing here fails loudly
+# (GameDateError) rather than falling through to a guessed year.
 SEASON_YEAR_MAP = {
     "1": 2023,
     "2": 2023,
@@ -623,30 +636,79 @@ SEASON_YEAR_MAP = {
 SEASON_YEAR_MAP.setdefault(PWHL_SEASON, _pwhl_live["start_year"])
 
 
+class GameDateError(ValueError):
+    """A schedule date this module can't place in a year it trusts -- the
+    computed date falls on a different weekday than HockeyTech printed, or
+    nothing says when the season starts. Raised rather than written:
+    pwhl_game_log.game_date drives the Scoreboard and every "next game"
+    lookup, and a date a year off looks entirely plausible."""
+
+
+# Schedule dates are placed in the year that puts them on or after the
+# season's start, less this much slack (HockeyTech's start_date isn't
+# always the first game's date).
+SEASON_START_SLACK_DAYS = 60
+
+
+def _season_date_floor(season_id: str) -> date:
+    """Earliest date a game of `season_id` can fall on. From the season's
+    real HockeyTech start_date when the Worker's /config/seasons describes
+    it (the current season, its preseason, the next season and its
+    preseason -- so a brand-new season_id needs no map entry); otherwise
+    September 1 of its SEASON_YEAR_MAP start year (the map's long-standing
+    "Sep-Dec in the start year, Jan-Aug in the next" rule). Raises
+    GameDateError when neither knows the season -- the old fallback year
+    2025 dated every such game wrongly."""
+    start = get_pwhl_season_start_date(season_id)
+    if start:
+        try:
+            return date.fromisoformat(start) - timedelta(days=SEASON_START_SLACK_DAYS)
+        except ValueError:
+            pass
+    start_year = SEASON_YEAR_MAP.get(str(season_id))
+    if start_year is None:
+        raise GameDateError(
+            f"season {season_id}: no start date from the Worker and no SEASON_YEAR_MAP entry"
+        )
+    return date(int(start_year), 9, 1)
+
+
 def _parse_game_date(date_with_day: str, season_id: str) -> str | None:
-    """Convert 'Fri, Nov 21' to 'YYYY-MM-DD' using season year context."""
+    """Convert 'Fri, Nov 21' to 'YYYY-MM-DD': the first such date on or
+    after _season_date_floor(season_id). Verified against the weekday
+    HockeyTech prints -- a mismatch means the year is wrong, and raises
+    GameDateError rather than return it. None for text with no date."""
     if not date_with_day:
         return None
-    import re as _re
-
-    # Strip weekday prefix: "Fri, Nov 21" → "Nov 21"
-    m = _re.search(r"([A-Za-z]+ \d+)$", date_with_day.strip())
+    m = re.search(r"(?:([A-Za-z]{3})[A-Za-z]*,\s*)?([A-Za-z]+) (\d+)$", date_with_day.strip())
     if not m:
         return None
-    date_str = m.group(1)  # e.g. "Nov 21"
-    start_year = SEASON_YEAR_MAP.get(str(season_id), 2025)
-    # Months Oct-Dec are in start_year; Jan-Jun are in start_year+1
+    printed_weekday, month_name, day_text = m.groups()
     try:
-        from datetime import datetime as _dt
-
-        # Pick the year from the month first, then parse the full date with
-        # it: strptime without a year assumes 1900, which rejects Feb 29
-        # (and is deprecated from Python 3.15).
-        month = _dt.strptime(date_str.split()[0], "%b").month
-        year = start_year if month >= 9 else start_year + 1
-        return _dt.strptime(f"{date_str} {year}", "%b %d %Y").strftime("%Y-%m-%d")
+        month = datetime.strptime(month_name[:3], "%b").month
     except ValueError:
         return None
+    floor = _season_date_floor(season_id)
+    found = None
+    # The floor's year or the next: a season spans less than a year, and
+    # trying both covers Feb 29 too (strptime without a year assumes 1900,
+    # which rejects it).
+    for year in (floor.year, floor.year + 1):
+        try:
+            candidate = date(year, month, int(day_text))
+        except ValueError:
+            continue
+        if candidate >= floor:
+            found = candidate
+            break
+    if found is None:
+        raise GameDateError(f"season {season_id}: no {month_name} {day_text} on or after {floor}")
+    if printed_weekday and found.strftime("%a") != printed_weekday.title():
+        raise GameDateError(
+            f"season {season_id}: {date_with_day!r} computed as {found} ({found.strftime('%a')}) "
+            "-- the year is wrong, not writing it"
+        )
+    return found.isoformat()
 
 
 def _parse_pct(s) -> float | None:
@@ -1517,8 +1579,53 @@ def run_game_log_only(season_id: str) -> None:
     log.info("=== PWHL game log only complete ===")
 
 
+def run_upcoming_game_logs() -> int:
+    """Game log (schedule) for every season around the current one that
+    run() doesn't sweep -- the current season's preseason, and the next
+    regular season and its preseason -- per the Worker's /config/seasons
+    (season_lookup.get_pwhl_upcoming_seasons()). Replaces a hardcoded
+    `--game-log-only 10` that needed a manual bump every year; this needs
+    none: on 2026-10-01 it ingests 7, 10 and 11, so the 2026-12-05 opener
+    is in pwhl_game_log before the Worker switches to season 11 (~Nov 20),
+    and after the switch it keeps the Nov 22-30 preseason (10) current.
+
+    Returns a process exit code: 1 if the Worker couldn't say which seasons
+    those are, or if any season's dates couldn't be trusted (GameDateError
+    -- that season writes nothing); 0 otherwise."""
+    seasons = get_pwhl_upcoming_seasons()
+    if seasons is None:
+        log.error(
+            "Upcoming PWHL seasons unknown (Worker unreachable, or it doesn't serve "
+            "pwhl.next/pwhl.preseason yet) -- no upcoming game logs ingested"
+        )
+        return 1
+    if not seasons:
+        log.info("No upcoming PWHL seasons to ingest")
+        return 0
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    failed = []
+    for season in seasons:
+        season_id = str(season["season_id"])
+        # SEASON_TYPE_MAP first: it holds manual corrections (season "2").
+        season_type = SEASON_TYPE_MAP.get(season_id) or season["season_type"]
+        log.info(f"=== PWHL upcoming game log — season {season_id} ({season_type}) ===")
+        ensure_season_row(sb, season_id, season_type)  # FK target for pwhl_game_log
+        try:
+            fetch_game_log(sb, season_id)
+        except GameDateError as e:
+            log.error(f"  Season {season_id} game log NOT written: {e}")
+            failed.append(season_id)
+    if failed:
+        log.error(f"Upcoming game logs failed for season(s) {', '.join(failed)}")
+        return 1
+    log.info("=== PWHL upcoming game logs complete ===")
+    return 0
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if "--upcoming-game-logs" in args:
+        sys.exit(run_upcoming_game_logs())
     if "--shot-totals-only" in args:
         args = [a for a in args if a != "--shot-totals-only"]
         run_shot_totals_only(args[0] if args else None)

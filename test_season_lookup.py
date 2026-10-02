@@ -338,3 +338,127 @@ class TestGetSeasonType:
         assert len(calls) == 2
         assert any(u.endswith("/config/seasons") and "pwhl-types" not in u for u in calls)
         assert any(u.endswith("/config/seasons/pwhl-types") for u in calls)
+
+
+# /config/seasons' pwhl entry as the Worker (seasons.js
+# pickPWHLSeasonContext()) answers it, live against HockeyTech on
+# 2026-10-01 (before the switch) and with the clock set to 2026-11-25.
+PRESEASON_10 = {
+    "seasonId": 10,
+    "seasonType": "preseason",
+    "startYear": 2026,
+    "startDate": "2026-10-01",
+}
+PWHL_BEFORE_SWITCH = {
+    "seasonId": 8,
+    "seasonType": "regular",
+    "startYear": 2025,
+    "startDate": "2025-11-21",
+    "next": {
+        "seasonId": 11,
+        "seasonType": "regular",
+        "startYear": 2026,
+        "startDate": "2026-12-04",
+        "preseason": PRESEASON_10,
+    },
+    "preseason": {
+        "seasonId": 7,
+        "seasonType": "preseason",
+        "startYear": 2025,
+        "startDate": "2025-06-01",
+    },
+}
+PWHL_AFTER_SWITCH = {
+    "seasonId": 11,
+    "seasonType": "regular",
+    "startYear": 2026,
+    "startDate": "2026-12-04",
+    "next": None,
+    "preseason": PRESEASON_10,
+}
+
+
+def _serve_pwhl(monkeypatch, pwhl):
+    monkeypatch.setattr(
+        season_lookup.requests, "get", lambda *a, **k: _mock_response({"nhl": {}, "pwhl": pwhl})
+    )
+
+
+class TestGetPWHLNextSeason:
+    def test_returns_the_upcoming_season_with_its_preseason(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_BEFORE_SWITCH)
+        assert season_lookup.get_pwhl_next_season() == {
+            "season_id": 11,
+            "season_type": "regular",
+            "start_year": 2026,
+            "start_date": "2026-12-04",
+            "preseason": {
+                "season_id": 10,
+                "season_type": "preseason",
+                "start_year": 2026,
+                "start_date": "2026-10-01",
+            },
+        }
+
+    def test_none_after_the_switch(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_AFTER_SWITCH)
+        assert season_lookup.get_pwhl_next_season() is None
+
+    def test_none_from_a_worker_without_the_field(self, monkeypatch):
+        _serve_pwhl(monkeypatch, {"seasonId": 8, "seasonType": "regular", "startYear": 2025})
+        assert season_lookup.get_pwhl_next_season() is None
+
+    def test_none_when_the_worker_is_unreachable(self, monkeypatch):
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_pwhl_next_season() is None
+
+
+class TestGetPWHLUpcomingSeasons:
+    def test_before_the_switch_lists_both_preseasons_and_the_next_season(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_BEFORE_SWITCH)
+        seasons = season_lookup.get_pwhl_upcoming_seasons()
+        assert [(s["season_id"], s["season_type"], s["start_date"]) for s in seasons] == [
+            (7, "preseason", "2025-06-01"),
+            (10, "preseason", "2026-10-01"),
+            (11, "regular", "2026-12-04"),
+        ]
+
+    def test_after_the_switch_keeps_the_preseason_and_never_the_current_season(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_AFTER_SWITCH)
+        assert [s["season_id"] for s in season_lookup.get_pwhl_upcoming_seasons()] == [10]
+
+    def test_empty_when_there_are_none(self, monkeypatch):
+        _serve_pwhl(monkeypatch, {**PWHL_AFTER_SWITCH, "preseason": None})
+        assert season_lookup.get_pwhl_upcoming_seasons() == []
+
+    def test_unknown_not_empty_from_a_worker_without_the_fields(self, monkeypatch):
+        _serve_pwhl(monkeypatch, {"seasonId": 8, "seasonType": "regular", "startYear": 2025})
+        assert season_lookup.get_pwhl_upcoming_seasons() is None
+
+    def test_unknown_not_empty_when_the_worker_is_unreachable(self, monkeypatch):
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_pwhl_upcoming_seasons() is None
+
+    def test_skips_a_malformed_entry(self, monkeypatch):
+        _serve_pwhl(monkeypatch, {**PWHL_AFTER_SWITCH, "preseason": {"seasonId": "x"}})
+        assert season_lookup.get_pwhl_upcoming_seasons() == []
+
+
+class TestGetPWHLSeasonStartDate:
+    def test_finds_every_season_the_worker_describes(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_BEFORE_SWITCH)
+        assert season_lookup.get_pwhl_season_start_date(8) == "2025-11-21"
+        assert season_lookup.get_pwhl_season_start_date("7") == "2025-06-01"
+        assert season_lookup.get_pwhl_season_start_date(10) == "2026-10-01"
+        assert season_lookup.get_pwhl_season_start_date(11) == "2026-12-04"
+
+    def test_none_for_a_season_it_does_not_describe(self, monkeypatch):
+        _serve_pwhl(monkeypatch, PWHL_BEFORE_SWITCH)
+        assert season_lookup.get_pwhl_season_start_date(5) is None
+
+    def test_none_without_a_start_date_or_a_worker(self, monkeypatch):
+        _serve_pwhl(monkeypatch, {"seasonId": 8, "seasonType": "regular", "startYear": 2025})
+        assert season_lookup.get_pwhl_season_start_date(8) is None
+        season_lookup._cache = None
+        monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
+        assert season_lookup.get_pwhl_season_start_date(8) is None
