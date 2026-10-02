@@ -18,9 +18,16 @@ Frontend compatibility:
   - Goalie heat maps:  car_game=True AND team!='CAR' AND goalie_id=<id>
   - RAPM:             situation_code='1551' (all teams, no car_game filter)
 
+Every player a row names (shooter or goalie) is also made sure of in
+`players`: nhl_stats.py only adds rostered players and those with
+regular-season or playoff stats, so a prospect who only played preseason
+games had no name anywhere -- the shot map's season view said "Unknown"
+for his shots (2026-10). Names come from each game's own rosterSpots.
+
 Usage:
-  python shot_events.py              # current season
-  python shot_events.py 20242025     # backfill a prior season
+  python shot_events.py                       # current season
+  python shot_events.py 20242025              # backfill a prior season
+  python shot_events.py --players [season]    # just add the season's unnamed players
 """
 
 import time
@@ -28,8 +35,14 @@ import traceback
 
 import requests
 
-from db import NHL_SEASON, get_client
-from pipeline_common import NHL_PLAYOFFS, NHL_PRESEASON, NHL_REGULAR_SEASON, FetchError
+from db import NHL_SEASON, get_client, upsert
+from pipeline_common import (
+    NHL_PLAYOFFS,
+    NHL_PRESEASON,
+    NHL_REGULAR_SEASON,
+    FetchError,
+    select_all,
+)
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 CAR_ABBR = "CAR"
@@ -138,7 +151,55 @@ def get_already_processed(client, season):
     return all_ids
 
 
-def process_game(game, season):
+def roster_players(pbp) -> dict:
+    """id -> {id, name, position} for everyone in a game's rosterSpots."""
+    out = {}
+    for s in pbp.get("rosterSpots") or []:
+        pid = s.get("playerId")
+        first = (s.get("firstName") or {}).get("default", "")
+        last = (s.get("lastName") or {}).get("default", "")
+        name = f"{first} {last}".strip()
+        if pid and name:
+            out[pid] = {"id": pid, "name": name, "position": s.get("positionCode")}
+    return out
+
+
+def known_player_ids(client) -> set:
+    """Every player id already in `players` (paged -- it's past 1,000 rows)."""
+    return {r["id"] for r in select_all(lambda: client.table("players").select("id"), order="id")}
+
+
+def add_missing_players(client, ids, known: set, roster: dict) -> list:
+    """Insert into `players` each of `ids` it doesn't have yet, named from
+    `roster` (a game's rosterSpots) or, failing that, the player's NHL
+    landing page. Only ever adds rows: a player already there keeps his
+    row as nhl_stats.py wrote it (team, bio). Adds the new ids to `known`
+    and returns the rows inserted."""
+    rows = []
+    for pid in sorted({i for i in ids if i} - known):
+        row = roster.get(pid)
+        if not row:
+            try:
+                data = nhl_get(f"{NHL_BASE}/player/{pid}/landing")
+            except FetchError as e:
+                print(f"  ERROR: {e}")
+                continue
+            name = (
+                f"{(data.get('firstName') or {}).get('default', '')} "
+                f"{(data.get('lastName') or {}).get('default', '')}"
+            ).strip()
+            if not name:
+                continue
+            row = {"id": pid, "name": name, "position": data.get("position")}
+            time.sleep(0.1)
+        rows.append(row)
+    if rows:
+        upsert(client, "players", rows, "id")
+        known.update(r["id"] for r in rows)
+    return rows
+
+
+def process_game(game, season, roster_out=None):
     game_id = game["id"]
     home_abbr = game.get("homeTeam", {}).get("abbrev", "")
     away_abbr = game.get("awayTeam", {}).get("abbrev", "")
@@ -148,6 +209,9 @@ def process_game(game, season):
     pbp = nhl_get(f"{NHL_BASE}/gamecenter/{game_id}/play-by-play")
     if not pbp.get("plays"):
         return []
+    # The caller's chance to name anyone these rows mention (see run())
+    if roster_out is not None:
+        roster_out.update(roster_players(pbp))
 
     # Build team ID -> abbrev map from PBP roster
     home_id = pbp.get("homeTeam", {}).get("id")
@@ -226,6 +290,8 @@ def run(season=NHL_SEASON):
         print("  All games already processed")
         return
 
+    known = None  # player ids in `players`, read once the first game has shots
+    added_players = 0
     total_shots = 0
     errors = 0  # process_game() returned no data (game has no PBP plays yet, e.g. postponed)
     fetch_failed = 0  # nhl_get() raised FetchError -- the fetch itself broke, not a parser bug
@@ -233,7 +299,8 @@ def run(season=NHL_SEASON):
 
     for i, game in enumerate(pending):
         try:
-            shots = process_game(game, season)
+            roster = {}
+            shots = process_game(game, season, roster_out=roster)
         except FetchError as e:
             # Fetch failed (network/HTTP/JSON) after nhl_get()'s own handling -- kept
             # separate from `crashed` so "Games that crashed the parser" isn't inflated
@@ -254,6 +321,10 @@ def run(season=NHL_SEASON):
             for j in range(0, len(shots), 500):
                 client.table("shot_events").insert(shots[j : j + 500]).execute()
             total_shots += len(shots)
+            if known is None:
+                known = known_player_ids(client)
+            ids = [s["player_id"] for s in shots] + [s["goalie_id"] for s in shots]
+            added_players += len(add_missing_players(client, ids, known, roster))
         else:
             errors += 1
 
@@ -264,6 +335,8 @@ def run(season=NHL_SEASON):
 
     print("\nShot events pipeline complete")
     print(f"   Shots inserted: {total_shots:,}")
+    if added_players:
+        print(f"   Players added to `players`: {added_players}")
     if errors:
         print(f"   Games with no data: {errors}")
     if fetch_failed:
@@ -272,8 +345,46 @@ def run(season=NHL_SEASON):
         print(f"   Games that crashed the parser: {crashed}")
 
 
+def run_missing_players(season=NHL_SEASON):
+    """Add every player `season`'s shot_events rows name but `players`
+    lacks -- the backfill for rows written before run() did this itself.
+    Names come from each player's NHL landing page."""
+    client = get_client()
+    print(f"\n=== Shot events: missing players -- Season {season} ===")
+    # Keyset-paged, like get_already_processed(): an OFFSET walk over this
+    # table times out (it did, 2026-10).
+    ids, last_id, n = set(), 0, 0
+    while True:
+        rows = (
+            client.table("shot_events")
+            .select("id,player_id,goalie_id")
+            .eq("season", season)
+            .gt("id", last_id)
+            .order("id")
+            .limit(999)
+            .execute()
+            .data
+        )
+        if not rows:
+            break
+        n += len(rows)
+        ids.update(r["player_id"] for r in rows)
+        ids.update(r["goalie_id"] for r in rows)
+        last_id = rows[-1]["id"]
+        if len(rows) < 999:
+            break
+    added = add_missing_players(client, ids, known_player_ids(client), {})
+    for r in added:
+        print(f"  + {r['id']} {r['name']} ({r['position']})")
+    print(f"  {len(added)} added, from {n:,} rows")
+
+
 if __name__ == "__main__":
     import sys
 
-    season_arg = int(sys.argv[1]) if len(sys.argv) > 1 else NHL_SEASON
-    run(season=season_arg)
+    args = sys.argv[1:]
+    if args and args[0] == "--players":
+        run_missing_players(*([int(args[1])] if len(args) > 1 else []))
+    else:
+        season_arg = int(args[0]) if args else NHL_SEASON
+        run(season=season_arg)

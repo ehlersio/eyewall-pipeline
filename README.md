@@ -158,6 +158,13 @@ python backfill_shot_event_ids.py --season 20252026  # one season
 python backfill_shot_event_ids.py --verify           # what's still missing
 ```
 
+Every player a row names, shooter or goalie, is also made sure of in **`players`** (2026-10). `nhl_stats.py` only adds rostered players and those with regular-season or playoff stats, so a prospect who only played preseason games had no name anywhere, and the app's shot map said "Unknown" for his shots. 71 such players were missing for 2026-27, including CAR's Zachary Lansard and Filip Ekberg. Each new game's `rosterSpots` names them. This only ever inserts: a player already in `players` keeps the row `nhl_stats.py` wrote. For rows ingested before this, add a season's unnamed players from their NHL landing pages:
+
+```bash
+python shot_events.py --players            # current season
+python shot_events.py --players 20252026   # a past season
+```
+
 ### `shift_data.py`
 Per-player shift start/end times. Falls back to HTML shift reports when JSON API returns no data. Used by `rapm.py`. Incremental.
 
