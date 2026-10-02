@@ -158,11 +158,18 @@ python backfill_shot_event_ids.py --season 20252026  # one season
 python backfill_shot_event_ids.py --verify           # what's still missing
 ```
 
-Every player a row names, shooter or goalie, is also made sure of in **`players`** (2026-10). `nhl_stats.py` only adds rostered players and those with regular-season or playoff stats, so a prospect who only played preseason games had no name anywhere, and the app's shot map said "Unknown" for his shots. 71 such players were missing for 2026-27, including CAR's Zachary Lansard and Filip Ekberg. Each new game's `rosterSpots` names them. This only ever inserts: a player already in `players` keeps the row `nhl_stats.py` wrote. For rows ingested before this, add a season's unnamed players from their NHL landing pages:
+Every player a row names (shooter, goalie, assists, blocker) is also made sure of in **`players`** (2026-10). `nhl_stats.py` only adds rostered players and those with regular-season or playoff stats, so a prospect who only played preseason games had no name anywhere, and the app's shot map said "Unknown" for his shots. 71 such players were missing for 2026-27, including CAR's Zachary Lansard and Filip Ekberg. Each new game's `rosterSpots` names them. This only ever inserts: a player already in `players` keeps the row `nhl_stats.py` wrote. For rows ingested before this, add a season's unnamed players from their NHL landing pages:
 
 ```bash
 python shot_events.py --players            # current season
 python shot_events.py --players 20252026   # a past season
+```
+
+Rows also carry **`assist1_id`, `assist2_id`** (goals) and **`blocker_id`** (blocked shots) since 2026-10, from the play-by-play's `assist1PlayerId`/`assist2PlayerId`/`blockingPlayerId`, so the app's season shot map can name them. Add the columns first with `docs/shot_events_assists_blocker.sql`. The nightly run skips games it already has, so rows written before then stay null until their game is rewritten. 2026-27 has been; earlier seasons haven't:
+
+```bash
+python shot_events.py --reprocess            # rewrite every completed game of the current season
+python shot_events.py --reprocess 20252026   # a past season (~1,400 games, slow)
 ```
 
 ### `shift_data.py`

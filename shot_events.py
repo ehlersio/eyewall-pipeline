@@ -18,7 +18,7 @@ Frontend compatibility:
   - Goalie heat maps:  car_game=True AND team!='CAR' AND goalie_id=<id>
   - RAPM:             situation_code='1551' (all teams, no car_game filter)
 
-Every player a row names (shooter or goalie) is also made sure of in
+Every player a row names (shooter, goalie, assists, blocker) is also made sure of in
 `players`: nhl_stats.py only adds rostered players and those with
 regular-season or playoff stats, so a prospect who only played preseason
 games had no name anywhere -- the shot map's season view said "Unknown"
@@ -28,6 +28,7 @@ Usage:
   python shot_events.py                       # current season
   python shot_events.py 20242025              # backfill a prior season
   python shot_events.py --players [season]    # just add the season's unnamed players
+  python shot_events.py --reprocess [season]  # rewrite every game (fill a new column)
 """
 
 import time
@@ -49,6 +50,10 @@ CAR_ABBR = "CAR"
 HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
 
 SHOT_TYPES = {"shot-on-goal", "missed-shot", "blocked-shot", "goal"}
+
+# Every column of a row that holds an NHL player id -- each one is made
+# sure of in `players` (see add_missing_players)
+PLAYER_COLUMNS = ("player_id", "goalie_id", "assist1_id", "assist2_id", "blocker_id")
 
 ALL_TEAMS = [
     "ANA",
@@ -256,6 +261,11 @@ def process_game(game, season, roster_out=None):
                 "event_id": play.get("eventId"),
                 "player_id": shooter_id,
                 "goalie_id": goalie_id,
+                # Who assisted (goals) and who blocked (blocked shots) --
+                # see docs/shot_events_assists_blocker.sql
+                "assist1_id": d.get("assist1PlayerId"),
+                "assist2_id": d.get("assist2PlayerId"),
+                "blocker_id": d.get("blockingPlayerId"),
                 "season": season,
                 "game_id": game_id,
                 "team": shooter_team,  # real abbrev e.g. 'BOS'
@@ -274,7 +284,10 @@ def process_game(game, season, roster_out=None):
     return shots
 
 
-def run(season=NHL_SEASON):
+def run(season=NHL_SEASON, reprocess=False):
+    """Ingest `season`'s completed games not yet in shot_events. With
+    `reprocess`, rewrite every completed game instead -- for filling a new
+    column on rows already ingested (each game's rows are replaced whole)."""
     client = get_client()
     print(f"\n=== Shot Events Pipeline (league-wide) -- Season {season} ===")
 
@@ -282,9 +295,13 @@ def run(season=NHL_SEASON):
     games = get_all_completed_games(season)
     print(f"  Found {len(games):,} completed games across all 32 teams")
 
-    already_done = get_already_processed(client, season)
-    pending = [g for g in games if g["id"] not in already_done]
-    print(f"  {len(already_done):,} already processed, {len(pending):,} pending")
+    if reprocess:
+        pending = games
+        print(f"  Re-processing all {len(pending):,}")
+    else:
+        already_done = get_already_processed(client, season)
+        pending = [g for g in games if g["id"] not in already_done]
+        print(f"  {len(already_done):,} already processed, {len(pending):,} pending")
 
     if not pending:
         print("  All games already processed")
@@ -323,7 +340,7 @@ def run(season=NHL_SEASON):
             total_shots += len(shots)
             if known is None:
                 known = known_player_ids(client)
-            ids = [s["player_id"] for s in shots] + [s["goalie_id"] for s in shots]
+            ids = [s[k] for s in shots for k in PLAYER_COLUMNS]
             added_players += len(add_missing_players(client, ids, known, roster))
         else:
             errors += 1
@@ -357,7 +374,7 @@ def run_missing_players(season=NHL_SEASON):
     while True:
         rows = (
             client.table("shot_events")
-            .select("id,player_id,goalie_id")
+            .select("id," + ",".join(PLAYER_COLUMNS))
             .eq("season", season)
             .gt("id", last_id)
             .order("id")
@@ -368,8 +385,7 @@ def run_missing_players(season=NHL_SEASON):
         if not rows:
             break
         n += len(rows)
-        ids.update(r["player_id"] for r in rows)
-        ids.update(r["goalie_id"] for r in rows)
+        ids.update(r[k] for r in rows for k in PLAYER_COLUMNS)
         last_id = rows[-1]["id"]
         if len(rows) < 999:
             break
@@ -385,6 +401,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args and args[0] == "--players":
         run_missing_players(*([int(args[1])] if len(args) > 1 else []))
+    elif args and args[0] == "--reprocess":
+        run(season=int(args[1]) if len(args) > 1 else NHL_SEASON, reprocess=True)
     else:
         season_arg = int(args[0]) if args else NHL_SEASON
         run(season=season_arg)
