@@ -44,24 +44,6 @@ jobs:
         # ever run manually, so pwhl_pbp_events.py below has been running
         # nightly against whatever game_log snapshot was last set by hand.
 
-      - name: Ingest PWHL preseason game log (schedule only)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python pwhl_stats.py --game-log-only 10
-        # PWHL_SEASON above always resolves to the most recent REGULAR
-        # season (resolve_pwhl_season()'s deliberate preference — see
-        # season_lookup.py) so preseason is never swept by the step above,
-        # same gap playoffs already has. Unlike playoffs (a few weeks,
-        # backfilled by hand per round), preseason is a month-long window
-        # with new games completing day to day, so this runs unconditionally
-        # every night rather than needing a manual command each time.
-        # Harmless no-op today (fetch_game_log() upserts zero rows) --
-        # PWHL hasn't published the 2026-27 preseason schedule yet.
-        # 10 = "2026-27 Pre-Season" (confirmed live 2026-09 via HockeyTech
-        # bootstrap). Bump this literal once a year, same convention as
-        # eyewall-analytics's PWHL_SEASONS entries in pwhlConfig.js.
-
       - name: Ingest PWHL shot events (goals, shots, blocked shots)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -251,6 +233,30 @@ jobs:
         # it doesn't depend on the steps above. Writes pwhl_team_elo_ratings
         # (read by eyewall-poller's /pwhl/prediction) and pwhl_game_win_probs.
         # Tables: docs/pwhl_elo_ddl.sql.
+
+      - name: Ingest upcoming PWHL schedules (preseason + next season game logs)
+        if: ${{ !cancelled() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pwhl_stats.py --upcoming-game-logs
+        # PWHL_SEASON (the steps above) is always the most recent REGULAR
+        # season the Worker has switched to, so nothing above sweeps the
+        # preseason or next season's schedule. This ingests the game logs of
+        # every season around it -- the current season's preseason, the next
+        # regular season and its preseason -- as the Worker's /config/seasons
+        # names them (pwhl.preseason / pwhl.next), so there's no season_id
+        # to bump each year (it replaced a hardcoded `--game-log-only 10`).
+        # On 2026-10-01 that's 7, 10 and 11: the 2026-27 opener (Dec 5) is
+        # in pwhl_game_log before the Worker switches to season 11 (~Nov 20),
+        # and the Nov 22-30 preseason (10) keeps updating after it.
+        #
+        # Last, and run even if an earlier step failed: it depends on none
+        # of them, and when it fails it fails loudly (exit 1) -- the Worker
+        # couldn't say which seasons these are, or a season's dates failed
+        # the weekday check and nothing was written for it -- without
+        # skipping the steps above, which a failure of the old step at the
+        # top of this file did three nights running in 2026-09.
 
       - name: Notify on failure
         if: failure()
