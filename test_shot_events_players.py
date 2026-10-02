@@ -112,3 +112,80 @@ class TestProcessGameHandsBackTheRoster:
         ):
             shot_events.process_game(game, 20262027, roster_out=roster)
         assert roster[8486229]["name"] == "Zachary Lansard"
+
+
+ASSIST_GAME = {
+    "id": 2026020001,
+    "homeTeam": {"abbrev": "CAR"},
+    "awayTeam": {"abbrev": "FLA"},
+    "gameType": 2,
+}
+
+
+class TestAssistsAndBlocker:
+    """Rows keep who assisted on a goal and who blocked a blocked shot
+    (docs/shot_events_assists_blocker.sql), and those players get names."""
+
+    def play(self, event_id, type_key, **details):
+        return {
+            "eventId": event_id,
+            "typeDescKey": type_key,
+            "periodDescriptor": {"number": 1},
+            "timeInPeriod": "05:00",
+            "details": {"xCoord": 80, "yCoord": 2, "eventOwnerTeamId": 13, **details},
+        }
+
+    def test_goal_keeps_its_assists_and_a_block_its_blocker(self):
+        plays = [
+            self.play(
+                1, "goal", scoringPlayerId=8479314, assist1PlayerId=8477493, assist2PlayerId=8478366
+            ),
+            self.play(2, "blocked-shot", shootingPlayerId=8479314, blockingPlayerId=8478427),
+            self.play(3, "shot-on-goal", shootingPlayerId=8479314, goalieInNetId=8483548),
+        ]
+        with patch.object(shot_events, "nhl_get", return_value={"plays": plays, "rosterSpots": []}):
+            rows = shot_events.process_game(ASSIST_GAME, 20262027)
+        by_id = {r["event_id"]: r for r in rows}
+        assert (by_id[1]["assist1_id"], by_id[1]["assist2_id"], by_id[1]["blocker_id"]) == (
+            8477493,
+            8478366,
+            None,
+        )
+        assert (by_id[2]["assist1_id"], by_id[2]["blocker_id"]) == (None, 8478427)
+        assert (by_id[3]["assist1_id"], by_id[3]["assist2_id"], by_id[3]["blocker_id"]) == (
+            None,
+            None,
+            None,
+        )
+
+    def test_every_player_column_is_named(self):
+        assert set(shot_events.PLAYER_COLUMNS) == {
+            "player_id",
+            "goalie_id",
+            "assist1_id",
+            "assist2_id",
+            "blocker_id",
+        }
+
+
+class TestReprocess:
+    def _run(self, monkeypatch, reprocess):
+        client = MagicMock()
+        seen = []
+        monkeypatch.setattr(shot_events, "get_client", lambda: client)
+        monkeypatch.setattr(
+            shot_events, "get_all_completed_games", lambda season: [{"id": 1}, {"id": 2}]
+        )
+        monkeypatch.setattr(shot_events, "get_already_processed", lambda c, season: {1})
+        monkeypatch.setattr(
+            shot_events, "process_game", lambda g, s, roster_out=None: seen.append(g["id"]) or []
+        )
+        monkeypatch.setattr(shot_events.time, "sleep", lambda *_a, **_k: None)
+        shot_events.run(season=20262027, reprocess=reprocess)
+        return seen
+
+    def test_a_normal_run_skips_games_already_in(self, monkeypatch):
+        assert self._run(monkeypatch, reprocess=False) == [2]
+
+    def test_reprocess_rewrites_every_game(self, monkeypatch):
+        assert self._run(monkeypatch, reprocess=True) == [1, 2]
