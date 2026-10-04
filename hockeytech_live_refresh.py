@@ -1,6 +1,7 @@
 """
 hockeytech_live_refresh.py -- frequent refresh of {league}_game_log's
-live-volatile fields (game_state, game_status_code, home_score, away_score)
+live-volatile fields (game_state, game_status_code, home_score, away_score,
+ended_in)
 for games in a narrow window around today. Shared by ahl_live_refresh.py
 and echl_live_refresh.py.
 
@@ -20,7 +21,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from hockeytech_leagues import HOCKEYTECH_BASE, League
+from hockeytech_leagues import HOCKEYTECH_BASE, League, ended_in
 
 load_dotenv()
 
@@ -84,6 +85,7 @@ def main(lg: League) -> None:
                 "game_status_code": status_code,
                 "home_score": int(g.get("HomeGoals", 0) or 0),
                 "away_score": int(g.get("VisitorGoals", 0) or 0),
+                "ended_in": ended_in(g.get("GameStatusStringLong")),
             }
         )
 

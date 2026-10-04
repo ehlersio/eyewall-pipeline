@@ -33,7 +33,7 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from hockeytech_leagues import HOCKEYTECH_BASE, League
+from hockeytech_leagues import HOCKEYTECH_BASE, League, ended_in
 from pipeline_common import FetchError, hockeytech_statview_get
 from season_lookup import get_hockeytech_season, get_hockeytech_seasons
 
@@ -712,6 +712,7 @@ def fetch_game_log(lg: League, sb, season_id: str) -> None:
                 "away_score": int(g.get("VisitorGoals", 0) or 0),
                 "game_state": status,
                 "game_status_code": status_code,
+                "ended_in": ended_in(g.get("GameStatusStringLong")),
                 "venue_name": g.get("venue_name") or None,
                 "venue_city": g.get("venue_location") or None,
                 "updated_at": datetime.now(UTC).isoformat(),

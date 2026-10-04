@@ -36,6 +36,8 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+from hockeytech_leagues import ended_in
+
 load_dotenv()
 
 logging.basicConfig(
@@ -110,6 +112,10 @@ def main():
                 "game_status_code": status_code,
                 "home_score": int(g.get("HomeGoals", 0) or 0),
                 "away_score": int(g.get("VisitorGoals", 0) or 0),
+                # Set here too, not only by the nightly pwhl_stats.py run, so
+                # a game that just ended in OT reads Final/OT tonight.
+                "ot": ended_in(g.get("GameStatusStringLong")) == "OT",
+                "shootout": ended_in(g.get("GameStatusStringLong")) == "SO",
             }
         )
 

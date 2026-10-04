@@ -789,6 +789,7 @@
         {
           "away_score": 0,
           "away_team_id": 8,
+          "ended_in": null,
           "game_date": "2026-01-15",
           "game_id": 1010,
           "game_state": "7:00PM",
@@ -803,6 +804,7 @@
         {
           "away_score": 1,
           "away_team_id": 99,
+          "ended_in": null,
           "game_date": "2026-01-15",
           "game_id": 1011,
           "game_state": "2nd",
@@ -817,6 +819,7 @@
         {
           "away_score": 2,
           "away_team_id": 99,
+          "ended_in": null,
           "game_date": "2026-01-14",
           "game_id": 1001,
           "game_state": "Final",

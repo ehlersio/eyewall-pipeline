@@ -945,7 +945,9 @@ python ahl_penalty_shots.py --game 1028362   # single game_id (debug)
 No coordinate data exists for penalty shots (make or miss) — same as PWHL, `ahl_penalty_shots` has no x/y columns and these events are never written to `ahl_shot_events`.
 
 ### `ahl_live_refresh.py`
-Lightweight, frequent refresh of just `ahl_game_log`'s live-volatile fields (`game_state`, `game_status_code`, `home_score`, `away_score`) for games in a ±1-day window around today. Run via `live-score-refresh.yml`'s 5-minute cron, separate from `ahl_stats.py`'s full nightly ingest.
+Lightweight, frequent refresh of just `ahl_game_log`'s live-volatile fields (`game_state`, `game_status_code`, `home_score`, `away_score`, `ended_in`) for games in a ±1-day window around today.
+
+**`ended_in` (2026-10):** `'OT'`/`'SO'` for a final that went past regulation, else null, read by `hockeytech_leagues.ended_in()` from scorebar's `GameStatusStringLong` ("Final OT"/"Final SO"). The short `GameStatusString` stored in `game_state` says "Final" for all three. Written here and by `hockeytech_stats.py`'s `fetch_game_log()`, for both AHL and ECHL; needs `docs/hockeytech_game_log_ended_in.sql` run first. `pwhl_live_refresh.py` now sets `pwhl_game_log.ot`/`shootout` from the same field, so a PWHL OT final shows the same night instead of after the nightly run. Run via `live-score-refresh.yml`'s 5-minute cron, separate from `ahl_stats.py`'s full nightly ingest.
 
 **Why this exists:** `ahl_stats.py` only runs once nightly (3:40 AM ET) and writes the whole season including future/scheduled games — nothing updates `game_state`/scores again until the following night. A game happening today would sit at whatever status the last nightly snapshot showed for the entire day, even after it goes live or finishes, meaning the Worker's per-minute live-game polling could never actually see a live game. This traced back to a real gap found while building AHL/PWHL live-tracking parity: `pwhl_game_log.game_state` had exactly the same problem, so `pwhl_live_refresh.py` was built as a companion fix in the same PR (#97) rather than an AHL-only patch.
 
