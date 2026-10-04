@@ -50,6 +50,27 @@ class League:
         }
 
 
+def ended_in(status: str | None) -> str | None:
+    """'OT' or 'SO' for a final that went past regulation, else None.
+
+    `status` is HockeyTech's long status text: scorebar's
+    GameStatusStringLong ("Final", "Final OT", "Final SO"; confirmed live
+    2026-10-04 on AHL games 1029091 and 1029088) or the PWHL schedule view's
+    game_status, which reads the same way. Scorebar's short GameStatusString
+    says just "Final" for all three, which is why {league}_game_log had no
+    way to tell them apart. Multi-overtime playoff finals ("Final 2OT")
+    count as OT.
+    """
+    words = (status or "").upper().split()
+    if not words or words[0] != "FINAL":
+        return None
+    if "SO" in words:
+        return "SO"
+    if any(w.endswith("OT") for w in words[1:]):
+        return "OT"
+    return None
+
+
 def strip_jsonp(text: str) -> str:
     """Unwrap a per-game response only if it actually is JSONP-wrapped.
 

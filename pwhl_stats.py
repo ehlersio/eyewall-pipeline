@@ -84,6 +84,7 @@ from datetime import UTC, date, datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
+from hockeytech_leagues import ended_in
 from pipeline_common import FetchError, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
@@ -1451,8 +1452,8 @@ def fetch_game_log(sb, season_id: str) -> None:
                 # The schedule view has no ot/shootout fields -- only
                 # game_status "Final OT" / "Final SO" (reading g.get("ot")
                 # left both False for every game until 2026-09).
-                "ot": status.strip() == "Final OT",
-                "shootout": status.strip() == "Final SO",
+                "ot": ended_in(status) == "OT",
+                "shootout": ended_in(status) == "SO",
                 "venue_name": venue_name or None,
                 "venue_city": venue_city or None,
                 "updated_at": datetime.now(UTC).isoformat(),
