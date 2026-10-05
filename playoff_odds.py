@@ -30,8 +30,16 @@ Model:
   prior season's alignment until the current season has standings rows.
 
 Explaining the change: each run also stores, for every game on the next
-game-day, every team's playoff odds conditional on each result
-(playoff_odds_game_impacts). The next run looks up the actual results of
+game-day, every team's playoff odds under each result
+(playoff_odds_game_impacts). These come from flipping that one game in
+every simulated season -- the same seasons, tiebreak draws and other
+results, only that game's winner changed -- not from splitting the
+seasons by who won it. Splitting compared two different halves of the
+simulated seasons, so each number carried about a point of sampling
+noise: on 2026-10-05 a Western game (SJS @ DAL) moved CAR's odds 1.1
+points, an effect it can't have. It also mixed in each season's random
+rating shift (seasons where a team won tonight lean toward seasons where
+it was drawn stronger), overstating what one result does. The next run looks up the actual results of
 those games and, for each team, attributes the move to them:
 contribution = (odds given the actual result) - (previous odds). The
 games involving the team, plus any other game worth >= IMPACT_MIN, are
@@ -167,12 +175,17 @@ def home_win_prob(r_home: float, r_away: float, neutral: bool) -> float:
     return elo.expected_prob(r_home + (0.0 if neutral else elo.HOME_ADVANTAGE), r_away)
 
 
-def seed(names, teams, pts, rw, wins, rng):
+def seed(names, teams, pts, rw, wins, rng, tiebreak=None):
     """(made_playoffs, won_division), both (n_sims x n_teams) bool arrays.
-    Ranking key: points, then regulation wins, then wins, then random."""
+    Ranking key: points, then regulation wins, then wins, then random.
+    tiebreak: the random draws in [0, 0.5) to use (shaped like pts), so a
+    season re-seeded with one result flipped breaks ties the same way;
+    drawn from rng when not given."""
     n_sims = pts.shape[0]
     rows = np.arange(n_sims)[:, None]
-    key = pts * 1e6 + rw * 1e3 + wins + rng.random(pts.shape) * 0.5
+    if tiebreak is None:
+        tiebreak = rng.random(pts.shape) * 0.5
+    key = pts * 1e6 + rw * 1e3 + wins + tiebreak
     made = np.zeros(pts.shape, dtype=bool)
     div_first = np.zeros(pts.shape, dtype=bool)
 
@@ -202,8 +215,9 @@ def simulate(
     rating_sd=0.0,
 ):
     """Simulate the remaining schedule n_sims times. Returns per-team odds
-    and, for each game in track_game_ids, each team's odds conditional on
-    that game's result. rating_sd > 0 gives each team its own random rating
+    and, for each game in track_game_ids, each team's odds if the home team
+    wins it and if the away team wins it (that game flipped in every
+    simulated season, nothing else changed -- see flip_result()). rating_sd > 0 gives each team its own random rating
     shift per simulated season (see module docstring); 0 = fixed ratings."""
     rng = rng if rng is not None else np.random.default_rng()
     names = sorted(teams)
@@ -218,8 +232,8 @@ def simulate(
     )
     if rating_sd > 0:
         sim_ratings += rng.normal(0.0, rating_sd, size=sim_ratings.shape)
-    track = {gid: j for j, gid in enumerate(track_game_ids)}
-    tracked_home_won = np.zeros((n_sims, len(track)), dtype=bool)
+    track = set(track_game_ids)
+    tracked = {}  # game_id -> (home index, away index, home won, past regulation)
 
     for g in games:
         h, a = idx[g["home"]], idx[g["away"]]
@@ -236,9 +250,10 @@ def simulate(
         rw[:, h] += hw & ~ot
         rw[:, a] += ~hw & ~ot
         if g["game_id"] in track:
-            tracked_home_won[:, track[g["game_id"]]] = hw
+            tracked[g["game_id"]] = (h, a, hw, ot)
 
-    made, div_first = seed(names, teams, pts, rw, wins, rng)
+    tiebreak = rng.random(pts.shape) * 0.5
+    made, div_first = seed(names, teams, pts, rw, wins, rng, tiebreak=tiebreak)
     made_f = made.astype(float)
     result = {
         "teams": names,
@@ -249,16 +264,36 @@ def simulate(
         "points_p90": dict(zip(names, np.percentile(pts, 90, axis=0))),
         "impacts": {},
     }
-    for gid, j in track.items():
-        hw = tracked_home_won[:, j]
-        n_home, n_away = int(hw.sum()), int((~hw).sum())
-        if_home = made_f[hw].mean(axis=0) if n_home else made_f.mean(axis=0)
-        if_away = made_f[~hw].mean(axis=0) if n_away else made_f.mean(axis=0)
-        result["impacts"][gid] = {
-            "home": dict(zip(names, if_home)),
-            "away": dict(zip(names, if_away)),
-        }
+    for gid, (h, a, hw, ot) in tracked.items():
+        cond = {}
+        for outcome, home_wins in (("home", True), ("away", False)):
+            made_if = flip_result(names, teams, pts, rw, wins, tiebreak, h, a, hw, ot, home_wins)
+            cond[outcome] = dict(zip(names, made_if.mean(axis=0)))
+        result["impacts"][gid] = cond
     return result
+
+
+def flip_result(names, teams, pts, rw, wins, tiebreak, h, a, hw, ot, home_wins):
+    """made_playoffs (n_sims x n_teams bool) with one game -- home index h,
+    away index a, simulated home wins hw and past-regulation flags ot --
+    won by the home team (home_wins) or the away team in every simulated
+    season. Seasons where that team already won it are unchanged; in the
+    rest the two teams trade that game's points, wins and regulation wins
+    (one that went past regulation still gives the loser a point). Ties are
+    broken with the simulation's own draws."""
+    flip = ~hw if home_wins else hw
+    winner, loser = (h, a) if home_wins else (a, h)
+    swing = np.where(flip, np.where(ot, 1.0, 2.0), 0.0)  # 2 - loser's point
+    reg = (flip & ~ot).astype(float)
+    pts, rw, wins = pts.copy(), rw.copy(), wins.copy()
+    pts[:, winner] += swing
+    pts[:, loser] -= swing
+    wins[:, winner] += flip
+    wins[:, loser] -= flip
+    rw[:, winner] += reg
+    rw[:, loser] -= reg
+    made, _ = seed(names, teams, pts, rw, wins, None, tiebreak=tiebreak)
+    return made
 
 
 def next_game_day_ids(games) -> list:
