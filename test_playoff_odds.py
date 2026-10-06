@@ -13,8 +13,10 @@ import numpy as np
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
+import playoff_odds
 from playoff_odds import (
     explain_change,
+    flip_result,
     home_win_prob,
     next_game_day_ids,
     rating_sd,
@@ -123,6 +125,93 @@ class TestSimulate:
         imp = sim["impacts"][1]
         assert imp["home"]["E1_0"] > imp["away"]["E1_0"]
         assert imp["away"]["E1_1"] > imp["home"]["E1_1"]
+
+    def test_a_game_in_the_other_conference_moves_nothing(self):
+        # Each result is that game flipped in the same simulated seasons, so
+        # a Western game can't move an Eastern team at all. (Splitting the
+        # seasons by who won showed ~1-point "effects" here: on 2026-10-05,
+        # SJS @ DAL moved CAR 1.1 points.)
+        teams, names = _league()
+        ratings = {n: 1500.0 + 7 * i for i, n in enumerate(names)}
+        games = self._conference_round_robin(teams, names)
+        west_game = next(g for g in games if teams[g["home"]]["conference"] == "W")
+        sim = simulate(
+            teams,
+            games,
+            ratings,
+            n_sims=2000,
+            rng=np.random.default_rng(4),
+            track_game_ids=[west_game["game_id"]],
+            rating_sd=50.0,
+        )
+        imp = sim["impacts"][west_game["game_id"]]
+        for t in names:
+            if teams[t]["conference"] == "E":
+                assert imp["home"][t] == sim["playoff_pct"][t]
+                assert imp["away"][t] == sim["playoff_pct"][t]
+        assert imp["home"][west_game["home"]] > imp["away"][west_game["home"]]
+
+    def test_each_result_brackets_the_overall_odds(self):
+        # Winning a game can only help a team in a given simulated season, so
+        # its odds if it wins >= its overall odds >= its odds if it loses.
+        teams, names = _league()
+        ratings = {n: 1500.0 + 5 * i for i, n in enumerate(names)}
+        games = self._conference_round_robin(teams, names)
+        tracked = [g["game_id"] for g in games[:6]]
+        sim = simulate(
+            teams,
+            games,
+            ratings,
+            n_sims=1000,
+            rng=np.random.default_rng(6),
+            track_game_ids=tracked,
+            rating_sd=50.0,
+        )
+        by_id = {g["game_id"]: g for g in games}
+        for gid in tracked:
+            imp, home, away = sim["impacts"][gid], by_id[gid]["home"], by_id[gid]["away"]
+            assert imp["home"][home] >= sim["playoff_pct"][home] >= imp["away"][home]
+            assert imp["away"][away] >= sim["playoff_pct"][away] >= imp["home"][away]
+            # 16 playoff spots in every simulated season, whichever team wins.
+            assert abs(sum(imp["home"].values()) - 16.0) < 1e-9
+            assert abs(sum(imp["away"].values()) - 16.0) < 1e-9
+
+    def test_flip_result_moves_points_wins_and_regulation_wins(self, monkeypatch):
+        teams, names = _league()
+        h, a = names.index("E1_0"), names.index("E1_1")
+        # Two seasons: E1_1 won in regulation, then E1_1 won in overtime.
+        pts = np.full((2, len(names)), 10.0)
+        pts[:, a] = [12.0, 12.0]
+        pts[1, h] = 11.0
+        rw = np.zeros_like(pts)
+        wins = np.zeros_like(pts)
+        captured = {}
+
+        def fake_seed(_names, _teams, p, r, w, _rng, tiebreak=None):
+            captured.update(pts=p, rw=r, wins=w)
+            return np.zeros(p.shape, dtype=bool), None
+
+        monkeypatch.setattr(playoff_odds, "seed", fake_seed)
+        flip_result(
+            names,
+            teams,
+            pts,
+            rw,
+            wins,
+            np.zeros_like(pts),
+            h,
+            a,
+            hw=np.array([False, False]),
+            ot=np.array([False, True]),
+            home_wins=True,
+        )
+        assert captured["pts"][:, h].tolist() == [12.0, 12.0]
+        assert captured["pts"][:, a].tolist() == [10.0, 11.0]
+        assert captured["wins"][:, h].tolist() == [1.0, 1.0]
+        assert captured["wins"][:, a].tolist() == [-1.0, -1.0]
+        assert captured["rw"][:, h].tolist() == [1.0, 0.0]
+        assert captured["rw"][:, a].tolist() == [-1.0, 0.0]
+        assert pts[:, h].tolist() == [10.0, 11.0]  # inputs untouched
 
     def _conference_round_robin(self, teams, names):
         games, gid = [], 0
