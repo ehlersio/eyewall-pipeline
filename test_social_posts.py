@@ -653,11 +653,21 @@ class TestLeaders:
 
 
 class TestCredentialsCheck:
+    NOW = datetime(2026, 10, 6, 12, tzinfo=UTC)
+
+    @staticmethod
+    def debug(data_access=None, expires=0, valid=True):
+        d = {"is_valid": valid, "type": "PAGE", "expires_at": int(expires and expires.timestamp())}
+        if data_access is not None:
+            d["data_access_expires_at"] = int(data_access.timestamp())
+        return {"data": d}
+
     def responses(self, **over):
         good = {
             "me": {"id": "pg", "name": "EyeWall Analytics"},
             "pg": {"instagram_business_account": {"id": "u1"}, "id": "pg"},
             "u1/content_publishing_limit": {"data": [{"quota_usage": 2}]},
+            "debug_token": self.debug(data_access=self.NOW + timedelta(days=60)),
         }
         good.update(over)
 
@@ -671,11 +681,47 @@ class TestCredentialsCheck:
 
     def test_all_good(self, creds, capsys):
         with patch.object(ig, "graph_get", side_effect=self.responses()):
-            assert ig.check_credentials() == 0
+            assert ig.check_credentials(now=self.NOW) == 0
         out = capsys.readouterr().out
         assert "ok    token is for FB_PAGE_ID (EyeWall Analytics)" in out
         assert "(2 posts in the last 24h)" in out
+        assert "ok    token and data access last 14+ days (data access until 2026-12-05)" in out
         assert "FAIL" not in out
+
+    def test_debug_token_inspects_the_page_token_itself(self, creds):
+        with patch.object(ig, "graph_get", side_effect=self.responses()) as get:
+            ig.check_credentials(now=self.NOW)
+        call = next(c for c in get.call_args_list if c.args[0] == "debug_token")
+        assert call.kwargs == {"input_token": "tok"}
+
+    def test_data_access_ending_within_14_days_fails(self, creds, capsys):
+        soon = self.debug(data_access=self.NOW + timedelta(days=13))
+        with patch.object(ig, "graph_get", side_effect=self.responses(debug_token=soon)):
+            assert ig.check_credentials(now=self.NOW) == 1
+        assert "data access expires 2026-10-19, under 14 days away" in capsys.readouterr().out
+
+    def test_token_expiry_within_14_days_fails(self, creds):
+        info = self.debug(
+            data_access=self.NOW + timedelta(days=60), expires=self.NOW + timedelta(days=3)
+        )
+        with patch.object(ig, "graph_get", side_effect=self.responses(debug_token=info)):
+            assert ig.check_credentials(now=self.NOW) == 1
+
+    def test_invalid_token_fails(self, creds, capsys):
+        info = self.debug(data_access=self.NOW + timedelta(days=60), valid=False)
+        info["data"]["error"] = {"message": "Session has expired"}
+        with patch.object(ig, "graph_get", side_effect=self.responses(debug_token=info)):
+            assert ig.check_credentials(now=self.NOW) == 1
+        assert "token is not valid (Session has expired)" in capsys.readouterr().out
+
+    def test_missing_data_access_date_fails_closed(self, creds):
+        with patch.object(ig, "graph_get", side_effect=self.responses(debug_token=self.debug())):
+            assert ig.check_credentials(now=self.NOW) == 1
+
+    def test_debug_token_error_fails(self, creds):
+        err = RuntimeError("(400) Invalid OAuth access token")
+        with patch.object(ig, "graph_get", side_effect=self.responses(debug_token=err)):
+            assert ig.check_credentials(now=self.NOW) == 1
 
     def test_wrong_linked_instagram_fails(self, creds, capsys):
         other = {"instagram_business_account": {"id": "someone-else"}}

@@ -492,7 +492,7 @@ Cards are 1080x1350 JPEGs drawn with Pillow in the site's palette and Barlow fon
 
 Each post checks its data before it goes out. `rankings` needs all 32 teams ranked today. `winners` needs this morning's `game_win_probs` (the row the recap later grades) and leaves off games that have already started. `recap` needs graded games. Data that isn't ready exits 1, and the backup run tries again. A day with nothing to post (no games, offseason, or rankings not generated yet) exits 0.
 
-One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. Instagram posts go through the Business account linked to the Page. A Page token made from a long-lived user token doesn't expire, so nothing refreshes it. The token needs `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic` and `instagram_content_publish`.
+One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. Instagram posts go through the Business account linked to the Page. A Page token made from a long-lived user token doesn't expire, so nothing refreshes it, but Meta's data access on it does (about 90 days; renewed by re-authorising the app, next due 2026-12-17), and posting stops when it lapses. `check` reads both dates from Graph API `debug_token` and fails when either is under 14 days away; `meta-token-check.yml` runs it every Monday at 12:00 UTC and pushes an ops alert on failure (2026-10). The token needs `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic` and `instagram_content_publish`.
 
 ```bash
 python social_posts.py winners --dry-run                           # render to social_out/, no upload/post
@@ -502,7 +502,8 @@ python social_posts_leagues.py pwhl-leaders --dry-run --date 2026-03-10 --season
 python milk_carton.py milk-carton --dry-run --date 2026-04-13        # a past week's carton
 python goal_of_week.py goal-of-week --dry-run --date 2026-01-16      # a past week's clip (needs ffmpeg)
 gh workflow run social-posts.yml -f kind=rankings -f dry_run=true  # images (or the video) come back as a run artifact
-gh workflow run social-posts.yml -f kind=check                     # read-only: token, Page and Instagram link, publish permission
+gh workflow run social-posts.yml -f kind=check                     # read-only: token, Page and Instagram link, publish permission, token/data-access expiry
+gh workflow run meta-token-check.yml                                # the same check, as the weekly workflow runs it
 ```
 
 Requires `docs/session_social_posts.sql` to be run in Supabase first (the `social_posts` table + the `social` bucket), and GitHub secrets `META_PAGE_TOKEN`, `IG_USER_ID` and `FB_PAGE_ID`. A platform without its id isn't published to.
@@ -1196,6 +1197,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
 | `social-posts.yml` | 20 crons (10 posts + backups) | Instagram + Facebook posts, see `social_posts.py` above |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
+| `meta-token-check.yml` | Weekly (Mon 12:00 UTC) | `social_posts.py check`: Meta Page token reaches the Page and Instagram, and neither the token nor its data access ends within 14 days (2026-10) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 | `ci.yml` | Every PR | Ruff check + format check + pytest |
 
