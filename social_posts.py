@@ -1268,7 +1268,11 @@ def post_leaders(client, season, today, dry_run):
     post_key = f"leaders-{today.isoformat()}"
     span = fmt_span(start, end)
     week_exp = f'gameDate>="{start.isoformat()}" and gameDate<="{end.isoformat()}" and gameTypeId=2'
-    season_exp = f"seasonId={season} and gameTypeId=2"
+    # Bounded to the Sunday the card names: post_leaders runs Tuesday (often
+    # hours late), and an unbounded season query added Monday's games to a
+    # card subtitled "Through Sun" (the Oct 6, 2026 card would have had the
+    # four Oct 5 games).
+    season_exp = f'seasonId={season} and gameTypeId=2 and gameDate<="{end.isoformat()}"'
     try:
         week_sk = week_skaters(fetch_nhl_stats("skater", week_exp, True))
         if not week_sk:
@@ -1314,7 +1318,9 @@ def post_leaders(client, season, today, dry_run):
             render_leaders(
                 "Season",
                 "Beyond the Box Score",
-                f"Through {fmt_day(end)} \u00b7 all situations",
+                # MoneyPuck's season file can't be cut off at a date: it's
+                # every game MoneyPuck has processed when this runs.
+                f"Season to date as of {fmt_day(today)} \u00b7 all situations",
                 [
                     (
                         "Goals above expected",

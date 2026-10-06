@@ -36,7 +36,7 @@ starters) and playoff_odds.
 
 import argparse
 import math
-from datetime import date
+from datetime import UTC, date, datetime
 
 import rapm
 from db import NHL_SEASON, get_client, upsert
@@ -453,7 +453,16 @@ def run(season=None, backtest=False, dry_run=False):
     if dry_run:
         print("  (dry-run) nothing written")
         return "ok"
-    upsert(client, "prediction_scorecard", rows, "model,kind,period")
+    # The column's default only applies on insert, and the upsert never set
+    # it, so every row kept its first run's stamp: the League page read
+    # "Updated Sep 14" in October while grading games through Oct 4.
+    stamp = datetime.now(UTC).isoformat()
+    upsert(
+        client,
+        "prediction_scorecard",
+        [{**r, "updated_at": stamp} for r in rows],
+        "model,kind,period",
+    )
     return "ok"
 
 

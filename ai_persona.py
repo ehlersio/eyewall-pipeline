@@ -4,7 +4,14 @@ Defines the Sticks persona and all prompt templates used by the AI pipeline.
 No model calls happen here — just strings and formatters.
 """
 
-from early_season import describe_stat, fmt_pct, is_early_estimate, prior_season, season_label
+from early_season import (
+    decided_in,
+    describe_stat,
+    fmt_pct,
+    is_early_estimate,
+    prior_season,
+    season_label,
+)
 
 # ---------------------------------------------------------------------------
 # Persona — system prompt
@@ -139,6 +146,18 @@ def get_system_prompt(locale: str = "en") -> str:
 # ---------------------------------------------------------------------------
 
 
+def period_label(period, ending) -> str:
+    """P1-P3, then "OT" (or "2OT", "3OT"... in the playoffs), and "SO" for
+    the shootout of a game decided in one -- so a shootout goal isn't read
+    as an overtime goal."""
+    period = period or 0
+    if period <= 3:
+        return f"P{period}"
+    if ending == "SO" and period == 5:
+        return "SO"
+    return "OT" if period == 4 else f"{period - 3}OT"
+
+
 def format_game_context(ctx: dict) -> str:
     """Formats the game summary context dict into a readable prompt block."""
     game = ctx.get("game", {})
@@ -167,7 +186,15 @@ def format_game_context(ctx: dict) -> str:
     lines.append(f"Final score: {away} {away_score} — {home} {home_score}")
     lines.append(f"Result for {team}: {game.get('result', '').upper()}")
     lines.append(f"Game type: {game.get('game_type')}")
-    if game.get("period_end", 3) > 3:
+    ending = game.get("decided_in") or decided_in(game.get("period_end"), game.get("game_type"))
+    if ending == "SO":
+        # Until 2026-10 a shootout read "Went to overtime (ended period 5)",
+        # and summaries had the winner scoring "in overtime".
+        lines.append(
+            "Decided in a shootout (tied after regulation and overtime). The winning "
+            "goal was NOT scored in overtime -- say it was decided in the shootout."
+        )
+    elif ending == "OT":
         lines.append(f"Went to overtime (ended period {game.get('period_end')})")
 
     # Playoff series context — CRITICAL for accurate game number references
@@ -238,7 +265,8 @@ def format_game_context(ctx: dict) -> str:
             assist_str = f" (assists: {', '.join(assists)})" if assists else " (unassisted)"
             sit_str = f" [{g['situation']}]" if g.get("situation") != "5v5" else ""
             lines.append(
-                f"  P{g['period']} {g['time']} — {g['team']}: {g['scorer']}{assist_str}{sit_str} "
+                f"  {period_label(g['period'], ending)} {g['time']} — {g['team']}: "
+                f"{g['scorer']}{assist_str}{sit_str} "
                 f"({g['away_score_after']}-{g['home_score_after']})"
             )
 
@@ -291,7 +319,7 @@ def format_game_context(ctx: dict) -> str:
     # Recent form
     lines.append("\nRECENT FORM (last 5 games)")
     for g in form:
-        ot = " (OT)" if g.get("went_to_ot") else ""
+        ot = f" ({g['decided_in']})" if g.get("decided_in") else ""
         lines.append(
             f"{g['game_date']} vs {g['opponent']}: {g['result']} "
             f"{g['team_score']}-{g['opp_score']}{ot} ({g['game_type']})"
@@ -444,7 +472,7 @@ def _format_form(form: list, label: str) -> list:
         f"preseason excluded): {record['W']}W-{record['L']}L"
     ]
     for g in form[:5]:
-        ot = " (OT)" if g.get("went_to_ot") else ""
+        ot = f" ({g['decided_in']})" if g.get("decided_in") else ""
         po = " (playoff)" if g.get("game_type") == "playoff" else ""
         lines.append(
             f"  {g['game_date']} vs {g['opponent']}: {g['result']} "

@@ -208,6 +208,34 @@ class TestPwhlLeaders:
             assert sl.post_pwhl_leaders(MagicMock(), date(2026, 11, 26), False) == 0
         ship.assert_not_called()
 
+    def test_season_slides_name_the_last_game_they_include(self):
+        # Thursday's post: the season tables are HockeyTech's running totals
+        # (Mon-Wed included), so they're labeled with the latest Final game,
+        # not the week's Sunday.
+        box = [
+            {"game_id": 330, "player_id": 23, "team_id": 2, "goals": 1, "assists": 1, "points": 2}
+        ]
+        season = [{"player_id": 23, "team_id": 2, "gp": 12, "goals": 9, "assists": 8,
+                   "points": 17, "xg_for": None}]  # fmt: skip
+        client = MagicMock()
+        q = client.table.return_value
+        for m in ("select", "eq", "lte", "order", "limit"):
+            getattr(q, m).return_value = q
+        q.execute.return_value = MagicMock(data=[{"game_date": "2026-12-16"}])
+        with (
+            patch.object(sl, "week_box", side_effect=[box, []]),
+            patch.object(sl, "select_all", side_effect=[season, []]),
+            patch.object(sl, "player_names", return_value={23: "A B"}),
+            patch.object(sp, "render_leaders", wraps=sp.render_leaders) as render,
+            patch.object(sp, "ship", return_value=0),
+        ):
+            assert sl.post_pwhl_leaders(client, date(2026, 12, 17), False, season_id=11) == 0
+        subtitles = [c.args[2] for c in render.call_args_list]
+        assert subtitles == ["Top scorers and goalies, Monday to Sunday", "Through Wed, Dec 16"]
+        client.table.assert_called_with("pwhl_game_log")
+        assert ("season_id", 11) in [c.args for c in q.eq.call_args_list]
+        q.lte.assert_called_with("game_date", "2026-12-17")
+
     def test_season_goalies_by_sv_pct_qualify_on_share_of_busiest(self):
         rows = [
             {"player_id": 1, "team_id": 3, "gp": 25, "sv_pct": 0.930},

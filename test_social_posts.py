@@ -556,8 +556,10 @@ class TestLeaders:
         assert "+3.2" in cap
         assert_neutral(cap)
 
-    def _run(self, week_rows, mp=None, mp_error=None):
+    def _run(self, week_rows, mp=None, mp_error=None, queries=None):
         def fetch(kind, cayenne, is_game):
+            if queries is not None:
+                queries.append((kind, cayenne, is_game))
             if is_game:
                 return week_rows if kind == "skater" else []
             return (
@@ -607,6 +609,36 @@ class TestLeaders:
         _, kind, key, images, caption, _ = ship.call_args.args
         assert (kind, key, len(images)) == ("leaders", "leaders-2026-10-20", 3)
         assert "week of Oct 12\u201318" in caption
+
+    def test_season_totals_stop_at_the_sunday_the_card_names(self):
+        # Run Tue Oct 20 for Mon Oct 12 - Sun Oct 18: the season query
+        # used to be unbounded, so "Through Sun, Oct 18" included Monday's
+        # games (e.g. the four Oct 5, 2026 games on the Oct 6 card).
+        queries = []
+        self._run([sk_game(1, "A", "CAR", "2026-10-13", 1, 1)], queries=queries)
+        season = [c for k, c, g in queries if not g]
+        assert season == ['seasonId=20262027 and gameTypeId=2 and gameDate<="2026-10-18"'] * 2
+
+    def test_moneypuck_slide_is_labeled_with_the_run_date(self):
+        week = [sk_game(1, "A", "CAR", "2026-10-13", 1, 1)]
+        sk = [
+            {
+                "name": "A",
+                "team": "CAR",
+                "situation": "all",
+                "games_played": "5",
+                "I_F_goals": "3",
+                "I_F_xGoals": "2",
+            }
+        ]
+        gl = [{"name": "G", "team": "BOS", "situation": "all", "games_played": "5",
+               "xGoals": "12", "goals": "10"}]  # fmt: skip
+        with patch.object(ig, "render_leaders", wraps=ig.render_leaders) as render:
+            self._run(week, mp=[sk, gl])
+        subtitles = [c.args[2] for c in render.call_args_list]
+        assert subtitles[1] == "Through Sun, Oct 18"
+        # MoneyPuck's file can't be cut off at Sunday.
+        assert subtitles[2] == "Season to date as of Tue, Oct 20 \u00b7 all situations"
 
     def test_moneypuck_down_drops_only_the_xg_slide(self):
         code, ship = self._run(

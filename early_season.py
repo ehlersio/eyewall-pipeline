@@ -46,6 +46,19 @@ def game_id_range(season: int, game_type: int) -> tuple[int, int]:
     return lo, lo + 10_000
 
 
+def decided_in(period_end, game_type) -> str | None:
+    """ "SO", "OT" or None (regulation) for a game that ended in period
+    `period_end` (game_log.period_end: nhl_stats maps a shootout to 5).
+    Only a regular-season game can end in a shootout: a playoff game that
+    ends in period 5 ended in double overtime. `game_type` is game_log's 2/3
+    or the AI contexts' "regular"/"playoff"."""
+    period_end = period_end or 3
+    if period_end <= 3:
+        return None
+    playoff = game_type in (3, "playoff")
+    return "SO" if period_end == 5 and not playoff else "OT"
+
+
 def blend_stat(cur, gp, prior, k):
     """{value, cur, gp, prior, k}, or None when neither season has the stat.
 

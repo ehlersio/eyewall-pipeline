@@ -25,7 +25,7 @@ Run order: after elo_ratings (tonight's ratings).
 """
 
 import argparse
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from db import NHL_SEASON, get_client, upsert
 from nhl_stats import ALL_TEAMS, fetch_schedule
@@ -104,7 +104,10 @@ def run(season=None, dry_run=False, today=None):
         print("  (dry-run) nothing written")
         return "ok"
     if rows:
-        upsert(client, "game_win_probs", rows, "game_id")
+        # Rewritten each run until puck drop; the column default only
+        # applies on insert, so stamp it (same as prediction_scorecard).
+        stamp = datetime.now(UTC).isoformat()
+        upsert(client, "game_win_probs", [{**r, "updated_at": stamp} for r in rows], "game_id")
     return "ok"
 
 
