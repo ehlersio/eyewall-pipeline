@@ -285,3 +285,68 @@ class TestGoaliesExcluded:
         special_teams.run_team_game_type("CAR", 20262027, 2, {1}, {1: ("CAR", "WSH")})
 
         assert calls == []
+
+
+class TestPPAndPKGatedSeparately:
+    """PP and PK inference each need their own minimum shot count (2026-10).
+    run_team_game_type() used to return before PK inference whenever the
+    team had fewer than MIN_PP_SHOTS PP shots, so a team short on power
+    plays (WSH, 2026-10-06) got no PK units either."""
+
+    SKATERS = (1, 2, 3, 4, 5)
+    GAME = 2026020001
+
+    def _run(self, monkeypatch, n_pp, n_pk):
+        # CAR at home: 1451 = home (CAR) on the PP, 1541 = away (WSH) on the PP.
+        shots = [
+            {
+                "game_id": self.GAME,
+                "period": 1,
+                "time_in_period": f"{m:02d}:00",
+                "situation_code": c,
+            }
+            for c, n in (("1451", n_pp), ("1541", n_pk))
+            for m in range(n)
+        ]
+        shifts = [
+            {
+                "id": pid,
+                "game_id": self.GAME,
+                "player_id": pid,
+                "period": 1,
+                "start_secs": 0,
+                "end_secs": 1200,
+            }
+            for pid in self.SKATERS
+        ]
+        written = []
+        monkeypatch.setattr(special_teams, "fetch_existing_manual_units", lambda *_: set())
+        monkeypatch.setattr(special_teams, "fetch_shifts_for_team", lambda *_: shifts)
+        monkeypatch.setattr(special_teams, "fetch_situational_shots_for_team", lambda *_: shots)
+        monkeypatch.setattr(special_teams, "fetch_goalie_ids", lambda ids: set())
+        monkeypatch.setattr(
+            special_teams, "upsert_unit", lambda t, s, gt, ut, un, ids: written.append((ut, un))
+        )
+        special_teams.run_team_game_type(
+            "CAR", 20262027, 2, {self.GAME}, {self.GAME: ("CAR", "WSH")}
+        )
+        return {ut for ut, _ in written}
+
+    def test_few_pp_shots_still_infers_pk_units(self, monkeypatch):
+        assert self._run(
+            monkeypatch, special_teams.MIN_PP_SHOTS - 1, special_teams.MIN_PK_SHOTS
+        ) == {"PK"}
+
+    def test_few_pk_shots_still_infers_pp_units(self, monkeypatch):
+        assert self._run(
+            monkeypatch, special_teams.MIN_PP_SHOTS, special_teams.MIN_PK_SHOTS - 1
+        ) == {"PP"}
+
+    def test_both_short_writes_nothing(self, monkeypatch):
+        assert self._run(monkeypatch, 0, 0) == set()
+
+    def test_both_enough_writes_both(self, monkeypatch):
+        assert self._run(monkeypatch, special_teams.MIN_PP_SHOTS, special_teams.MIN_PK_SHOTS) == {
+            "PP",
+            "PK",
+        }

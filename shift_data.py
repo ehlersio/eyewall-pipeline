@@ -13,6 +13,15 @@ Usage:
 
 Performance: ~1,300 games/season x ~750 shifts = ~1M rows per season.
 One-time backfill of 3 seasons takes ~30-45 minutes.
+
+Skaters only (2026-10). Goalie shifts are left out on both paths by the
+game's roster (play-by-play rosterSpots positionCode == "G"). The JSON path
+used to test the shiftcharts row's detailCode == 1, which never matches a
+goalie (detailCode is 0 on every shift row, the feed has no position), so
+every goalie shift was stored and reached RAPM's design matrix, line
+combinations and special teams. Rows ingested before the fix still carry
+goalie shifts until the season is re-ingested (delete its shift_events rows,
+then run this again).
 """
 
 import re
@@ -200,6 +209,11 @@ def fetch_roster(game_id):
     return roster, team_map
 
 
+def goalie_ids(roster) -> set[int]:
+    """player_ids fetch_roster() lists as goalies (positionCode "G")."""
+    return {pid for pid, _team, pos in roster.values() if pos == "G"}
+
+
 def parse_html_shifts(game_id, season, html, roster):
     """Parse NHL HTML shift report into shift_events rows.
     HTML structure: player header td contains 'NUMBER LASTNAME, FIRSTNAME',
@@ -327,8 +341,10 @@ def mark_skipped(client, game_id, season, reason="no_data"):
         pass  # non-critical
 
 
-def process_shifts(game_id, season, raw_shifts):
-    """Convert raw shift chart rows into shift_events rows for both teams."""
+def process_shifts(game_id, season, raw_shifts, goalies=frozenset()):
+    """Convert raw shift chart rows into shift_events rows for both teams,
+    skaters only: `goalies` is the game's goalie player_ids (goalie_ids())
+    -- the shiftcharts rows themselves carry no position."""
     rows = []
     for shift in raw_shifts:
         player_id = shift.get("playerId")
@@ -336,11 +352,10 @@ def process_shifts(game_id, season, raw_shifts):
         start_str = shift.get("startTime", "0:00")
         end_str = shift.get("endTime", "0:00")
         period = shift.get("period", 1)
-        detail_code = shift.get("detailCode", 0)
 
         if not player_id:
             continue
-        if detail_code == 1:  # goalie — excluded from skater matrix
+        if player_id in goalies:  # excluded from the skater matrix
             continue
         if not start_str or not end_str or ":" not in start_str:
             continue
@@ -365,6 +380,20 @@ def process_shifts(game_id, season, raw_shifts):
         )
 
     return rows
+
+
+def shifts_for_game(game_id, season):
+    """One game's skater shift_events rows: the JSON shiftcharts feed first
+    (fast, early-season games), else the HTML shift reports (every game).
+    Either way the game's roster says who the goalies are. Raises when the
+    roster can't be fetched, like the HTML path always has."""
+    raw = fetch_shift_chart(game_id)
+    if raw:
+        roster, _ = fetch_roster(game_id)
+        rows = process_shifts(game_id, season, raw, goalie_ids(roster))
+        if rows:
+            return rows
+    return fetch_shift_chart_html(game_id, season)
 
 
 def run(season=NHL_SEASON):
@@ -395,15 +424,7 @@ def run(season=NHL_SEASON):
     def process_one(game):
         game_id = game["id"]
         try:
-            # Try JSON API first (fast, available for early-season games)
-            raw = fetch_shift_chart(game_id)
-            if raw:
-                rows = process_shifts(game_id, season, raw)
-                if rows:
-                    return game_id, rows, None
-
-            # Fall back to HTML shift reports (available for all games)
-            rows = fetch_shift_chart_html(game_id, season)
+            rows = shifts_for_game(game_id, season)
             if not rows:
                 return game_id, [], "no_data"
             return game_id, rows, None

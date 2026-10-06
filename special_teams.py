@@ -21,8 +21,10 @@ regular-season game has no inferred units, and each run replaces a game
 type's inferred units rather than leaving older ones behind. Manual units
 are never touched.
 
-Goalies (2026-10): shift_events carries goalie shifts too (shift_data.py's
-detailCode==1 check does not catch them), and a goalie is on the ice for
+Goalies (2026-10): shift_events carried goalie shifts too (shift_data.py's
+detailCode==1 check never caught them; it excludes them by roster position
+since 2026-10, but rows ingested before that still have them until a season
+is re-ingested), and a goalie is on the ice for
 every power play, so every unit used to include one -- CAR PP1 with
 Kochetkov, UTA PP2 with two goalies. The team's goalie ids are looked up
 from `players` (position G) and their shifts dropped before inference, so
@@ -103,7 +105,12 @@ ALL_TEAMS = [
 HOME_PP_CODES = {"1451", "1461", "1351", "1361"}  # home team on PP
 AWAY_PP_CODES = {"1541", "1641", "1531", "1631"}  # away team on PP
 
-MIN_PP_SHOTS = 10  # minimum PP shots to attempt unit inference for a team
+# Minimum shots to attempt unit inference, gated separately (2026-10): a
+# team that has drawn few power plays still gets PK units from the
+# opponents' power plays, and vice versa. Both used to hang off the PP
+# count, so a team short on PP chances (WSH, 2026-10-06) got no PK units.
+MIN_PP_SHOTS = 10  # its own PP shots, for PP units
+MIN_PK_SHOTS = 10  # opponents' PP shots against it, for PK units
 MIN_UNIT_SHOTS = 5  # minimum shots a combination must appear in to be a unit
 MIN_OVERLAP = 3  # minimum players overlapping to count a combo
 PP_UNIT_SIZE = 5  # forwards + D on PP
@@ -287,8 +294,9 @@ def fetch_shifts_for_team(team: str, season: int, game_type: int) -> list[dict]:
 def fetch_goalie_ids(player_ids: set[int]) -> set[int]:
     """The ids among `player_ids` whose `players.position` is G.
 
-    shift_events includes goalie shifts (shift_data.py's detailCode==1
-    filter never matched the shiftcharts feed), and a goalie is on the ice
+    shift_events rows ingested before 2026-10 include goalie shifts
+    (shift_data.py's old detailCode==1 filter never matched the shiftcharts
+    feed; it filters by roster position now), and a goalie is on the ice
     for every PP/PK shot, so without this every inferred unit carried one."""
     goalies: set[int] = set()
     ids = sorted(player_ids)
@@ -516,17 +524,21 @@ def run_team_game_type(
     situational_rows = fetch_situational_shots_for_team(team, season, game_ids)
 
     # ── PP ────────────────────────────────────────────────────
+    pp1_ids = pp2_ids = pk1_ids = pk2_ids = None
     pp_shots = filter_pp_shots(team, situational_rows, game_home_away)
     if len(pp_shots) < MIN_PP_SHOTS:
-        print(f"insufficient PP shots ({len(pp_shots)}) — skip")
-        return
-
-    pp1_ids, pp2_ids = infer_units(pp_shots, shift_idx, PP_UNIT_SIZE)
+        print(f"insufficient PP shots ({len(pp_shots)}), no PP units;", end=" ")
+    else:
+        pp1_ids, pp2_ids = infer_units(pp_shots, shift_idx, PP_UNIT_SIZE)
 
     # ── PK ────────────────────────────────────────────────────
-    # PK = opponent is on PP. Same situational rows as PP, flipped perspective.
+    # PK = opponent is on PP. Same situational rows as PP, flipped
+    # perspective, with its own threshold (see MIN_PK_SHOTS).
     pk_shots = filter_pk_shots(team, situational_rows, game_home_away)
-    pk1_ids, pk2_ids = infer_units(pk_shots, shift_idx, PK_UNIT_SIZE)
+    if len(pk_shots) < MIN_PK_SHOTS:
+        print(f"insufficient PK shots ({len(pk_shots)}), no PK units;", end=" ")
+    else:
+        pk1_ids, pk2_ids = infer_units(pk_shots, shift_idx, PK_UNIT_SIZE)
 
     # ── Report / write ────────────────────────────────────────
     results = [
