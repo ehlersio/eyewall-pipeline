@@ -69,7 +69,7 @@ If it's active but out of sync with `requirements.txt`, ask before running `pip 
 
 ## Ruff: check and format together (standing rule — read before every commit/PR)
 
-`ruff check` alone is not sufficient — always run `ruff format` in the same pass before committing or opening a PR. The CI pipeline (`nightly.yml`) enforces formatting separately from linting, so a clean `ruff check` with un-formatted files will still fail in GitHub Actions (happened 2026-07-09: `ruff check .` passed, `ruff format --check .` didn't, failing the whole nightly run). Run both locally before every commit:
+`ruff check` alone is not sufficient — always run `ruff format` in the same pass before committing or opening a PR. CI (`ci.yml`, every PR) enforces formatting separately from linting, so a clean `ruff check` with un-formatted files will still fail in GitHub Actions (happened 2026-07-09: `ruff check .` passed, `ruff format --check .` didn't — and back then the lint ran *before* ingest in `nightly.yml`, so it cost a whole night of NHL data; since 2026-10 the nightly's Ruff step runs after the pipeline with `continue-on-error: true`, informational only). Run both locally before every commit:
 
 ```
 ruff check . && ruff format --check .
