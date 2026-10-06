@@ -59,6 +59,35 @@ def decided_in(period_end, game_type) -> str | None:
     return "SO" if period_end == 5 and not playoff else "OT"
 
 
+def period_label(period, game_type) -> str | None:
+    """How a period is named in EyeWall AI prompts: P1-P3, then "OT", and
+    "2OT"/"3OT"... in the playoffs; "SO" for a regular-season (or preseason)
+    shootout, which nhl_stats/shot_events store as period 5. Same rule as
+    the Worker's alerts (eyewall-poller pushPeriodLabel). None when there's
+    no period to name -- never a raw "P4" or "PNone". `game_type` is
+    game_log's 1/2/3 or the AI contexts' "regular"/"playoff"."""
+    try:
+        num = int(period)
+    except (TypeError, ValueError):
+        return None
+    if num < 1:
+        return None
+    if num <= 3:
+        return f"P{num}"
+    if num >= 5 and game_type not in (3, "playoff"):
+        return "SO"
+    return "OT" if num == 4 else f"{num - 3}OT"
+
+
+def ending_label(period_end, game_type) -> str | None:
+    """None for a game decided in regulation, else the period it ended in:
+    "OT", "2OT"/"3OT"... (playoffs) or "SO" -- decided_in() with the
+    overtime period named, so a playoff double overtime reads "2OT"."""
+    if decided_in(period_end, game_type) is None:
+        return None
+    return period_label(period_end, game_type)
+
+
 def blend_stat(cur, gp, prior, k):
     """{value, cur, gp, prior, k}, or None when neither season has the stat.
 

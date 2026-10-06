@@ -4,11 +4,15 @@ Defines the Sticks persona and all prompt templates used by the AI pipeline.
 No model calls happen here — just strings and formatters.
 """
 
+import math
+
 from early_season import (
     decided_in,
     describe_stat,
+    ending_label,
     fmt_pct,
     is_early_estimate,
+    period_label,
     prior_season,
     season_label,
 )
@@ -146,47 +150,96 @@ def get_system_prompt(locale: str = "en") -> str:
 # ---------------------------------------------------------------------------
 
 
-def period_label(period, ending) -> str:
-    """P1-P3, then "OT" (or "2OT", "3OT"... in the playoffs), and "SO" for
-    the shootout of a game decided in one -- so a shootout goal isn't read
-    as an overtime goal."""
-    period = period or 0
-    if period <= 3:
-        return f"P{period}"
-    if ending == "SO" and period == 5:
-        return "SO"
-    return "OT" if period == 4 else f"{period - 3}OT"
+def _present(v) -> bool:
+    """A stat that's really there: not None, not NaN."""
+    return v is not None and not (isinstance(v, float) and math.isnan(v))
+
+
+def _goal_line(g: dict, game_type) -> str:
+    """One GOAL SCORING line. A missing period, time, scorer, situation or
+    score is left out rather than printed as "None"; a shootout goal is
+    named as one -- it isn't a goal in the box score or the running score."""
+    label = period_label(g.get("period"), game_type)
+    scorer = g.get("scorer") or "scorer not available"
+    if label == "SO":
+        return (
+            f"  SO — {g.get('team')}: {scorer} scored in the shootout "
+            f"(a shootout goal, not counted in the score or the player's goal total)"
+        )
+    when = " ".join(str(x) for x in (label, g.get("time")) if x)
+    assists = [a for a in (g.get("assist1"), g.get("assist2")) if a]
+    assist_str = f" (assists: {', '.join(assists)})" if assists else " (unassisted)"
+    sit = g.get("situation")
+    sit_str = f" [{sit}]" if sit and sit not in ("5v5", "unknown") else ""
+    away_after, home_after = g.get("away_score_after"), g.get("home_score_after")
+    score = f" ({away_after}-{home_after})" if _present(away_after) and _present(home_after) else ""
+    return f"  {when + ' ' if when else ''}— {g.get('team')}: {scorer}{assist_str}{sit_str}{score}"
+
+
+def _season_stat_line(p: dict) -> str | None:
+    """A SEASON STATS line with only the stats the player has; None for a
+    player with no season stats at all."""
+    if not _present(p.get("goals")):
+        return None
+    counts = " ".join(
+        f"{p[k]}{suffix}"
+        for k, suffix in (("goals", "G"), ("assists", "A"), ("points", "PTS"))
+        if _present(p.get(k))
+    )
+    if _present(p.get("games_played")):
+        counts = f"{counts} in {p['games_played']} GP".strip()
+    parts = [counts] if counts else []
+    if _present(p.get("rapm")):
+        parts.append(f"RAPM {p['rapm']:+.3f}")
+    if _present(p.get("xgf_per60")):
+        parts.append(f"xGF/60 {p['xgf_per60']:.2f}")
+    if _present(p.get("pct_ev_off")):
+        parts.append(f"EV off pct {p['pct_ev_off']}")
+    if not parts:
+        return None
+    return f"{p['name']} ({p['position']}): " + " | ".join(parts)
 
 
 def format_game_context(ctx: dict) -> str:
-    """Formats the game summary context dict into a readable prompt block."""
+    """Formats the game summary context dict into a readable prompt block.
+
+    Periods are named as the Worker's alerts name them (period_label): P1-P3,
+    OT, 2OT/3OT in the playoffs, SO for a regular-season shootout -- until
+    2026-10 the period-by-period shots read "period_4" and the overtime
+    line "ended period 5". A stat the context doesn't have is left out, not
+    printed as "None"."""
     game = ctx.get("game", {})
-    shots = ctx.get("shots", {})
-    players = ctx.get("players", [])
-    zones = ctx.get("zones", [])
-    form = ctx.get("form", [])
-    goalies = ctx.get("goalies", {})
+    shots = ctx.get("shots") or {}
+    players = ctx.get("players") or []
+    zones = ctx.get("zones") or []
+    form = ctx.get("form") or []
+    goalies = ctx.get("goalies") or {}
     series = ctx.get("series")
+    game_type = game.get("game_type")
 
     lines = []
 
     # Game basics
     lines.append("GAME INFORMATION")
-    lines.append(f"Date: {game.get('game_date')}")
+    if game.get("game_date"):
+        lines.append(f"Date: {game.get('game_date')}")
     lines.append(f"Matchup: {game.get('away_team')} @ {game.get('home_team')}")
 
     home = game.get("home_team", "")
     away = game.get("away_team", "")
     team = game.get("primary_team", "")
     is_home = game.get("is_home", False)
-    team_score = game.get("team_score", 0)
-    opp_score = game.get("opp_score", 0)
-    home_score = team_score if is_home else opp_score
-    away_score = opp_score if is_home else team_score
-    lines.append(f"Final score: {away} {away_score} — {home} {home_score}")
-    lines.append(f"Result for {team}: {game.get('result', '').upper()}")
-    lines.append(f"Game type: {game.get('game_type')}")
-    ending = game.get("decided_in") or decided_in(game.get("period_end"), game.get("game_type"))
+    team_score = game.get("team_score")
+    opp_score = game.get("opp_score")
+    if _present(team_score) and _present(opp_score):
+        home_score = team_score if is_home else opp_score
+        away_score = opp_score if is_home else team_score
+        lines.append(f"Final score: {away} {away_score} — {home} {home_score}")
+    if game.get("result"):
+        lines.append(f"Result for {team}: {game['result'].upper()}")
+    if game_type:
+        lines.append(f"Game type: {game_type}")
+    ending = game.get("decided_in") or decided_in(game.get("period_end"), game_type)
     if ending == "SO":
         # Until 2026-10 a shootout read "Went to overtime (ended period 5)",
         # and summaries had the winner scoring "in overtime".
@@ -195,7 +248,13 @@ def format_game_context(ctx: dict) -> str:
             "goal was NOT scored in overtime -- say it was decided in the shootout."
         )
     elif ending == "OT":
-        lines.append(f"Went to overtime (ended period {game.get('period_end')})")
+        ended_in = game.get("ended_in") or ending_label(game.get("period_end"), game_type)
+        if ended_in and ended_in != "OT":
+            lines.append(
+                f"Went to overtime: decided in {ended_in} (overtime period {ended_in[:-2]})"
+            )
+        else:
+            lines.append("Went to overtime: decided in OT")
 
     # Playoff series context — CRITICAL for accurate game number references
     if series:
@@ -219,34 +278,49 @@ def format_game_context(ctx: dict) -> str:
         )
 
     # Advanced stats if available
-    if game.get("home_cf_pct") is not None:
+    if _present(game.get("home_cf_pct")):
         lines.append(f"\nCorsi For % (home): {game.get('home_cf_pct'):.1f}%")
-    if game.get("pp_goals") is not None:
+    if _present(game.get("pp_goals")) and _present(game.get("pp_opps")):
         lines.append(f"Power play: {game.get('pp_goals')}/{game.get('pp_opps')}")
-    if game.get("pk_goals_against") is not None:
+    if _present(game.get("pk_goals_against")) and _present(game.get("pk_opps")):
         lines.append(
             f"Penalty kill: {game.get('pk_opps') - game.get('pk_goals_against')}/{game.get('pk_opps')}"
         )
 
     # Shot summary
-    lines.append("\nSHOT SUMMARY")
-    by_team = shots.get("by_team", {})
-    for t, stats in by_team.items():
-        lines.append(
-            f"{t}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal, "
-            f"{stats['missed_shots']} missed, {stats['blocked_shots']} blocked"
-        )
+    by_team = shots.get("by_team") or {}
+    if by_team:
+        lines.append("\nSHOT SUMMARY")
+        for t, stats in by_team.items():
+            lines.append(
+                f"{t}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal, "
+                f"{stats['missed_shots']} missed, {stats['blocked_shots']} blocked"
+            )
 
-    lines.append("\nSHOTS BY SITUATION")
-    by_sit = shots.get("by_situation", {})
-    for sit, stats in by_sit.items():
-        lines.append(f"{sit}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal")
+    by_sit = {s: v for s, v in (shots.get("by_situation") or {}).items() if s != "unknown"}
+    if by_sit:
+        lines.append("\nSHOTS BY SITUATION")
+        for sit, stats in by_sit.items():
+            lines.append(f"{sit}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal")
 
-    lines.append("\nSHOTS BY PERIOD")
-    by_period = shots.get("by_period", {})
-    for period, teams in sorted(by_period.items()):
-        for t, stats in teams.items():
-            lines.append(f"{period} {t}: {stats['goals']} goals, {stats['shots_on_goal']} SOG")
+    by_period = []
+    for period, teams in (shots.get("by_period") or {}).items():
+        # Keys are period numbers; "period_N" strings are read too.
+        num = str(period).removeprefix("period_")
+        label = period_label(num, game_type)
+        if label and label != "SO":
+            by_period.append((int(num), label, teams))
+    if by_period:
+        lines.append("\nSHOTS BY PERIOD")
+        for _, label, teams in sorted(by_period, key=lambda x: x[0]):
+            for t, stats in teams.items():
+                lines.append(f"{label} {t}: {stats['goals']} goals, {stats['shots_on_goal']} SOG")
+
+    shootout = shots.get("shootout") or {}
+    if shootout:
+        lines.append("\nSHOOTOUT (not included in the shot and goal counts above)")
+        for t, so in shootout.items():
+            lines.append(f"{t}: {so['goals']} scored on {so['attempts']} attempts")
 
     # Goal scorers — authoritative record
     goals = ctx.get("goals", [])
@@ -257,73 +331,59 @@ def format_game_context(ctx: dict) -> str:
             "Do not invent, add, or modify any goal or assist."
         )
         for g in goals:
-            assists = []
-            if g.get("assist1"):
-                assists.append(g["assist1"])
-            if g.get("assist2"):
-                assists.append(g["assist2"])
-            assist_str = f" (assists: {', '.join(assists)})" if assists else " (unassisted)"
-            sit_str = f" [{g['situation']}]" if g.get("situation") != "5v5" else ""
-            lines.append(
-                f"  {period_label(g['period'], ending)} {g['time']} — {g['team']}: "
-                f"{g['scorer']}{assist_str}{sit_str} "
-                f"({g['away_score_after']}-{g['home_score_after']})"
-            )
+            lines.append(_goal_line(g, game_type))
 
     # xG
-    xg = ctx.get("xg", [])
-    if xg:
+    xg_lines = []
+    for x in ctx.get("xg") or []:
+        parts = [
+            f"{label} {x[k]:.2f}"
+            for k, label in (("xgf", "xGF"), ("xga", "xGA"))
+            if _present(x.get(k))
+        ]
+        if _present(x.get("xgf_pct")):
+            parts.append(f"xG% {x['xgf_pct'] * 100:.1f}%")
+        if parts:
+            xg_lines.append(f"  {x['team']} {x['situation']}: " + " | ".join(parts))
+    if xg_lines:
         lines.append("\nEXPECTED GOALS")
-        for x in xg:
-            lines.append(
-                f"  {x['team']} {x['situation']}: xGF {x['xgf']:.2f} | xGA {x['xga']:.2f} | "
-                f"xG% {x['xgf_pct'] * 100:.1f}%"
-            )
+        lines.extend(xg_lines)
 
     # Player stats — background context only, NOT active roster for this game
-    # Extract names from goals and zones for grounding
-    goal_names = set()
-    for g in goals:
-        if g.get("scorer"):
-            goal_names.add(g["scorer"])
-        if g.get("assist1"):
-            goal_names.add(g["assist1"])
-        if g.get("assist2"):
-            goal_names.add(g["assist2"])
-    goalie_names = set()
-    for names in goalies.values():
-        goalie_names.update(names)
-    lines.append(
-        f"\n{team} SEASON STATS (background context — do NOT use to invent game details)\n"
-        f"These are season averages, NOT a roster of players who appeared in this game.\n"
-        f"You may only name a player from this list if they also appear in GOAL SCORING or ZONE STARTS above."
-    )
-    for p in players:
-        if p.get("goals") is None:
-            continue
-        rapm_str = f"RAPM {p['rapm']:+.3f}" if p.get("rapm") is not None else ""
+    stat_lines = [ln for ln in (_season_stat_line(p) for p in players) if ln]
+    if stat_lines:
         lines.append(
-            f"{p['name']} ({p['position']}): {p.get('goals')}G {p.get('assists')}A "
-            f"{p.get('points')}PTS in {p.get('games_played')} GP | {rapm_str} | "
-            f"xGF/60 {p.get('xgf_per60'):.2f} | EV off pct {p.get('pct_ev_off')}"
+            f"\n{team} SEASON STATS (background context — do NOT use to invent game details)\n"
+            f"These are season averages, NOT a roster of players who appeared in this game.\n"
+            f"You may only name a player from this list if they also appear in GOAL SCORING or ZONE STARTS above."
         )
+        lines.extend(stat_lines)
 
     # Zone starts — these players DID play in this game
     if zones:
         lines.append("\nZONE STARTS (this game — these players confirmed on ice)")
         for z in zones:
-            lines.append(
-                f"{z['name']}: OZ {z['oz_pct']}% | DZ {z['dz_pct']}% | NZ starts {z['nz_starts']}"
-            )
+            parts = [
+                f"{label} {z[k]}{suffix}"
+                for k, label, suffix in (
+                    ("oz_pct", "OZ", "%"),
+                    ("dz_pct", "DZ", "%"),
+                    ("nz_starts", "NZ starts", ""),
+                )
+                if _present(z.get(k))
+            ]
+            if parts:
+                lines.append(f"{z['name']}: " + " | ".join(parts))
 
     # Recent form
-    lines.append("\nRECENT FORM (last 5 games)")
-    for g in form:
-        ot = f" ({g['decided_in']})" if g.get("decided_in") else ""
-        lines.append(
-            f"{g['game_date']} vs {g['opponent']}: {g['result']} "
-            f"{g['team_score']}-{g['opp_score']}{ot} ({g['game_type']})"
-        )
+    if form:
+        lines.append("\nRECENT FORM (last 5 games)")
+        for g in form:
+            ot = f" ({g['decided_in']})" if g.get("decided_in") else ""
+            lines.append(
+                f"{g['game_date']} vs {g['opponent']}: {g['result']} "
+                f"{g['team_score']}-{g['opp_score']}{ot} ({g['game_type']})"
+            )
 
     return "\n".join(lines)
 

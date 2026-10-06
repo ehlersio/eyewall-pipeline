@@ -48,22 +48,22 @@ def test_shootout_game_is_not_called_overtime():
 
 
 def test_overtime_and_double_overtime_still_read_overtime():
-    assert "Went to overtime (ended period 4)" in format_game_context({"game": _game(4)})
+    assert "Went to overtime: decided in OT" in format_game_context({"game": _game(4)})
     playoff = format_game_context({"game": _game(5, "playoff")})
-    assert "Went to overtime (ended period 5)" in playoff and "shootout" not in playoff
+    assert "Went to overtime: decided in 2OT" in playoff and "shootout" not in playoff
 
 
 def test_goal_lines_label_ot_and_so():
-    assert period_label(2, None) == "P2"
-    assert period_label(4, "OT") == "OT"
-    assert period_label(5, "SO") == "SO"
-    assert period_label(5, "OT") == "2OT"
+    assert period_label(2, "regular") == "P2"
+    assert period_label(4, "regular") == "OT"
+    assert period_label(5, "regular") == "SO"
+    assert period_label(5, "playoff") == "2OT"
     goals = [
         {"period": 5, "time": "0:00", "team": "CAR", "scorer": "Seth Jarvis",
          "situation": "5v5", "away_score_after": 5, "home_score_after": 4},
     ]  # fmt: skip
     text = format_game_context({"game": _game(5), "goals": goals})
-    assert "  SO 0:00 — CAR: Seth Jarvis" in text
+    assert "  SO — CAR: Seth Jarvis scored in the shootout" in text
 
 
 def test_recent_form_marks_so(monkeypatch):
