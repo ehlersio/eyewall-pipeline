@@ -95,6 +95,58 @@ def hockeytech_statview_get(
     raise FetchError(f"HT {p.get('view')}: failed after {retries} attempts ({last_err})")
 
 
+class OnRosterMarker:
+    """Keeps {league}_players.on_roster in step with one run's roster feed.
+
+    For each team whose roster came back, write() upserts its rows with
+    on_roster = true, then sets on_roster = false on that team's other rows
+    in one update (players released, sent down or traded, whose team_id still
+    points here because nothing has moved them). Teams whose roster fetch
+    failed or came back empty are left alone. Readers (eyewall-poller's
+    Roster tab and call-up watch) hide only on_roster = false, so a NULL
+    (never marked) still shows.
+
+    The column comes from docs/2026-10-06_on_roster.sql, which the owner
+    runs. Until then the first write fails with PostgREST's missing-column
+    error: that is logged once, and this run (and every later one until the
+    column exists) upserts the rows without on_roster, as before.
+
+    `enabled=False` (an explicit-season backfill, whose roster is not
+    today's) skips the marking entirely.
+    """
+
+    def __init__(self, sb, table: str, enabled: bool = True):
+        self.sb = sb
+        self.table = table
+        self.enabled = enabled
+
+    def write(self, team_id: int, rows: list[dict], upsert) -> int:
+        """`upsert(rows) -> int` writes rows to self.table (the module's own
+        upsert_chunk); returns what it returns."""
+        if not rows or not self.enabled:
+            return upsert(rows)
+        try:
+            n = upsert([{**r, "on_roster": True} for r in rows])
+        except Exception as e:
+            if "on_roster" not in str(e):
+                raise
+            log.warning(
+                f"{self.table}.on_roster is missing (run docs/2026-10-06_on_roster.sql); "
+                f"writing rosters without it this run: {e}"
+            )
+            self.enabled = False
+            return upsert(rows)
+        ids = ",".join(str(r["player_id"]) for r in rows)
+        (
+            self.sb.table(self.table)
+            .update({"on_roster": False})
+            .eq("team_id", team_id)
+            .filter("player_id", "not.in", f"({ids})")
+            .execute()
+        )
+        return n
+
+
 def select_all(
     build, order: str = "game_id", page_size: int = 1000, max_pages: int = 1000
 ) -> list[dict]:

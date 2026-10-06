@@ -4,6 +4,37 @@
     {
       "ops": [
         [
+          "update",
+          [
+            {
+              "on_roster": false
+            }
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "team_id",
+            335
+          ],
+          {}
+        ],
+        [
+          "filter",
+          [
+            "player_id",
+            "not.in",
+            "(6681,7001)"
+          ],
+          {}
+        ]
+      ],
+      "table": "ahl_players"
+    },
+    {
+      "ops": [
+        [
           "select",
           [
             "player_id,team_id"
@@ -786,6 +817,7 @@
           "height_inches": 73,
           "jersey_number": 19,
           "last_name": "Skater",
+          "on_roster": true,
           "player_id": 6681,
           "position": "C",
           "shoots": "L",
@@ -800,6 +832,7 @@
           "height_inches": null,
           "jersey_number": null,
           "last_name": "Keeper",
+          "on_roster": true,
           "player_id": 7001,
           "position": "G",
           "shoots": "",

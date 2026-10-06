@@ -47,9 +47,13 @@ def test_run_passes_the_season_type_to_fetch_roster(monkeypatch):
     monkeypatch.setattr(
         hs,
         "fetch_roster",
-        lambda lg, sb, season_id, season_type="regular": seen.append(season_type),
+        lambda lg, sb, season_id, season_type="regular", mark_on_roster=False: seen.append(
+            (season_type, mark_on_roster)
+        ),
     )
     for name in ("fetch_skater_stats", "fetch_goalie_stats", "fetch_team_stats", "fetch_game_log"):
         monkeypatch.setattr(hs, name, lambda *a, **k: None)
     hs.run(AHL, "92")
-    assert seen == ["playoffs"]
+    # An explicit season is a backfill: its roster isn't today's, so it
+    # doesn't touch on_roster.
+    assert seen == [("playoffs", False)]
