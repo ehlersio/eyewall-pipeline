@@ -50,12 +50,57 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def nhl_get(path: str) -> dict:
-    """GET against api-web.nhle.com/v1, path should start with '/'."""
-    url = f"{NHL_BASE}{path}"
-    r = requests.get(url, timeout=15)
-    r.raise_for_status()
-    return r.json()
+# Indirection so tests can skip the backoff without patching time.sleep for
+# every module.
+_sleep = time.sleep
+
+NHL_HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
+
+# Worth another try: rate limiting and server-side errors. Any other 4xx
+# (a 404 for a game that doesn't exist yet, say) fails at once.
+NHL_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def nhl_get(
+    path_or_url: str,
+    params: dict | None = None,
+    *,
+    headers: dict | None = None,
+    timeout: float = 20,
+    retries: int = 3,
+) -> dict:
+    """GET an NHL API endpoint and return its JSON.
+
+    `path_or_url` is either a path under api-web.nhle.com/v1 (starting with
+    '/') or a full URL (nhl_stats/shot_events/shift_data/zone_starts/
+    game_scoring/line_combinations pass full URLs, some on api.nhle.com).
+
+    Retries timeouts, connection errors and 429/5xx up to `retries` attempts
+    with 1 s, 2 s backoff, the same shape as hockeytech_statview_get(), so
+    one 502 no longer fails a whole stage (audit 2026-10-06 F-12). Raises
+    FetchError when the attempts run out, on any other HTTP error, or on a
+    body that isn't JSON.
+    """
+    url = path_or_url if path_or_url.startswith("http") else f"{NHL_BASE}{path_or_url}"
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=headers or NHL_HEADERS, params=params, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_err = e
+        else:
+            if r.status_code in NHL_RETRY_STATUSES:
+                last_err = f"HTTP {r.status_code}"
+            else:
+                try:
+                    r.raise_for_status()
+                    return r.json()
+                except (requests.HTTPError, ValueError) as e:
+                    raise FetchError(f"NHL GET failed: {url} -- {e}") from e
+        log.warning(f"NHL GET {url}: {last_err} (attempt {attempt + 1}/{retries})")
+        if attempt < retries - 1:
+            _sleep(2**attempt)
+    raise FetchError(f"NHL GET failed: {url} -- {last_err} after {retries} attempts")
 
 
 def hockeytech_statview_get(

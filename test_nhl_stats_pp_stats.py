@@ -16,6 +16,15 @@ from unittest.mock import MagicMock
 import pytest
 
 import nhl_stats
+import pipeline_common
+
+# nhl_get lives in pipeline_common (2026-10) and retries a network error
+# with backoff; don't sleep through it here.
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff(monkeypatch):
+    monkeypatch.setattr(pipeline_common, "_sleep", lambda _s: None)
 
 
 def _mock_response(json_data):
@@ -37,7 +46,7 @@ def _right_rail(home_value, away_value):
 class TestFetchPPStats:
     def test_parses_goals_and_opps_for_both_teams(self, monkeypatch):
         monkeypatch.setattr(
-            nhl_stats.requests,
+            pipeline_common.requests,
             "get",
             lambda *a, **k: _mock_response(_right_rail("2/3", "0/0")),
         )
@@ -50,7 +59,7 @@ class TestFetchPPStats:
         0 opportunities (including a shorthanded goal); the real box score
         is CGY 0/0, NJD 2/3."""
         monkeypatch.setattr(
-            nhl_stats.requests,
+            pipeline_common.requests,
             "get",
             lambda *a, **k: _mock_response(_right_rail("2/3", "0/0")),
         )
@@ -60,7 +69,7 @@ class TestFetchPPStats:
 
     def test_returns_none_when_field_missing(self, monkeypatch):
         monkeypatch.setattr(
-            nhl_stats.requests,
+            pipeline_common.requests,
             "get",
             lambda *a, **k: _mock_response({"teamGameStats": [{"category": "sog"}]}),
         )
@@ -68,14 +77,14 @@ class TestFetchPPStats:
 
     def test_returns_none_on_fetch_error(self, monkeypatch):
         def _raise(*_a, **_k):
-            raise nhl_stats.requests.ConnectionError("network down")
+            raise pipeline_common.requests.ConnectionError("network down")
 
-        monkeypatch.setattr(nhl_stats.requests, "get", _raise)
+        monkeypatch.setattr(pipeline_common.requests, "get", _raise)
         assert nhl_stats.fetch_pp_stats(1) is None
 
     def test_returns_none_on_malformed_value(self, monkeypatch):
         monkeypatch.setattr(
-            nhl_stats.requests,
+            pipeline_common.requests,
             "get",
             lambda *a, **k: _mock_response(_right_rail("n/a", "0/0")),
         )

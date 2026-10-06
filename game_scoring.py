@@ -13,11 +13,10 @@ import argparse
 import os
 import time
 
-import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError
+from pipeline_common import FetchError, nhl_get
 from season_lookup import get_nhl_season
 
 load_dotenv()
@@ -31,15 +30,6 @@ REQUEST_DELAY = 0.5  # seconds between NHL API calls — stay well under rate li
 # ---------------------------------------------------------------------------
 # NHL API helpers
 # ---------------------------------------------------------------------------
-
-
-def nhl_get(url: str) -> dict:
-    try:
-        r = requests.get(url, headers={"User-Agent": "EyeWall-Analytics/1.0"}, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise FetchError(f"NHL API error for {url}: {e}") from e
 
 
 def get_season_schedule(season: int) -> list:

@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db import NHL_SEASON, get_client
-from pipeline_common import FetchError
+from pipeline_common import FetchError, nhl_get
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -64,15 +64,6 @@ ALL_TEAMS = [
 ]
 
 PERIOD_OFFSETS = {1: 0, 2: 1200, 3: 2400, 4: 3600, 5: 4800}
-
-
-def nhl_get(url, params=None):
-    try:
-        r = requests.get(url, headers=HEADERS, params=params, timeout=20)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise FetchError(f"GET failed: {url} — {e}") from e
 
 
 def mmss_to_secs(mmss):
