@@ -610,7 +610,7 @@ def test_upcoming_games_skip_preseason(monkeypatch):
         ]
     }
     monkeypatch.setattr(ap, "nhl_get", lambda path: sched)
-    assert [g["game_id"] for g in ap.get_upcoming_games()] == [2026020001]
+    assert [g["game_id"] for g in ap.get_upcoming_games("2026-09-29")] == [2026020001]
 
 
 def test_process_game_builds_context_for_the_games_own_season(monkeypatch):
