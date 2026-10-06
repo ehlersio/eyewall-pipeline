@@ -53,6 +53,7 @@ Run modes:
   python pwhl_shot_events.py --backfill-goals  # merge gameSummary onto ALREADY-ingested goal rows missing it
   python pwhl_shot_events.py --backfill-goals 5   # backfill a specific season_id
   python pwhl_shot_events.py --game 261        # single game_id (debug -- ingest + merge just this game)
+  python pwhl_shot_events.py 8 --reingest      # re-ingest every completed game of season 8 (idempotent)
   TRANSFORM_DEBUG=1 python pwhl_shot_events.py 5
 """
 
@@ -615,7 +616,14 @@ def ingest_game(sb, gid: int, home_id: int, season_id: str, season_type: str) ->
     return len(rows)
 
 
-def run(season_id: str | None = None) -> None:
+def run(season_id: str | None = None, reingest: bool = False) -> None:
+    """Ingest every completed game of the season not yet in
+    pwhl_shot_events (or skipped). `reingest` also re-ingests the games
+    already there -- the upsert is idempotent, so this only adds what an
+    earlier run dropped: before 2026-07-04 (ad955c5) the dedup key had no
+    x_raw/y_raw, and a player's two shots in the same second collapsed to
+    one (game 212, P3 7:46: two shots by player 285 at (558,158) and
+    (556,157))."""
     season_id = season_id or PWHL_SEASON
     season_type = _resolve_season_type(season_id)
     if season_type is None:
@@ -633,7 +641,11 @@ def run(season_id: str | None = None) -> None:
     completed = get_completed_games(sb, season_id)
     skipped = get_skipped_games(sb, PIPELINE)
     processed = get_processed_games(sb, season_id)
-    todo = [g for g in completed if g["game_id"] not in skipped and g["game_id"] not in processed]
+    todo = [
+        g
+        for g in completed
+        if g["game_id"] not in skipped and (reingest or g["game_id"] not in processed)
+    ]
 
     log.info(
         f"  {len(completed)} completed, {len(processed)} processed, "
@@ -738,6 +750,12 @@ if __name__ == "__main__":
         default=None,
         help="Single game_id (debug -- ingest + merge just this game)",
     )
+    parser.add_argument(
+        "--reingest",
+        action="store_true",
+        help="Re-ingest games already in pwhl_shot_events too (idempotent upsert; "
+        "restores shots an older dedup key dropped)",
+    )
     args = parser.parse_args()
 
     if args.game is not None:
@@ -745,4 +763,4 @@ if __name__ == "__main__":
     elif args.backfill_goals:
         backfill_goals(args.season)
     else:
-        run(args.season)
+        run(args.season, reingest=args.reingest)

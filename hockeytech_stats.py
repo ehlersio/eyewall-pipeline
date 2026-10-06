@@ -195,6 +195,14 @@ def extract_rows(data: list | dict) -> list[dict]:
             row = item.get("row", {})
             if row:
                 row["_section"] = section.get("title", "")
+                # The feed's own team id for the row, when it gives one
+                # (AHL on team_code, ECHL skaters on team_name).
+                prop = item.get("prop") if isinstance(item.get("prop"), dict) else {}
+                for key in ("team_code", "team_name"):
+                    team = prop.get(key)
+                    if isinstance(team, dict) and team.get("teamLink"):
+                        row["_team_link"] = str(team["teamLink"])
+                        break
                 rows.append(row)
     return rows
 
@@ -313,6 +321,206 @@ def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -
         time.sleep(0.3)
 
 
+# ── Per-team splits ──────────────────────────────────────────────────────────
+#
+# The league-wide `players` view has one row per player: his whole season,
+# filed under the last team he played for. A traded player's games for his
+# earlier teams were credited to the last one and missing from the others
+# (AHL 2025-26: Graeme Clarke 65 GP / 43 pts, all under BEL, though 50 GP /
+# 24 pts came with HER). The same view filtered with `team=<id>` lists one
+# row per player who was with that team -- but for a player's latest team
+# that row is still his season total (Clarke under BEL: 65 GP, not 15), and
+# a team he was only registered with can list him too (ECHL 2025-26: Colby
+# Muise under ATL with his 8 ORL games; Jesper Vikman under HER with his 18
+# HSK games). So a player listed by exactly one team gets that row, and a
+# player listed by more than one gets his per-team lines from his own
+# `player` view (careerStats), the split HockeyTech's player pages show.
+# All checked live 2026-10-05 against AHL season 90 and ECHL season 73.
+
+
+def _season_team_names(lg: League, season_id: str) -> dict[str, str]:
+    """team_id -> team name for the season's teams (modulekit
+    teamsbyseason). Empty if the call fails; callers fall back to
+    lg.team_id_map's ids, and to lg.team_id_by_name for names."""
+    try:
+        data = _modulekit_get(lg, "teamsbyseason", {"season_id": season_id})
+    except FetchError as e:
+        log.warning(f"  No team list for season {season_id}: {e}")
+        return {}
+    names, unknown = {}, Counter()
+    for t in data.get("Teamsbyseason") or []:
+        if not isinstance(t, dict) or not t.get("id"):
+            continue
+        if str(t["id"]) in lg.team_id_map:
+            names[str(t["id"])] = t.get("name") or ""
+        else:
+            # Its players would go missing: name it so it can be added to
+            # hockeytech_leagues.py.
+            unknown[f"{t.get('code') or '?'} id {t['id']}"] += 1
+    _warn_unresolved(unknown, "team-list")
+    return names
+
+
+def _row_team_id(lg: League, row: dict) -> str | None:
+    """The team a `players` row says it belongs to, if it says: the feed's
+    teamLink id (AHL), else its team_code (AHL) or team_name (ECHL)."""
+    prop_team = row.get("_team_link")
+    if prop_team and str(prop_team) in lg.team_id_map:
+        return str(prop_team)
+    if row.get("team_code"):
+        return lg.code_to_team_id.get(row["team_code"])
+    if row.get("team_name") and lg.team_id_by_name:
+        return lg.team_id_by_name.get(row["team_name"])
+    return None
+
+
+def _team_listings(
+    lg: League, base_params: dict, team_ids: list[str]
+) -> dict[str, dict[str, dict]]:
+    """player_id -> {team_id: row} from the `players` view filtered by each
+    team. A team whose call fails is logged and left out (its rows keep
+    last night's values)."""
+    listings: dict[str, dict[str, dict]] = {}
+    for team_id in team_ids:
+        try:
+            data = ht_get(lg, {**base_params, "team": team_id})
+        except FetchError as e:
+            log.warning(f"  No {base_params['position']} data for team {team_id}: {e}")
+            continue
+        for row in extract_rows(data):
+            pid = row.get("player_id")
+            if pid:
+                listings.setdefault(str(pid), {})[team_id] = row
+        time.sleep(0.3)
+    return listings
+
+
+def _player_view_splits(
+    lg: League, player_id: str, season_id: str, name_to_team: dict[str, str], needs: str
+) -> dict[str, dict] | None:
+    """team_id -> this season's careerStats line for each team the player
+    played for, from his `player` view. None if the call fails or the view
+    has no line we can place, so the caller can fall back rather than write
+    a guess. Lines without the `needs` column are skipped: a goalie in the
+    skaters list gets his goalie table there, which on ECHL has no goals or
+    assists at all (AHL's does)."""
+    try:
+        data = ht_get(lg, {"view": "player", "player_id": player_id, "season_id": season_id})
+    except FetchError as e:
+        log.warning(f"  No player view for {player_id}: {e}")
+        return None
+    if not isinstance(data, dict):
+        return None
+    season_name = next(
+        (s.get("name") for s in data.get("seasons") or [] if str(s.get("id")) == str(season_id)),
+        None,
+    )
+    if not season_name:
+        return None
+    splits: dict[str, dict] = {}
+    for block in data.get("careerStats") or []:
+        for row in extract_rows(block):
+            if row.get("season_name") != season_name or needs not in row:
+                continue
+            team_id = name_to_team.get(row.get("team_name") or "")
+            if not team_id:
+                log.warning(
+                    f"  Player {player_id}: no team for '{row.get('team_name')}' "
+                    f"in {season_name}, skipping that line"
+                )
+                continue
+            splits[team_id] = row
+    return splits or None
+
+
+def _team_split_rows(
+    lg: League, season_id: str, base_params: dict, fallback: dict[str, tuple[str, dict]]
+) -> tuple[list[tuple[str, dict]], dict[int, set[int]]]:
+    """(team_id, stats row) for every player's line with every team this
+    season -- see "Per-team splits" above -- and, for the players resolved
+    through their player view, the teams they have a line with (for
+    _delete_stale_splits).
+
+    A multi-team player whose player view can't be used gets `fallback`'s
+    entry for him: his league-wide row, whole season under his current team
+    -- what was stored before per-team splits, never a guessed split."""
+    team_names = _season_team_names(lg, season_id)
+    team_ids = list(team_names) or list(lg.team_id_map)
+    name_to_team = {name: tid for tid, name in team_names.items() if name}
+    for name, tid in (lg.team_id_by_name or {}).items():
+        name_to_team.setdefault(name, tid)
+
+    listings = _team_listings(lg, base_params, team_ids)
+    out: list[tuple[str, dict]] = []
+    resolved: dict[int, set[int]] = {}
+    unplaced = 0
+    for pid, by_team in listings.items():
+        if len(by_team) == 1:
+            [(team_id, row)] = by_team.items()
+            # A row that names some other team (seen live: ECHL's ATL list
+            # carrying Carter McPhail's GVL line) isn't this team's split.
+            named = _row_team_id(lg, row)
+            if named is None or named == team_id:
+                out.append((team_id, row))
+                continue
+        needs = "goals_against" if base_params["position"] == "goalies" else "goals"
+        splits = _player_view_splits(lg, pid, season_id, name_to_team, needs)
+        time.sleep(0.3)
+        if not splits:
+            unplaced += 1
+            if pid in fallback:
+                out.append(fallback[pid])
+            continue
+        for team_id, row in splits.items():
+            out.append((team_id, {**row, "player_id": pid}))
+        resolved[int(pid)] = {int(t) for t in splits}
+    if unplaced:
+        log.warning(
+            f"  {unplaced} multi-team {base_params['position']} had no usable player view; "
+            "their league-wide (whole-season) rows were used"
+        )
+    return out, resolved
+
+
+def _delete_stale_splits(
+    sb, table: str, season_id: str, season_type: str, resolved: dict[int, set[int]]
+) -> None:
+    """Delete this season's rows for the resolved players on teams they have
+    no line with -- before per-team splits, the league-wide row put a
+    traded player's whole season under his last team, even one he never
+    played for (Vikman, HER)."""
+    pids = sorted(resolved)
+    stale = []
+    for i in range(0, len(pids), 200):
+        existing = (
+            sb.table(table)
+            .select("player_id,team_id")
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .in_("player_id", pids[i : i + 200])
+            .execute()
+            .data
+            or []
+        )
+        stale += [
+            (r["player_id"], r["team_id"])
+            for r in existing
+            if r.get("team_id") is not None and r["team_id"] not in resolved[r["player_id"]]
+        ]
+    for player_id, team_id in stale:
+        (
+            sb.table(table)
+            .delete()
+            .eq("player_id", player_id)
+            .eq("team_id", team_id)
+            .eq("season_id", int(season_id))
+            .eq("season_type", season_type)
+            .execute()
+        )
+    if stale:
+        log.info(f"  Deleted {len(stale)} {table} rows for teams those players have no line with")
+
+
 # ── Skater Stats ──────────────────────────────────────────────────────────────
 
 
@@ -330,8 +538,20 @@ def _skater_team_id(lg: League, p: dict) -> str | None:
     return lg.code_to_team_id.get(p.get("team_code", ""))
 
 
+def _points(p: dict) -> int:
+    """A skater line's points. A goalie in the skaters list who changed
+    teams gets his lines from the player view's goalie table, which has
+    goals and assists but no points column."""
+    if p.get("points") not in (None, ""):
+        return int(p["points"] or 0)
+    return int(p.get("goals", 0) or 0) + int(p.get("assists", 0) or 0)
+
+
 def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None:
-    """Fetch league-wide skater stats and upsert to {league}_player_seasons.
+    """Fetch skater stats and upsert to {league}_player_seasons, one row per
+    (player, team) -- see "Per-team splits". The league-wide view still
+    supplies the {league}_players stubs, since its one row per player names
+    the team he's with now.
 
     The `players` view has no shooting_percentage/power_play_assists/
     short_handed_assists at all (PWHL's does), so those columns are left
@@ -339,21 +559,19 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
     """
     log.info(f"Fetching skater stats (season {season_id})...")
 
+    params = {
+        "view": "players",
+        "season": season_id,
+        "context": "overall",
+        "position": "skaters",
+        "rookie": "false",
+        # The feed returns at most `limit` rows, and a season has
+        # more than 1,000 skaters (AHL 2025-26: 1,234; ECHL: 1,195).
+        "limit": "5000",
+        "sort": "points",
+    }
     try:
-        data = ht_get(
-            lg,
-            {
-                "view": "players",
-                "season": season_id,
-                "context": "overall",
-                "position": "skaters",
-                "rookie": "false",
-                # The feed returns at most `limit` rows, and a season has
-                # more than 1,000 skaters (AHL 2025-26: 1,234; ECHL: 1,195).
-                "limit": "5000",
-                "sort": "points",
-            },
-        )
+        data = ht_get(lg, params)
     except FetchError as e:
         log.warning(f"  No skater data: {e}")
         return
@@ -380,31 +598,24 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
         )
     upsert_chunk(sb, f"{lg.key}_players", player_stubs, "player_id")
 
+    league_wide = {
+        str(p["player_id"]): (team_id, p)
+        for p in rows_raw
+        if p.get("player_id") and (team_id := _skater_team_id(lg, p))
+    }
     rows = []
-    unresolved = Counter()
-    for p in rows_raw:
-        pid = p.get("player_id")
-        team_id = _skater_team_id(lg, p)
-        if not pid:
-            continue
-        if not team_id:
-            # A NULL team_id never matches the (player_id, team_id, ...)
-            # conflict key -- NULLs are distinct in Postgres -- so every run
-            # used to insert another team-less copy. Skip and name the team
-            # so it can be added to hockeytech_leagues.py.
-            unresolved[p.get("team_name") or p.get("team_code") or "?"] += 1
-            continue
-
+    splits, resolved = _team_split_rows(lg, season_id, params, league_wide)
+    for team_id, p in splits:
         rows.append(
             {
-                "player_id": int(pid),
-                "team_id": int(team_id) if team_id else None,
+                "player_id": int(p["player_id"]),
+                "team_id": int(team_id),
                 "season_id": int(season_id),
                 "season_type": season_type,
                 "gp": int(p.get("games_played", 0) or 0),
                 "goals": int(p.get("goals", 0) or 0),
                 "assists": int(p.get("assists", 0) or 0),
-                "points": int(p.get("points", 0) or 0),
+                "points": _points(p),
                 "plus_minus": int(p.get("plus_minus", 0) or 0),
                 "pim": int(p.get("penalty_minutes", 0) or 0),
                 "shots": int(p.get("shots", 0) or 0),
@@ -414,10 +625,10 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
             }
         )
 
-    _warn_unresolved(unresolved, "skater")
     n = upsert_chunk(
         sb, f"{lg.key}_player_seasons", rows, "player_id,team_id,season_id,season_type"
     )
+    _delete_stale_splits(sb, f"{lg.key}_player_seasons", season_id, season_type, resolved)
     log.info(f"  {n} skater season rows upserted")
 
 
@@ -435,25 +646,33 @@ def _goalie_saves(g: dict) -> int:
     return max(shots - int(g.get("goals_against", 0) or 0), 0)
 
 
+def _goalie_shots(g: dict) -> int:
+    """Shots against: the `players` view's "shots"; the player view (used
+    for multi-team goalies) has none, but its saves + goals_against are the
+    same count."""
+    if g.get("shots") not in (None, ""):
+        return int(g["shots"] or 0)
+    return int(g.get("saves", 0) or 0) + int(g.get("goals_against", 0) or 0)
+
+
 def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None:
-    """Fetch league-wide goalie stats and upsert to {league}_goalie_seasons.
-    Field shape matches PWHL's closely -- no fields need dropping here."""
+    """Fetch goalie stats and upsert to {league}_goalie_seasons, one row per
+    (player, team) -- see "Per-team splits" and fetch_skater_stats. Field
+    shape matches PWHL's closely -- no fields need dropping here."""
     log.info(f"Fetching goalie stats (season {season_id})...")
 
+    params = {
+        "view": "players",
+        "season": season_id,
+        "context": "overall",
+        "position": "goalies",
+        "rookie": "false",
+        # Well above a season's goalie count (2025-26: 135 AHL, 126 ECHL).
+        "limit": "1000",
+        "sort": "wins",
+    }
     try:
-        data = ht_get(
-            lg,
-            {
-                "view": "players",
-                "season": season_id,
-                "context": "overall",
-                "position": "goalies",
-                "rookie": "false",
-                # Well above a season's goalie count (2025-26: 135 AHL, 126 ECHL).
-                "limit": "1000",
-                "sort": "wins",
-            },
-        )
+        data = ht_get(lg, params)
     except FetchError as e:
         log.warning(f"  No goalie data: {e}")
         return
@@ -480,33 +699,32 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
         )
     upsert_chunk(sb, f"{lg.key}_players", goalie_stubs, "player_id")
 
+    league_wide = {
+        str(g["player_id"]): (team_id, g)
+        for g in rows_raw
+        if g.get("player_id") and (team_id := lg.code_to_team_id.get(g.get("team_code", "")))
+    }
     rows = []
-    unresolved = Counter()
-    for g in rows_raw:
-        pid = g.get("player_id")
-        team_id = lg.code_to_team_id.get(g.get("team_code", ""))
-        if not pid:
-            continue
-        if not team_id:  # see fetch_skater_stats
-            unresolved[g.get("team_code") or "?"] += 1
-            continue
-
+    splits, resolved = _team_split_rows(lg, season_id, params, league_wide)
+    for team_id, g in splits:
+        sv_pct = g.get("save_percentage") or g.get("savepct")
         rows.append(
             {
-                "player_id": int(pid),
-                "team_id": int(team_id) if team_id else None,
+                "player_id": int(g["player_id"]),
+                "team_id": int(team_id),
                 "season_id": int(season_id),
                 "season_type": season_type,
                 "gp": int(g.get("games_played", 0) or 0),
                 "wins": int(g.get("wins", 0) or 0),
                 "losses": int(g.get("losses", 0) or 0),
                 "ot_losses": int(g.get("ot_losses", 0) or 0),
-                "shots_against": int(g.get("shots", 0) or 0),
+                "shots_against": _goalie_shots(g),
                 # ECHL's goalie rows have no "saves" field (AHL's do); fall
                 # back to shots - goals_against rather than storing 0.
                 "saves": _goalie_saves(g),
                 "goals_against": int(g.get("goals_against", 0) or 0),
-                "sv_pct": float(g["save_percentage"]) if g.get("save_percentage") else None,
+                # The player view (multi-team goalies) calls it "savepct".
+                "sv_pct": float(sv_pct) if sv_pct else None,
                 "gaa": float(g["goals_against_average"])
                 if g.get("goals_against_average")
                 else None,
@@ -516,10 +734,10 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
             }
         )
 
-    _warn_unresolved(unresolved, "goalie")
     n = upsert_chunk(
         sb, f"{lg.key}_goalie_seasons", rows, "player_id,team_id,season_id,season_type"
     )
+    _delete_stale_splits(sb, f"{lg.key}_goalie_seasons", season_id, season_type, resolved)
     log.info(f"  {n} goalie season rows upserted")
 
 

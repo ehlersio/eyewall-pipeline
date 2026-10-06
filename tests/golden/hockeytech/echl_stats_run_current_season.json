@@ -1,6 +1,45 @@
 {
   "posts": [],
-  "reads": [],
+  "reads": [
+    {
+      "ops": [
+        [
+          "select",
+          [
+            "player_id,team_id"
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_id",
+            73
+          ],
+          {}
+        ],
+        [
+          "eq",
+          [
+            "season_type",
+            "regular"
+          ],
+          {}
+        ],
+        [
+          "in_",
+          [
+            "player_id",
+            [
+              6683
+            ]
+          ],
+          {}
+        ]
+      ],
+      "table": "echl_player_seasons"
+    }
+  ],
   "requests": [
     {
       "params": {},
@@ -505,6 +544,74 @@
     {
       "params": {
         "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "73",
+        "site_id": "0",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "73",
+        "site_id": "0",
+        "sort": "points",
+        "team": "8",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "73",
+        "site_id": "0",
+        "sort": "points",
+        "team": "99",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "player_id": "6683",
+        "season_id": "73",
+        "site_id": "0",
+        "view": "player"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
         "context": "overall",
         "feed": "statviewfeed",
         "key": "2c2b89ea7345cae8",
@@ -516,6 +623,59 @@
         "season": "73",
         "site_id": "0",
         "sort": "wins",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "feed": "modulekit",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "season_id": "73",
+        "site_id": "0",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "73",
+        "site_id": "0",
+        "sort": "wins",
+        "team": "8",
+        "view": "players"
+      },
+      "referer": "https://echl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "echl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "2c2b89ea7345cae8",
+        "lang": "en",
+        "league_id": "1",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "73",
+        "site_id": "0",
+        "sort": "wins",
+        "team": "99",
         "view": "players"
       },
       "referer": "https://echl.com/",
@@ -676,13 +836,13 @@
           "pim": 0,
           "player_id": 6682,
           "plus_minus": 0,
-          "points": 0,
+          "points": 1,
           "pp_goals": 0,
           "season_id": 73,
           "season_type": "regular",
           "sh_goals": 0,
           "shots": 0,
-          "team_id": 8,
+          "team_id": 99,
           "updated_at": "2026-01-15T17:00:00+00:00"
         },
         {
@@ -699,6 +859,38 @@
           "sh_goals": 1,
           "shots": 110,
           "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 6,
+          "goals": 4,
+          "gp": 20,
+          "pim": 2,
+          "player_id": 6683,
+          "plus_minus": 1,
+          "points": 10,
+          "pp_goals": 1,
+          "season_id": 73,
+          "season_type": "regular",
+          "sh_goals": 0,
+          "shots": 40,
+          "team_id": 8,
+          "updated_at": "2026-01-15T17:00:00+00:00"
+        },
+        {
+          "assists": 8,
+          "goals": 7,
+          "gp": 30,
+          "pim": 2,
+          "player_id": 6683,
+          "plus_minus": 1,
+          "points": 15,
+          "pp_goals": 1,
+          "season_id": 73,
+          "season_type": "regular",
+          "sh_goals": 0,
+          "shots": 61,
+          "team_id": 99,
           "updated_at": "2026-01-15T17:00:00+00:00"
         }
       ],
@@ -746,6 +938,24 @@
           "toi": "1800:00",
           "updated_at": "2026-01-15T17:00:00+00:00",
           "wins": 17
+        },
+        {
+          "gaa": null,
+          "goals_against": 0,
+          "gp": 0,
+          "losses": 0,
+          "ot_losses": 0,
+          "player_id": 7002,
+          "saves": 0,
+          "season_id": 73,
+          "season_type": "regular",
+          "shots_against": 0,
+          "shutouts": 0,
+          "sv_pct": null,
+          "team_id": 8,
+          "toi": null,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 0
         }
       ],
       "table": "echl_goalie_seasons"

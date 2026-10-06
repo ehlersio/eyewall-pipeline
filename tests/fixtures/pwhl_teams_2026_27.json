@@ -1,0 +1,660 @@
+{
+ "10": [
+  {
+   "sections": [
+    {
+     "title": "",
+     "data": [
+      {
+       "row": {
+        "team_code": "BOS",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "1",
+        "games_played": "0",
+        "rank": 1,
+        "name": "Boston Fleet"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "1"
+        },
+        "name": {
+         "teamLink": "1"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "MIN",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "2",
+        "games_played": "0",
+        "rank": 2,
+        "name": "Minnesota Frost"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "2"
+        },
+        "name": {
+         "teamLink": "2"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "MTL",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "3",
+        "games_played": "0",
+        "rank": 3,
+        "name": "Montréal Victoire"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "3"
+        },
+        "name": {
+         "teamLink": "3"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "NY",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "4",
+        "games_played": "0",
+        "rank": 4,
+        "name": "New York Sirens"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "4"
+        },
+        "name": {
+         "teamLink": "4"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "OTT",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "5",
+        "games_played": "0",
+        "rank": 5,
+        "name": "Ottawa Charge"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "5"
+        },
+        "name": {
+         "teamLink": "5"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "TOR",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "6",
+        "games_played": "0",
+        "rank": 6,
+        "name": "Toronto Sceptres"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "6"
+        },
+        "name": {
+         "teamLink": "6"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "SEA",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "7",
+        "games_played": "0",
+        "rank": 7,
+        "name": "Seattle Torrent"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "8"
+        },
+        "name": {
+         "teamLink": "8"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "VAN",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "8",
+        "games_played": "0",
+        "rank": 8,
+        "name": "Vancouver Goldeneyes"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "9"
+        },
+        "name": {
+         "teamLink": "9"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "DET",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "9",
+        "games_played": "0",
+        "rank": 9,
+        "name": "PWHL Detroit"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "10"
+        },
+        "name": {
+         "teamLink": "10"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "HAM",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "10",
+        "games_played": "0",
+        "rank": 10,
+        "name": "PWHL Hamilton"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "11"
+        },
+        "name": {
+         "teamLink": "11"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "VEG",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "11",
+        "games_played": "0",
+        "rank": 11,
+        "name": "PWHL Las Vegas"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "12"
+        },
+        "name": {
+         "teamLink": "12"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "SJ",
+        "losses": "0",
+        "regulation_wins": "",
+        "points": 0,
+        "streak_wl": "",
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "",
+        "non_reg_losses": "0",
+        "games_remaining": "2",
+        "percentage": "0.000",
+        "overall_rank": "12",
+        "games_played": "0",
+        "rank": 12,
+        "name": "PWHL San Jose"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "13"
+        },
+        "name": {
+         "teamLink": "13"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "11": [
+  {
+   "sections": [
+    {
+     "title": "",
+     "data": [
+      {
+       "row": {
+        "team_code": "BOS",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "1",
+        "games_played": "0",
+        "rank": 1,
+        "name": "Boston Fleet"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "1"
+        },
+        "name": {
+         "teamLink": "1"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "MIN",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "2",
+        "games_played": "0",
+        "rank": 2,
+        "name": "Minnesota Frost"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "2"
+        },
+        "name": {
+         "teamLink": "2"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "MTL",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "3",
+        "games_played": "0",
+        "rank": 3,
+        "name": "Montréal Victoire"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "3"
+        },
+        "name": {
+         "teamLink": "3"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "NY",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "4",
+        "games_played": "0",
+        "rank": 4,
+        "name": "New York Sirens"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "4"
+        },
+        "name": {
+         "teamLink": "4"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "OTT",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "5",
+        "games_played": "0",
+        "rank": 5,
+        "name": "Ottawa Charge"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "5"
+        },
+        "name": {
+         "teamLink": "5"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "TOR",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "6",
+        "games_played": "0",
+        "rank": 6,
+        "name": "Toronto Sceptres"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "6"
+        },
+        "name": {
+         "teamLink": "6"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "SEA",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "7",
+        "games_played": "0",
+        "rank": 7,
+        "name": "Seattle Torrent"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "8"
+        },
+        "name": {
+         "teamLink": "8"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "VAN",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "8",
+        "games_played": "0",
+        "rank": 8,
+        "name": "Vancouver Goldeneyes"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "9"
+        },
+        "name": {
+         "teamLink": "9"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "DET",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "9",
+        "games_played": "0",
+        "rank": 9,
+        "name": "PWHL Detroit"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "10"
+        },
+        "name": {
+         "teamLink": "10"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "HAM",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "10",
+        "games_played": "0",
+        "rank": 10,
+        "name": "PWHL Hamilton"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "11"
+        },
+        "name": {
+         "teamLink": "11"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "VGS",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "11",
+        "games_played": "0",
+        "rank": 11,
+        "name": "PWHL Las Vegas"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "12"
+        },
+        "name": {
+         "teamLink": "12"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "SJ",
+        "losses": "0",
+        "regulation_wins": "0",
+        "points": 0,
+        "goals_for": "0",
+        "goals_against": "0",
+        "non_reg_wins": "0",
+        "non_reg_losses": "0",
+        "games_remaining": "30",
+        "percentage": "0.000",
+        "overall_rank": "12",
+        "games_played": "0",
+        "rank": 12,
+        "name": "PWHL San Jose"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "13"
+        },
+        "name": {
+         "teamLink": "13"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

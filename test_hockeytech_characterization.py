@@ -191,6 +191,82 @@ def goalies(L):
     ]  # fmt: skip
 
 
+# The `players` view filtered by team (see hockeytech_stats "Per-team
+# splits"). 6683 was traded from team_a to team_b: like the real feed
+# (Graeme Clarke, AHL 2025-26), his latest team's list carries his season
+# total and the other his split, so his lines come from his player view.
+TRADED = "6683"
+
+
+def team_listing(L, position, team):
+    if position == "goalies":
+        return [g for g in goalies(L) if g["team_code"] == (L.code_b if team == L.team_b else "")]
+    rows = {
+        L.team_a: [skaters(L)[0]],
+        L.team_b: [skaters(L)[1]],
+    }.get(team, [])
+    traded = {
+        "player_id": TRADED,
+        "name": "Trade Deadline",
+        "position": "RW",
+        "games_played": "20",
+        "goals": "4",
+        "assists": "6",
+        "points": "10",
+        "shots": "40",
+    }
+    if team == L.team_a:
+        return [*rows, {**traded, "team_code": L.code_a, "team_name": L.name_a}]
+    if team == L.team_b:
+        return [
+            *rows,
+            {
+                **traded,
+                "team_code": L.code_b,
+                "team_name": L.name_b,
+                "games_played": "50",
+                "goals": "11",
+                "points": "25",
+            },
+        ]
+    return rows
+
+
+def team_list(L, season):
+    """modulekit teamsbyseason; 9999 isn't in the league's team_id_map."""
+    return [
+        {"id": str(L.team_a), "name": L.name_a, "code": L.code_a},
+        {"id": str(L.team_b), "name": L.name_b, "code": L.code_b},
+        {"id": "9999", "name": "Expansion Club", "code": "EXP"},
+    ]
+
+
+def player_view(L, player_id):
+    """The traded player's `player` view: one careerStats line per team."""
+    assert player_id == TRADED
+    line = {
+        "player_id": TRADED,
+        "plus_minus": "1",
+        "penalty_minutes": "2",
+        "power_play_goals": "1",
+        "short_handed_goals": "0",
+    }
+    return {
+        "seasons": [{"id": L.regular, "name": "2025-26 Regular Season"},
+                    {"id": L.playoffs, "name": "2026 Playoffs"}],
+        "careerStats": [{"sections": [{"title": "Regular Season", "data": [
+            {"row": {**line, "season_name": "2025-26 Regular Season", "team_name": L.name_a,
+                     "games_played": "20", "goals": "4", "assists": "6", "points": "10",
+                     "shots": "40"}},
+            {"row": {**line, "season_name": "2025-26 Regular Season", "team_name": L.name_b,
+                     "games_played": "30", "goals": "7", "assists": "8", "points": "15",
+                     "shots": "61"}},
+            {"row": {**line, "season_name": "2024-25 Regular Season", "team_name": L.name_a,
+                     "games_played": "70", "goals": "20", "points": "45"}},
+        ]}]}],
+    }  # fmt: skip
+
+
 def team_totals(L):
     return [
         {"team_code": f"{L.key} - {L.code_a}", "games_played": "40", "wins": "24", "losses": "12",
@@ -487,14 +563,20 @@ class Harness:
                 if team_id == str(L.team_b):
                     return FakeResponse(500)
                 return ok_json({"SiteKit": {"Roster": []}})
+            if view == "teamsbyseason":
+                return ok_json({"SiteKit": {"Teamsbyseason": team_list(L, p.get("season_id"))}})
             if view == "scorebar":
                 if self.fail_scorebar:
                     return FakeResponse(500)
                 return ok_json({"SiteKit": {"Scorebar": scorebar(L)}})
         if feed == "statviewfeed":
             if view == "players":
+                if p.get("team"):
+                    return jsonp(sections(team_listing(L, p["position"], int(p["team"]))))
                 rows = skaters(L) if p.get("position") == "skaters" else goalies(L)
                 return jsonp(sections(rows))
+            if view == "player":
+                return jsonp(player_view(L, p.get("player_id")))
             if view == "teams":
                 rows = team_special(L) if p.get("special") == "true" else team_totals(L)
                 return jsonp(sections(rows))

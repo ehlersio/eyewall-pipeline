@@ -12,6 +12,11 @@ warning rather than written team-less. Same monkeypatch pattern as
 test_pwhl_stats_game_log_scores.py.
 """
 
+import json
+from pathlib import Path
+
+import pytest
+
 import pwhl_stats
 
 
@@ -87,3 +92,45 @@ class TestGoalies:
         upserted = _run(monkeypatch, pwhl_stats.fetch_goalie_stats, rows)
         assert [r["player_id"] for r in upserted["pwhl_goalie_seasons"]] == [82]
         assert "ZZZ (1)" in caplog.text
+
+
+# The 2026-27 expansion teams: TEAM_ID_MAP files them as "LV" and "SJS", but
+# HockeyTech's feed calls team 12 "VEG" (2026-27 preseason, season 10) and
+# "VGS" (regular season, season 11), and team 13 "SJ". Real view=teams
+# responses for both seasons (2026-10-05) are in
+# tests/fixtures/pwhl_teams_2026_27.json.
+TEAMS_2026_27 = json.loads(
+    (Path(__file__).parent / "tests" / "fixtures" / "pwhl_teams_2026_27.json").read_text()
+)
+
+
+class TestExpansionCodes:
+    def test_feed_codes_resolve(self):
+        assert pwhl_stats.team_id_for("VEG") == pwhl_stats.team_id_for("VGS") == "12"
+        assert pwhl_stats.team_id_for("SJ") == "13"
+        # The app's own codes still work.
+        assert pwhl_stats.team_id_for("LV") == "12"
+        assert pwhl_stats.team_id_for("SJS") == "13"
+
+    def test_feed_team_id_wins_over_an_unknown_code(self):
+        assert pwhl_stats.team_id_for("XYZ", "12") == "12"
+        # An id we don't know falls back to the code.
+        assert pwhl_stats.team_id_for("BOS", "99") == "1"
+
+    def test_extract_rows_carries_the_team_link(self):
+        rows = pwhl_stats.extract_rows(TEAMS_2026_27["11"])
+        by_code = {r["team_code"]: r["_team_link"] for r in rows}
+        assert by_code["VGS"] == "12" and by_code["SJ"] == "13"
+
+    @pytest.mark.parametrize("season_id", ["10", "11"])
+    def test_every_team_gets_a_standings_row(self, monkeypatch, season_id):
+        monkeypatch.setattr(pwhl_stats, "ht_get", lambda params: TEAMS_2026_27[season_id])
+        upserted = {}
+        monkeypatch.setattr(
+            pwhl_stats,
+            "upsert_chunk",
+            lambda sb, table, rows, conflict: upserted.setdefault(table, rows) and len(rows),
+        )
+        pwhl_stats.fetch_team_stats(sb=None, season_id=season_id, season_type="regular")
+        team_ids = sorted(r["team_id"] for r in upserted["pwhl_team_seasons"])
+        assert team_ids == [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]

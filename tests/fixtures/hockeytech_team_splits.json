@@ -1,0 +1,1502 @@
+{
+ "ahl_90_skaters": {
+  "listings": {
+   "319": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "name": {
+           "playerLink": "8598",
+           "seoName": "Graeme Clarke"
+          },
+          "active": {
+           "active": "0"
+          },
+          "rookie": {
+           "rookie": "0"
+          },
+          "team_code": {
+           "teamLink": "319"
+          }
+         },
+         "row": {
+          "player_id": "8598",
+          "name": "Graeme Clarke",
+          "active": "0",
+          "position": "RW",
+          "rookie": "0",
+          "team_code": "HER",
+          "games_played": "50",
+          "goals": "15",
+          "shots": "126",
+          "assists": "9",
+          "points": "24",
+          "points_per_game": "0.48",
+          "plus_minus": "-8",
+          "penalty_minutes": "24",
+          "penalty_minutes_per_game": "0.48",
+          "power_play_goals": "4",
+          "short_handed_goals": "0",
+          "shootout_goals": "0",
+          "shootout_attempts": "2",
+          "shootout_winning_goals": "0",
+          "shootout_percentage": "0.0",
+          "rank": 10
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "413": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "name": {
+           "playerLink": "8598",
+           "seoName": "Graeme Clarke"
+          },
+          "active": {
+           "active": "1"
+          },
+          "rookie": {
+           "rookie": "0"
+          },
+          "team_code": {
+           "teamLink": "413"
+          }
+         },
+         "row": {
+          "player_id": "8598",
+          "name": "Graeme Clarke",
+          "active": "1",
+          "position": "RW",
+          "rookie": "0",
+          "team_code": "BEL",
+          "games_played": "65",
+          "goals": "20",
+          "shots": "172",
+          "assists": "23",
+          "points": "43",
+          "points_per_game": "0.66",
+          "plus_minus": "-5",
+          "penalty_minutes": "42",
+          "penalty_minutes_per_game": "0.65",
+          "power_play_goals": "7",
+          "short_handed_goals": "0",
+          "shootout_goals": "0",
+          "shootout_attempts": "2",
+          "shootout_winning_goals": "0",
+          "shootout_percentage": "0.0",
+          "rank": 4
+         },
+         "teams": [
+          {
+           "player_id": "8598",
+           "active": "0",
+           "team_code": "HER",
+           "games_played": "50",
+           "goals": "15",
+           "assists": "9",
+           "points": "24",
+           "penalty_minutes": "24",
+           "plus_minus": "-8",
+           "power_play_goals": "4",
+           "short_handed_goals": "0",
+           "position": "RW",
+           "shots": "126",
+           "shootout_goals": "0",
+           "shootout_winning_goals": "0",
+           "shootout_attempts": "2",
+           "shootout_percentage": "0.0",
+           "points_per_game": "0.48",
+           "penalty_minutes_per_game": "0.48",
+           "name": "&nbsp;"
+          },
+          {
+           "player_id": "8598",
+           "active": "1",
+           "team_code": "BEL",
+           "games_played": "15",
+           "goals": "5",
+           "assists": "14",
+           "points": "19",
+           "penalty_minutes": "18",
+           "plus_minus": "3",
+           "power_play_goals": "3",
+           "short_handed_goals": "0",
+           "position": "RW",
+           "shots": "46",
+           "shootout_goals": "0",
+           "shootout_winning_goals": "0",
+           "shootout_attempts": "0",
+           "shootout_percentage": "0.0",
+           "points_per_game": "1.27",
+           "penalty_minutes_per_game": "1.20",
+           "name": "&nbsp;"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "players": {
+   "8598": {
+    "seasons": [
+     {
+      "id": 90,
+      "name": "2025-26 Regular Season"
+     }
+    ],
+    "careerStats": [
+     {
+      "sections": [
+       {
+        "title": "Regular Season",
+        "data": [
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals": "5",
+           "games_played": "15",
+           "assists": "14",
+           "points": "19",
+           "plus_minus": "3",
+           "penalty_minutes": "18",
+           "power_play_goals": "3",
+           "shots": "46",
+           "shootout_attempts": "0",
+           "shootout_goals": "0",
+           "shootout_percentage": "0.0",
+           "shooting_percentage": "10.9",
+           "short_handed_goals": "0",
+           "game_winning_goals": "1",
+           "team_name": "Belleville Senators"
+          }
+         },
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals": "15",
+           "games_played": "50",
+           "assists": "9",
+           "points": "24",
+           "plus_minus": "-8",
+           "penalty_minutes": "24",
+           "power_play_goals": "4",
+           "shots": "126",
+           "shootout_attempts": "2",
+           "shootout_goals": "0",
+           "shootout_percentage": "0.0",
+           "shooting_percentage": "11.9",
+           "short_handed_goals": "0",
+           "game_winning_goals": "2",
+           "team_name": "Hershey Bears"
+          }
+         }
+        ]
+       },
+       {
+        "title": "Playoffs",
+        "data": []
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "league_wide": [
+   {
+    "sections": [
+     {
+      "title": "",
+      "data": [
+       {
+        "prop": {
+         "name": {
+          "playerLink": "8598",
+          "seoName": "Graeme Clarke"
+         },
+         "active": {
+          "active": "1"
+         },
+         "rookie": {
+          "rookie": "0"
+         },
+         "team_code": {
+          "teamLink": "413"
+         }
+        },
+        "row": {
+         "player_id": "8598",
+         "name": "Graeme Clarke",
+         "active": "1",
+         "position": "RW",
+         "rookie": "0",
+         "team_code": "BEL",
+         "games_played": "65",
+         "goals": "20",
+         "shots": "172",
+         "assists": "23",
+         "points": "43",
+         "points_per_game": "0.66",
+         "plus_minus": "-5",
+         "penalty_minutes": "42",
+         "penalty_minutes_per_game": "0.65",
+         "power_play_goals": "7",
+         "short_handed_goals": "0",
+         "shootout_goals": "0",
+         "shootout_attempts": "2",
+         "shootout_winning_goals": "0",
+         "shootout_percentage": "0.0",
+         "rank": 100
+        },
+        "teams": [
+         {
+          "player_id": "8598",
+          "active": "0",
+          "team_code": "HER",
+          "games_played": "50",
+          "goals": "15",
+          "assists": "9",
+          "points": "24",
+          "penalty_minutes": "24",
+          "plus_minus": "-8",
+          "power_play_goals": "4",
+          "short_handed_goals": "0",
+          "position": "RW",
+          "shots": "126",
+          "shootout_goals": "0",
+          "shootout_winning_goals": "0",
+          "shootout_attempts": "2",
+          "shootout_percentage": "0.0",
+          "points_per_game": "0.48",
+          "penalty_minutes_per_game": "0.48",
+          "name": "&nbsp;"
+         },
+         {
+          "player_id": "8598",
+          "active": "1",
+          "team_code": "BEL",
+          "games_played": "15",
+          "goals": "5",
+          "assists": "14",
+          "points": "19",
+          "penalty_minutes": "18",
+          "plus_minus": "3",
+          "power_play_goals": "3",
+          "short_handed_goals": "0",
+          "position": "RW",
+          "shots": "46",
+          "shootout_goals": "0",
+          "shootout_winning_goals": "0",
+          "shootout_attempts": "0",
+          "shootout_percentage": "0.0",
+          "points_per_game": "1.27",
+          "penalty_minutes_per_game": "1.20",
+          "name": "&nbsp;"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "ahl_90_goalies": {
+  "listings": {
+   "319": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "0"
+          },
+          "name": {
+           "playerLink": "9282",
+           "seoName": "Jesper Vikman"
+          },
+          "active": {
+           "active": "1"
+          },
+          "team_code": {
+           "teamLink": "319"
+          }
+         },
+         "row": {
+          "player_id": "9282",
+          "rookie": "0",
+          "name": "Jesper Vikman",
+          "active": "1",
+          "team_code": "HER",
+          "games_played": "18",
+          "minutes_played": "1089:23",
+          "saves": "402",
+          "shots": "464",
+          "save_percentage": "0.866",
+          "goals_against": "62",
+          "shutouts": "0",
+          "wins": "8",
+          "losses": "7",
+          "ot_losses": "3",
+          "shootout_goals_against": "2",
+          "shootout_attempts": "5",
+          "goals": "0",
+          "assists": "0",
+          "penalty_minutes": "0",
+          "shootout_percentage": "0.600",
+          "goals_against_average": "3.41",
+          "rank": 3
+         },
+         "teams": [
+          {
+           "player_id": "9282",
+           "active": "1",
+           "rookie": "1",
+           "team_code": "HSK",
+           "games_played": "18",
+           "minutes_played": "1089:23",
+           "saves": "402",
+           "shots": "464",
+           "save_percentage": "0.866",
+           "goals_against": "62",
+           "shutouts": "0",
+           "wins": "8",
+           "losses": "7",
+           "ot_losses": "2",
+           "shootout_goals_against": "2",
+           "shootout_attempts": "5",
+           "shootout_percentage": "0.600",
+           "goals_against_average": "3.41",
+           "name": "&nbsp;"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "437": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "0"
+          },
+          "name": {
+           "playerLink": "9282",
+           "seoName": "Jesper Vikman"
+          },
+          "active": {
+           "active": "0"
+          },
+          "team_code": {
+           "teamLink": "437"
+          }
+         },
+         "row": {
+          "player_id": "9282",
+          "rookie": "0",
+          "name": "Jesper Vikman",
+          "active": "0",
+          "team_code": "HSK",
+          "games_played": "18",
+          "minutes_played": "1089:23",
+          "saves": "402",
+          "shots": "464",
+          "save_percentage": "0.866",
+          "goals_against": "62",
+          "shutouts": "0",
+          "wins": "8",
+          "losses": "7",
+          "ot_losses": "3",
+          "shootout_goals_against": "2",
+          "shootout_attempts": "5",
+          "goals": "0",
+          "assists": "1",
+          "penalty_minutes": "0",
+          "shootout_percentage": "0.600",
+          "goals_against_average": "3.41",
+          "rank": 2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "players": {
+   "9282": {
+    "seasons": [
+     {
+      "id": 90,
+      "name": "2025-26 Regular Season"
+     }
+    ],
+    "careerStats": [
+     {
+      "sections": [
+       {
+        "title": "Regular Season",
+        "data": [
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "62",
+           "goals_against_average": "3.41",
+           "games_played": "18",
+           "minutes_played": "1089",
+           "wins": "8",
+           "losses": "7",
+           "ot_losses": "3",
+           "shutouts": "0",
+           "saves": "402",
+           "savepct": "0.866",
+           "goals": "0",
+           "assists": "1",
+           "penalty_minutes": "0",
+           "team_name": "Henderson Silver Knights"
+          }
+         }
+        ]
+       },
+       {
+        "title": "Playoffs",
+        "data": []
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "echl_73_goalies": {
+  "listings": {
+   "10": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "0"
+          },
+          "name": {
+           "playerLink": "10659",
+           "seoName": "Colby Muise"
+          },
+          "active": {
+           "active": "1"
+          },
+          "team_code": {
+           "teamLink": "10"
+          }
+         },
+         "row": {
+          "player_id": "10659",
+          "rookie": "0",
+          "name": "Colby Muise",
+          "active": "1",
+          "team_code": "ATL",
+          "games_played": "8",
+          "minutes_played": 327,
+          "shots": "160",
+          "save_percentage": "0.919",
+          "goals_against": "13",
+          "shutouts": "1",
+          "wins": "3",
+          "losses": "2",
+          "ot_losses": "0",
+          "shootout_losses": "0",
+          "goals_against_average": "2.38",
+          "rank": 3
+         },
+         "teams": [
+          {
+           "player_id": "10659",
+           "active": "1",
+           "rookie": "1",
+           "team_code": "ORL",
+           "games_played": "8",
+           "minutes_played": "327",
+           "shots": "160",
+           "save_percentage": "0.919",
+           "goals_against": "13",
+           "shutouts": "1",
+           "wins": "3",
+           "losses": "2",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "goals_against_average": "2.38",
+           "name": "&nbsp;"
+          }
+         ]
+        },
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "1"
+          },
+          "name": {
+           "playerLink": "10762",
+           "seoName": "Carter McPhail"
+          },
+          "active": {
+           "active": "0"
+          },
+          "team_code": {
+           "teamLink": "52"
+          }
+         },
+         "row": {
+          "player_id": "10762",
+          "rookie": "1",
+          "name": "Carter McPhail",
+          "active": "0",
+          "team_code": "GVL",
+          "games_played": "1",
+          "minutes_played": 14,
+          "shots": "3",
+          "save_percentage": "1.000",
+          "goals_against": "0",
+          "shutouts": "0",
+          "wins": "0",
+          "losses": "0",
+          "ot_losses": "0",
+          "shootout_losses": "0",
+          "goals_against_average": "0.00",
+          "rank": 4
+         },
+         "teams": [
+          {
+           "player_id": "10762",
+           "active": "0",
+           "rookie": "1",
+           "team_code": "GVL",
+           "games_played": "1",
+           "minutes_played": "14",
+           "shots": "3",
+           "save_percentage": "1.000",
+           "goals_against": "0",
+           "shutouts": "0",
+           "wins": "0",
+           "losses": "0",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "goals_against_average": "0.00",
+           "name": "&nbsp;"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "52": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "1"
+          },
+          "name": {
+           "playerLink": "10762",
+           "seoName": "Carter McPhail"
+          },
+          "active": {
+           "active": "0"
+          },
+          "team_code": {
+           "teamLink": "52"
+          }
+         },
+         "row": {
+          "player_id": "10762",
+          "rookie": "1",
+          "name": "Carter McPhail",
+          "active": "0",
+          "team_code": "GVL",
+          "games_played": "1",
+          "minutes_played": 14,
+          "shots": "3",
+          "save_percentage": "1.000",
+          "goals_against": "0",
+          "shutouts": "0",
+          "wins": "0",
+          "losses": "0",
+          "ot_losses": "0",
+          "shootout_losses": "0",
+          "goals_against_average": "0.00",
+          "rank": 4
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "61": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "rookie": {
+           "rookie": "0"
+          },
+          "name": {
+           "playerLink": "10659",
+           "seoName": "Colby Muise"
+          },
+          "active": {
+           "active": "0"
+          },
+          "team_code": {
+           "teamLink": "61"
+          }
+         },
+         "row": {
+          "player_id": "10659",
+          "rookie": "0",
+          "name": "Colby Muise",
+          "active": "0",
+          "team_code": "ORL",
+          "games_played": "8",
+          "minutes_played": 327,
+          "shots": "160",
+          "save_percentage": "0.919",
+          "goals_against": "13",
+          "shutouts": "1",
+          "wins": "3",
+          "losses": "2",
+          "ot_losses": "0",
+          "shootout_losses": "0",
+          "goals_against_average": "2.38",
+          "rank": 5
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "players": {
+   "10659": {
+    "seasons": [
+     {
+      "id": 73,
+      "name": "2025-26 Regular Season"
+     }
+    ],
+    "careerStats": [
+     {
+      "sections": [
+       {
+        "title": "Regular Season",
+        "data": [
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "13",
+           "goals_against_average": "2.38",
+           "games_played": "8",
+           "minutes_played": "327",
+           "shots_against": "160",
+           "wins": "3",
+           "losses": "2",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "shutouts": "1",
+           "saves": "147",
+           "savepct": "0.919",
+           "team_name": "Orlando Solar Bears"
+          }
+         }
+        ]
+       },
+       {
+        "title": "Playoffs",
+        "data": []
+       }
+      ]
+     }
+    ]
+   },
+   "10762": {
+    "seasons": [
+     {
+      "id": 73,
+      "name": "2025-26 Regular Season"
+     }
+    ],
+    "careerStats": [
+     {
+      "sections": [
+       {
+        "title": "Regular Season",
+        "data": [
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "0",
+           "goals_against_average": "0.00",
+           "games_played": "1",
+           "minutes_played": "14",
+           "shots_against": "3",
+           "wins": "0",
+           "losses": "0",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "shutouts": "0",
+           "saves": "3",
+           "savepct": "1.000",
+           "team_name": "Greenville Swamp Rabbits"
+          }
+         }
+        ]
+       },
+       {
+        "title": "Playoffs",
+        "data": []
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "ahl_90_teams": [
+  {
+   "id": "440",
+   "name": "Abbotsford Canucks",
+   "code": "ABB"
+  },
+  {
+   "id": "402",
+   "name": "Bakersfield Condors",
+   "code": "BAK"
+  },
+  {
+   "id": "413",
+   "name": "Belleville Senators",
+   "code": "BEL"
+  },
+  {
+   "id": "317",
+   "name": "Bridgeport Islanders",
+   "code": "BRI"
+  },
+  {
+   "id": "444",
+   "name": "Calgary Wranglers",
+   "code": "CGY"
+  },
+  {
+   "id": "384",
+   "name": "Charlotte Checkers",
+   "code": "CLT"
+  },
+  {
+   "id": "330",
+   "name": "Chicago Wolves",
+   "code": "CHI"
+  },
+  {
+   "id": "373",
+   "name": "Cleveland Monsters",
+   "code": "CLE"
+  },
+  {
+   "id": "445",
+   "name": "Coachella Valley Firebirds",
+   "code": "CV"
+  },
+  {
+   "id": "419",
+   "name": "Colorado Eagles",
+   "code": "COL"
+  },
+  {
+   "id": "328",
+   "name": "Grand Rapids Griffins",
+   "code": "GR"
+  },
+  {
+   "id": "307",
+   "name": "Hartford Wolf Pack",
+   "code": "HFD"
+  },
+  {
+   "id": "437",
+   "name": "Henderson Silver Knights",
+   "code": "HSK"
+  },
+  {
+   "id": "319",
+   "name": "Hershey Bears",
+   "code": "HER"
+  },
+  {
+   "id": "389",
+   "name": "Iowa Wild",
+   "code": "IA"
+  },
+  {
+   "id": "415",
+   "name": "Laval Rocket",
+   "code": "LAV"
+  },
+  {
+   "id": "313",
+   "name": "Lehigh Valley Phantoms",
+   "code": "LV"
+  },
+  {
+   "id": "321",
+   "name": "Manitoba Moose",
+   "code": "MB"
+  },
+  {
+   "id": "327",
+   "name": "Milwaukee Admirals",
+   "code": "MIL"
+  },
+  {
+   "id": "403",
+   "name": "Ontario Reign",
+   "code": "ONT"
+  },
+  {
+   "id": "309",
+   "name": "Providence Bruins",
+   "code": "PRO"
+  },
+  {
+   "id": "323",
+   "name": "Rochester Americans",
+   "code": "ROC"
+  },
+  {
+   "id": "372",
+   "name": "Rockford IceHogs",
+   "code": "RFD"
+  },
+  {
+   "id": "404",
+   "name": "San Diego Gulls",
+   "code": "SD"
+  },
+  {
+   "id": "405",
+   "name": "San Jose Barracuda",
+   "code": "SJ"
+  },
+  {
+   "id": "411",
+   "name": "Springfield Thunderbirds",
+   "code": "SPR"
+  },
+  {
+   "id": "324",
+   "name": "Syracuse Crunch",
+   "code": "SYR"
+  },
+  {
+   "id": "380",
+   "name": "Texas Stars",
+   "code": "TEX"
+  },
+  {
+   "id": "335",
+   "name": "Toronto Marlies",
+   "code": "TOR"
+  },
+  {
+   "id": "412",
+   "name": "Tucson Roadrunners",
+   "code": "TUC"
+  },
+  {
+   "id": "390",
+   "name": "Utica Comets",
+   "code": "UTC"
+  },
+  {
+   "id": "316",
+   "name": "Wilkes-Barre/Scranton Penguins",
+   "code": "WBS"
+  }
+ ],
+ "echl_73_teams": [
+  {
+   "id": "74",
+   "name": "Adirondack Thunder",
+   "code": "ADK"
+  },
+  {
+   "id": "66",
+   "name": "Allen Americans",
+   "code": "ALN"
+  },
+  {
+   "id": "10",
+   "name": "Atlanta Gladiators",
+   "code": "ATL"
+  },
+  {
+   "id": "107",
+   "name": "Bloomington Bison",
+   "code": "BLM"
+  },
+  {
+   "id": "5",
+   "name": "Cincinnati Cyclones",
+   "code": "CIN"
+  },
+  {
+   "id": "8",
+   "name": "Florida Everblades",
+   "code": "FLA"
+  },
+  {
+   "id": "60",
+   "name": "Fort Wayne Komets",
+   "code": "FW"
+  },
+  {
+   "id": "108",
+   "name": "Greensboro Gargoyles",
+   "code": "GSO"
+  },
+  {
+   "id": "52",
+   "name": "Greenville Swamp Rabbits",
+   "code": "GVL"
+  },
+  {
+   "id": "11",
+   "name": "Idaho Steelheads",
+   "code": "IDH"
+  },
+  {
+   "id": "65",
+   "name": "Indy Fuel",
+   "code": "IND"
+  },
+  {
+   "id": "98",
+   "name": "Iowa Heartlanders",
+   "code": "IA"
+  },
+  {
+   "id": "79",
+   "name": "Jacksonville Icemen",
+   "code": "JAX"
+  },
+  {
+   "id": "50",
+   "name": "Kalamazoo Wings",
+   "code": "KAL"
+  },
+  {
+   "id": "68",
+   "name": "Kansas City Mavericks",
+   "code": "KC"
+  },
+  {
+   "id": "82",
+   "name": "Maine Mariners",
+   "code": "MNE"
+  },
+  {
+   "id": "76",
+   "name": "Norfolk Admirals",
+   "code": "NOR"
+  },
+  {
+   "id": "61",
+   "name": "Orlando Solar Bears",
+   "code": "ORL"
+  },
+  {
+   "id": "70",
+   "name": "Rapid City Rush",
+   "code": "RC"
+  },
+  {
+   "id": "17",
+   "name": "Reading Royals",
+   "code": "REA"
+  },
+  {
+   "id": "102",
+   "name": "Savannah Ghost Pirates",
+   "code": "SAV"
+  },
+  {
+   "id": "18",
+   "name": "South Carolina Stingrays",
+   "code": "SC"
+  },
+  {
+   "id": "106",
+   "name": "Tahoe Knight Monsters",
+   "code": "TAH"
+  },
+  {
+   "id": "21",
+   "name": "Toledo Walleye",
+   "code": "TOL"
+  },
+  {
+   "id": "99",
+   "name": "Trois-Rivières Lions",
+   "code": "TR"
+  },
+  {
+   "id": "71",
+   "name": "Tulsa Oilers",
+   "code": "TUL"
+  },
+  {
+   "id": "23",
+   "name": "Utah Grizzlies",
+   "code": "UTA"
+  },
+  {
+   "id": "25",
+   "name": "Wheeling Nailers",
+   "code": "WHL"
+  },
+  {
+   "id": "72",
+   "name": "Wichita Thunder",
+   "code": "WIC"
+  },
+  {
+   "id": "77",
+   "name": "Worcester Railers",
+   "code": "WOR"
+  }
+ ],
+ "echl_73_skaters": {
+  "listings": {
+   "8": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "name": {
+           "playerLink": "8567",
+           "seoName": "David Tendeck"
+          },
+          "active": {
+           "active": "0"
+          },
+          "rookie": {
+           "rookie": "0"
+          },
+          "team_name": {
+           "teamLink": "8"
+          }
+         },
+         "row": {
+          "player_id": "8567",
+          "name": "David Tendeck",
+          "active": "0",
+          "position": "G",
+          "rookie": "0",
+          "team_name": "Florida Everblades",
+          "games_played": "2",
+          "goals": "0",
+          "shots": "0",
+          "assists": "0",
+          "points": "0",
+          "points_per_game": "0.00",
+          "plus_minus": "0",
+          "penalty_minutes": "0",
+          "penalty_minutes_per_game": "0.00",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "rank": 39
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "66": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "name": {
+           "playerLink": "8567",
+           "seoName": "David Tendeck"
+          },
+          "active": {
+           "active": "0"
+          },
+          "rookie": {
+           "rookie": "0"
+          },
+          "team_name": {
+           "teamLink": "66"
+          }
+         },
+         "row": {
+          "player_id": "8567",
+          "name": "David Tendeck",
+          "active": "0",
+          "position": "G",
+          "rookie": "0",
+          "team_name": "Allen Americans",
+          "games_played": "16",
+          "goals": "0",
+          "shots": "0",
+          "assists": "2",
+          "points": "2",
+          "points_per_game": "0.13",
+          "plus_minus": "0",
+          "penalty_minutes": "0",
+          "penalty_minutes_per_game": "0.00",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "rank": 31
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "71": [
+    {
+     "sections": [
+      {
+       "title": "",
+       "data": [
+        {
+         "prop": {
+          "name": {
+           "playerLink": "8567",
+           "seoName": "David Tendeck"
+          },
+          "active": {
+           "active": "1"
+          },
+          "rookie": {
+           "rookie": "0"
+          },
+          "team_name": {
+           "teamLink": "71"
+          }
+         },
+         "row": {
+          "player_id": "8567",
+          "name": "David Tendeck",
+          "active": "1",
+          "position": "G",
+          "rookie": "0",
+          "team_name": "Tulsa Oilers",
+          "games_played": "27",
+          "goals": "0",
+          "shots": "0",
+          "assists": "3",
+          "points": "3",
+          "points_per_game": "0.11",
+          "plus_minus": "0",
+          "penalty_minutes": "0",
+          "penalty_minutes_per_game": "0.00",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "rank": 37
+         },
+         "teams": [
+          {
+           "player_id": "8567",
+           "active": "0",
+           "team_name": "Florida Everblades",
+           "games_played": "2",
+           "goals": "0",
+           "assists": "0",
+           "points": "0",
+           "penalty_minutes": "0",
+           "plus_minus": "0",
+           "power_play_goals": "0",
+           "short_handed_goals": "0",
+           "position": "G",
+           "shots": "0",
+           "points_per_game": "0.00",
+           "penalty_minutes_per_game": "0.00",
+           "name": "&nbsp;"
+          },
+          {
+           "player_id": "8567",
+           "active": "0",
+           "team_name": "Allen Americans",
+           "games_played": "16",
+           "goals": "0",
+           "assists": "2",
+           "points": "2",
+           "penalty_minutes": "0",
+           "plus_minus": "0",
+           "power_play_goals": "0",
+           "short_handed_goals": "0",
+           "position": "G",
+           "shots": "0",
+           "points_per_game": "0.13",
+           "penalty_minutes_per_game": "0.00",
+           "name": "&nbsp;"
+          },
+          {
+           "player_id": "8567",
+           "active": "1",
+           "team_name": "Tulsa Oilers",
+           "games_played": "9",
+           "goals": "0",
+           "assists": "1",
+           "points": "1",
+           "penalty_minutes": "0",
+           "plus_minus": "0",
+           "power_play_goals": "0",
+           "short_handed_goals": "0",
+           "position": "G",
+           "shots": "0",
+           "points_per_game": "0.11",
+           "penalty_minutes_per_game": "0.00",
+           "name": "&nbsp;"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "players": {
+   "8567": {
+    "seasons": [
+     {
+      "id": 73,
+      "name": "2025-26 Regular Season"
+     }
+    ],
+    "careerStats": [
+     {
+      "sections": [
+       {
+        "title": "Regular Season",
+        "data": [
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "2",
+           "goals_against_average": "1.02",
+           "games_played": "2",
+           "minutes_played": "118",
+           "shots_against": "57",
+           "wins": "1",
+           "losses": "1",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "shutouts": "1",
+           "saves": "55",
+           "savepct": "0.965",
+           "team_name": "Florida Everblades"
+          }
+         },
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "48",
+           "goals_against_average": "3.40",
+           "games_played": "16",
+           "minutes_played": "848",
+           "shots_against": "543",
+           "wins": "7",
+           "losses": "6",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "shutouts": "2",
+           "saves": "495",
+           "savepct": "0.912",
+           "team_name": "Allen Americans"
+          }
+         },
+         {
+          "row": {
+           "season_name": "2025-26 Regular Season",
+           "goals_against": "25",
+           "goals_against_average": "3.53",
+           "games_played": "9",
+           "minutes_played": "426",
+           "shots_against": "226",
+           "wins": "4",
+           "losses": "2",
+           "ot_losses": "0",
+           "shootout_losses": "0",
+           "shutouts": "0",
+           "saves": "201",
+           "savepct": "0.889",
+           "team_name": "Tulsa Oilers"
+          }
+         }
+        ]
+       },
+       {
+        "title": "Playoffs",
+        "data": []
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "league_wide": [
+   {
+    "sections": [
+     {
+      "title": "",
+      "data": [
+       {
+        "prop": {
+         "name": {
+          "playerLink": "8567",
+          "seoName": "David Tendeck"
+         },
+         "active": {
+          "active": "1"
+         },
+         "rookie": {
+          "rookie": "0"
+         },
+         "team_name": {
+          "teamLink": "71"
+         }
+        },
+        "row": {
+         "player_id": "8567",
+         "name": "David Tendeck",
+         "active": "1",
+         "position": "G",
+         "rookie": "0",
+         "team_name": "Tulsa Oilers",
+         "games_played": "27",
+         "goals": "0",
+         "shots": "0",
+         "assists": "3",
+         "points": "3",
+         "points_per_game": "0.11",
+         "plus_minus": "0",
+         "penalty_minutes": "0",
+         "penalty_minutes_per_game": "0.00",
+         "power_play_goals": "0",
+         "short_handed_goals": "0",
+         "rank": 840
+        },
+        "teams": [
+         {
+          "player_id": "8567",
+          "active": "0",
+          "team_name": "Florida Everblades",
+          "games_played": "2",
+          "goals": "0",
+          "assists": "0",
+          "points": "0",
+          "penalty_minutes": "0",
+          "plus_minus": "0",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "position": "G",
+          "shots": "0",
+          "points_per_game": "0.00",
+          "penalty_minutes_per_game": "0.00",
+          "name": "&nbsp;"
+         },
+         {
+          "player_id": "8567",
+          "active": "0",
+          "team_name": "Allen Americans",
+          "games_played": "16",
+          "goals": "0",
+          "assists": "2",
+          "points": "2",
+          "penalty_minutes": "0",
+          "plus_minus": "0",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "position": "G",
+          "shots": "0",
+          "points_per_game": "0.13",
+          "penalty_minutes_per_game": "0.00",
+          "name": "&nbsp;"
+         },
+         {
+          "player_id": "8567",
+          "active": "1",
+          "team_name": "Tulsa Oilers",
+          "games_played": "9",
+          "goals": "0",
+          "assists": "1",
+          "points": "1",
+          "penalty_minutes": "0",
+          "plus_minus": "0",
+          "power_play_goals": "0",
+          "short_handed_goals": "0",
+          "position": "G",
+          "shots": "0",
+          "points_per_game": "0.11",
+          "penalty_minutes_per_game": "0.00",
+          "name": "&nbsp;"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}
