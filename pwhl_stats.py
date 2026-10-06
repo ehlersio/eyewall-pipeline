@@ -751,7 +751,14 @@ def _parse_pct(s) -> float | None:
 
 
 def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
-    """Fetch standings and upsert to pwhl_team_seasons."""
+    """Fetch standings and upsert to pwhl_team_seasons.
+
+    A playoff season stores only the teams that played in it. HockeyTech's
+    view=teams for the 2024 playoffs (season 3) also lists the two teams
+    that missed them (NY, OTT) at 0 GP, which used to be written as 0-0-0
+    playoff seasons with a 0.0 PP%/PK% -- the 2025 and 2026 playoffs (6, 9)
+    list only their playoff teams. A regular or preseason season keeps its
+    0-GP rows: that's every team's real record before its first game."""
     log.info(f"Fetching team stats (season {season_id})...")
 
     try:
@@ -810,6 +817,11 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
             log.warning(f"  Unknown team_code: '{raw_code}' — skipping")
             continue
 
+        gp = int(t.get("games_played", 0) or 0)
+        if season_type == "playoffs" and gp == 0:
+            log.info(f"  {raw_code}: no games in this playoff season -- not written")
+            continue
+
         # wins = regulation_wins + non_reg_wins (OT/SO wins)
         reg_wins = int(t.get("regulation_wins", 0) or 0)
         non_reg_wins = int(t.get("non_reg_wins", 0) or 0)
@@ -822,7 +834,7 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
                 "team_id": int(team_id),
                 "season_id": int(season_id),
                 "season_type": season_type,
-                "gp": int(t.get("games_played", 0) or 0),
+                "gp": gp,
                 "wins": wins,
                 "losses": int(t.get("losses", 0) or 0),
                 "ot_losses": ot_losses,

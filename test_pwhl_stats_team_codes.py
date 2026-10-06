@@ -134,3 +134,44 @@ class TestExpansionCodes:
         pwhl_stats.fetch_team_stats(sb=None, season_id=season_id, season_type="regular")
         team_ids = sorted(r["team_id"] for r in upserted["pwhl_team_seasons"])
         assert team_ids == [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
+
+
+# The 2024 playoffs (season 3): HockeyTech's view=teams lists all six
+# teams, NY and OTT -- who missed the playoffs -- at 0 GP. Those two were
+# written as 0-0-0 playoff seasons; the 2025/2026 playoffs (6, 9) list
+# only their playoff teams. Real responses (2026-10-06) in
+# tests/fixtures/pwhl_teams_season3_playoffs.json.
+SEASON_3 = json.loads(
+    (Path(__file__).parent / "tests" / "fixtures" / "pwhl_teams_season3_playoffs.json").read_text()
+)
+
+
+class TestPlayoffSeasonRows:
+    def _upserted(self, monkeypatch, season_type):
+        monkeypatch.setattr(
+            pwhl_stats,
+            "ht_get",
+            lambda params: SEASON_3["special" if params["special"] == "true" else "standings"],
+        )
+        upserted = {}
+        monkeypatch.setattr(
+            pwhl_stats,
+            "upsert_chunk",
+            lambda sb, table, rows, conflict: upserted.setdefault(table, rows) and len(rows),
+        )
+        pwhl_stats.fetch_team_stats(sb=None, season_id="3", season_type=season_type)
+        return {r["team_id"]: r for r in upserted["pwhl_team_seasons"]}
+
+    def test_season_3_is_a_playoff_season(self):
+        assert pwhl_stats._resolve_season_type("3") == "playoffs"
+
+    def test_teams_that_missed_the_playoffs_get_no_row(self, monkeypatch):
+        rows = self._upserted(monkeypatch, "playoffs")
+        assert sorted(rows) == [1, 2, 3, 6]  # BOS, MIN, MTL, TOR -- not NY (4), OTT (5)
+        assert all(r["season_type"] == "playoffs" and r["gp"] > 0 for r in rows.values())
+        # MIN won the 2024 Walter Cup: 10 GP, 6 wins.
+        assert (rows[2]["gp"], rows[2]["wins"]) == (10, 6)
+
+    def test_a_regular_season_keeps_its_zero_gp_rows(self, monkeypatch):
+        # Before its first game a team's 0-0-0 is its real record.
+        assert sorted(self._upserted(monkeypatch, "regular")) == [1, 2, 3, 4, 5, 6]
