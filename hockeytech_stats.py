@@ -195,11 +195,14 @@ def extract_rows(data: list | dict) -> list[dict]:
             row = item.get("row", {})
             if row:
                 row["_section"] = section.get("title", "")
-                # The feed's own team id for the row, when it gives one.
-                prop = item.get("prop")
-                team = prop.get("team_code") if isinstance(prop, dict) else None
-                if isinstance(team, dict) and team.get("teamLink"):
-                    row["_team_link"] = str(team["teamLink"])
+                # The feed's own team id for the row, when it gives one
+                # (AHL on team_code, ECHL skaters on team_name).
+                prop = item.get("prop") if isinstance(item.get("prop"), dict) else {}
+                for key in ("team_code", "team_name"):
+                    team = prop.get(key)
+                    if isinstance(team, dict) and team.get("teamLink"):
+                        row["_team_link"] = str(team["teamLink"])
+                        break
                 rows.append(row)
     return rows
 
@@ -393,12 +396,14 @@ def _team_listings(
 
 
 def _player_view_splits(
-    lg: League, player_id: str, season_id: str, name_to_team: dict[str, str]
+    lg: League, player_id: str, season_id: str, name_to_team: dict[str, str], needs: str
 ) -> dict[str, dict] | None:
     """team_id -> this season's careerStats line for each team the player
     played for, from his `player` view. None if the call fails or the view
-    has no line we can place, so the caller can skip him rather than write
-    a guess."""
+    has no line we can place, so the caller can fall back rather than write
+    a guess. Lines without the `needs` column are skipped: a goalie in the
+    skaters list gets his goalie table there, which on ECHL has no goals or
+    assists at all (AHL's does)."""
     try:
         data = ht_get(lg, {"view": "player", "player_id": player_id, "season_id": season_id})
     except FetchError as e:
@@ -415,7 +420,7 @@ def _player_view_splits(
     splits: dict[str, dict] = {}
     for block in data.get("careerStats") or []:
         for row in extract_rows(block):
-            if row.get("season_name") != season_name:
+            if row.get("season_name") != season_name or needs not in row:
                 continue
             team_id = name_to_team.get(row.get("team_name") or "")
             if not team_id:
@@ -429,12 +434,16 @@ def _player_view_splits(
 
 
 def _team_split_rows(
-    lg: League, season_id: str, base_params: dict
+    lg: League, season_id: str, base_params: dict, fallback: dict[str, tuple[str, dict]]
 ) -> tuple[list[tuple[str, dict]], dict[int, set[int]]]:
     """(team_id, stats row) for every player's line with every team this
     season -- see "Per-team splits" above -- and, for the players resolved
     through their player view, the teams they have a line with (for
-    _delete_stale_splits)."""
+    _delete_stale_splits).
+
+    A multi-team player whose player view can't be used gets `fallback`'s
+    entry for him: his league-wide row, whole season under his current team
+    -- what was stored before per-team splits, never a guessed split."""
     team_names = _season_team_names(lg, season_id)
     team_ids = list(team_names) or list(lg.team_id_map)
     name_to_team = {name: tid for tid, name in team_names.items() if name}
@@ -454,10 +463,13 @@ def _team_split_rows(
             if named is None or named == team_id:
                 out.append((team_id, row))
                 continue
-        splits = _player_view_splits(lg, pid, season_id, name_to_team)
+        needs = "goals_against" if base_params["position"] == "goalies" else "goals"
+        splits = _player_view_splits(lg, pid, season_id, name_to_team, needs)
         time.sleep(0.3)
         if not splits:
             unplaced += 1
+            if pid in fallback:
+                out.append(fallback[pid])
             continue
         for team_id, row in splits.items():
             out.append((team_id, {**row, "player_id": pid}))
@@ -465,7 +477,7 @@ def _team_split_rows(
     if unplaced:
         log.warning(
             f"  {unplaced} multi-team {base_params['position']} had no usable player view; "
-            "their rows were left as they were"
+            "their league-wide (whole-season) rows were used"
         )
     return out, resolved
 
@@ -586,8 +598,13 @@ def fetch_skater_stats(lg: League, sb, season_id: str, season_type: str) -> None
         )
     upsert_chunk(sb, f"{lg.key}_players", player_stubs, "player_id")
 
+    league_wide = {
+        str(p["player_id"]): (team_id, p)
+        for p in rows_raw
+        if p.get("player_id") and (team_id := _skater_team_id(lg, p))
+    }
     rows = []
-    splits, resolved = _team_split_rows(lg, season_id, params)
+    splits, resolved = _team_split_rows(lg, season_id, params, league_wide)
     for team_id, p in splits:
         rows.append(
             {
@@ -682,8 +699,13 @@ def fetch_goalie_stats(lg: League, sb, season_id: str, season_type: str) -> None
         )
     upsert_chunk(sb, f"{lg.key}_players", goalie_stubs, "player_id")
 
+    league_wide = {
+        str(g["player_id"]): (team_id, g)
+        for g in rows_raw
+        if g.get("player_id") and (team_id := lg.code_to_team_id.get(g.get("team_code", "")))
+    }
     rows = []
-    splits, resolved = _team_split_rows(lg, season_id, params)
+    splits, resolved = _team_split_rows(lg, season_id, params, league_wide)
     for team_id, g in splits:
         sv_pct = g.get("save_percentage") or g.get("savepct")
         rows.append(

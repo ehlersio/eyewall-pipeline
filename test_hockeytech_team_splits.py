@@ -72,7 +72,9 @@ def _run(monkeypatch, lg, season, position, existing=None):
             return fx["players"][params["player_id"]]
         if params.get("team"):
             return fx["listings"].get(params["team"], [{"sections": []}])
-        return [{"sections": []}]  # league-wide view: only feeds the stubs
+        # league-wide view: the stubs, and the fallback for a player whose
+        # player view can't be used
+        return fx.get("league_wide", [{"sections": []}])
 
     monkeypatch.setattr(hs, "ht_get", ht_get)
     monkeypatch.setattr(hs, "_modulekit_get", lambda _lg, view, p: {"Teamsbyseason": teams})
@@ -153,7 +155,9 @@ def test_single_listing_is_used_as_is_without_a_player_view(monkeypatch):
     assert sb.deletes == []
 
 
-def test_player_view_without_this_season_leaves_him_alone(monkeypatch, caplog):
+def test_unusable_player_view_falls_back_to_the_league_wide_row(monkeypatch, caplog):
+    # No split we can trust: store what the league-wide feed says (Clarke's
+    # whole season under BEL), as before per-team splits -- never a guess.
     fx = FIXTURES["ahl_90_skaters"]
 
     def ht_get(_lg, params):
@@ -161,7 +165,7 @@ def test_player_view_without_this_season_leaves_him_alone(monkeypatch, caplog):
             return {"seasons": [], "careerStats": []}
         if params.get("team"):
             return fx["listings"].get(params["team"], [{"sections": []}])
-        return [{"sections": []}]
+        return fx["league_wide"]
 
     monkeypatch.setattr(hs, "ht_get", ht_get)
     monkeypatch.setattr(
@@ -170,9 +174,25 @@ def test_player_view_without_this_season_leaves_him_alone(monkeypatch, caplog):
     monkeypatch.setattr(hs.time, "sleep", lambda _s: None)
     sb = FakeSupabase()
     hs.fetch_skater_stats(AHL, sb, "90", "regular")
-    assert sb.upserts.get("ahl_player_seasons", []) == []
+    [row] = sb.upserts["ahl_player_seasons"]
+    assert (row["player_id"], row["team_id"], row["gp"], row["points"]) == (8598, 413, 65, 43)
     assert sb.deletes == []
     assert "no usable player view" in caplog.text
+
+
+def test_echl_goalie_in_the_skaters_list_keeps_his_points(monkeypatch):
+    # David Tendeck, ECHL 2025-26: FLA, ALN and TUL each list him among
+    # skaters, but ECHL's player view gives a goalie only his goalie table
+    # (no goals or assists), so his 3 assists stay on his league-wide row.
+    _, rows = _run(monkeypatch, ECHL, "73", "skaters")
+    assert list(rows) == [(8567, 71)]
+    assert (rows[(8567, 71)]["gp"], rows[(8567, 71)]["points"]) == (27, 3)
+
+
+def test_echl_skater_rows_carry_the_feed_team_id():
+    rows = hs.extract_rows(FIXTURES["echl_73_skaters"]["league_wide"])
+    assert rows[0]["_team_link"] == "71"
+    assert hs._row_team_id(ECHL, rows[0]) == "71"
 
 
 def test_teams_missing_from_the_league_map_are_named(monkeypatch, caplog):
