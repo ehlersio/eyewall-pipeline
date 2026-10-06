@@ -34,6 +34,14 @@
         {
           "away_score": 0,
           "ended_in": null,
+          "game_id": 1100,
+          "game_state": "7:05 pm",
+          "game_status_code": 1,
+          "home_score": 0
+        },
+        {
+          "away_score": 0,
+          "ended_in": null,
           "game_id": 999,
           "game_state": "",
           "game_status_code": null,

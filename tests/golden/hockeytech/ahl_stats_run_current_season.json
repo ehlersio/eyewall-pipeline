@@ -596,6 +596,23 @@
       },
       "referer": "https://theahl.com/",
       "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "numberofdaysahead": "461",
+        "numberofdaysback": "3",
+        "season_id": "94",
+        "site_id": "3",
+        "view": "scorebar"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
     }
   ],
   "writes": [
@@ -844,6 +861,27 @@
           "updated_at": "2026-01-15T17:00:00+00:00",
           "venue_city": "Home City",
           "venue_name": "Home Arena"
+        }
+      ],
+      "table": "ahl_game_log"
+    },
+    {
+      "on_conflict": "game_id",
+      "rows": [
+        {
+          "away_score": 0,
+          "away_team_id": 323,
+          "ended_in": null,
+          "game_date": "2026-10-17",
+          "game_id": 1100,
+          "game_state": "7:05 pm",
+          "game_status_code": 1,
+          "home_score": 0,
+          "home_team_id": 335,
+          "season_id": 94,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "venue_city": null,
+          "venue_name": null
         }
       ],
       "table": "ahl_game_log"
