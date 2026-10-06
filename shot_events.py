@@ -34,20 +34,18 @@ Usage:
 import time
 import traceback
 
-import requests
-
 from db import NHL_SEASON, get_client, upsert
 from pipeline_common import (
     NHL_PLAYOFFS,
     NHL_PRESEASON,
     NHL_REGULAR_SEASON,
     FetchError,
+    nhl_get,
     select_all,
 )
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 CAR_ABBR = "CAR"
-HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
 
 SHOT_TYPES = {"shot-on-goal", "missed-shot", "blocked-shot", "goal"}
 
@@ -89,15 +87,6 @@ ALL_TEAMS = [
     "WPG",
     "WSH",
 ]
-
-
-def nhl_get(url):
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise FetchError(f"{url} -- {e}") from e
 
 
 def get_all_completed_games(season):

@@ -13,6 +13,15 @@ from unittest.mock import MagicMock
 import pytest
 
 import nhl_stats
+import pipeline_common
+
+# nhl_get lives in pipeline_common (2026-10) and retries a network error
+# with backoff; don't sleep through it here.
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff(monkeypatch):
+    monkeypatch.setattr(pipeline_common, "_sleep", lambda _s: None)
 
 
 def _mock_response(json_data):
@@ -23,13 +32,13 @@ def _mock_response(json_data):
 
 
 def _raise_network_error(*_a, **_k):
-    raise nhl_stats.requests.ConnectionError("network down")
+    raise pipeline_common.requests.ConnectionError("network down")
 
 
 class TestFetchStandingsSeasonId:
     def test_captures_season_id_per_team(self, monkeypatch):
         monkeypatch.setattr(
-            nhl_stats.requests,
+            pipeline_common.requests,
             "get",
             lambda *a, **k: _mock_response(
                 {
@@ -49,7 +58,7 @@ class TestFetchStandingsSeasonId:
         assert result["CAR"]["games_played"] == 82
 
     def test_returns_empty_dict_on_fetch_error(self, monkeypatch):
-        monkeypatch.setattr(nhl_stats.requests, "get", _raise_network_error)
+        monkeypatch.setattr(pipeline_common.requests, "get", _raise_network_error)
         assert nhl_stats.fetch_standings() == {}
 
 

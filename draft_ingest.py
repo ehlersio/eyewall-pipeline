@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 import requests
 
 from db import get_client, upsert
-from pipeline_common import get_logger, nhl_get
+from pipeline_common import FetchError, get_logger, nhl_get
 
 log = get_logger(__name__)
 
@@ -172,7 +172,7 @@ def seed_rankings():
         log.info(f"Fetching {cat['label']} rankings...")
         try:
             data = nhl_get(f"/draft/rankings/{DRAFT_YEAR}/{cat['id']}")
-        except requests.HTTPError as e:
+        except FetchError as e:
             log.error(f"  Failed {cat['label']}: {e}")
             continue
 

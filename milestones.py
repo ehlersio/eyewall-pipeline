@@ -2,7 +2,8 @@
 milestones.py — EyeWall Analytics milestone detection pipeline (NHL only, v1)
 
 Runs nightly after nhl_stats.py. Scans games from a target date (default:
-yesterday) and detects notable events, writing to the `milestones` table.
+the last CATCH_UP_DAYS days in Eastern time, see below) and detects
+notable events, writing to the `milestones` table.
 
 Detects:
   - Hat tricks / natural hat tricks           (game_scoring)
@@ -35,9 +36,20 @@ Situation code notes (confirmed against real data, 2026-07-03):
     milestone detection — they don't count toward individual stats.
 
 Usage:
-  python milestones.py                    # yesterday's games
+  python milestones.py                    # the last 3 days' games (ET)
   python milestones.py --date 2026-06-15  # specific date
-  python milestones.py --since 2026-06-01 # date range through yesterday
+  python milestones.py --since 2026-06-01 # date range through yesterday (ET)
+
+Catch-up window (2026-10): the nightly default re-scans the last 3 ET dates,
+not only yesterday, so a failed or skipped night's milestones are picked up
+the next night (they used to be lost unless someone ran --since by hand).
+Re-scanning is idempotent: the upsert key below makes a repeat a no-op, and
+threshold milestones (season/career goals, points, wins) are judged on the
+totals as they stood after that date, not today's. The season and career
+totals read here include every game played since, so each threshold check
+subtracts what the player did in later games (LaterGames). Without that, a
+player who reached 50 goals yesterday would also be credited with it on a
+game two days ago.
 
 event_key convention (added 2026-07-04, shared with pwhl_milestones.py —
 both write into the same `milestones` table, unique on
@@ -57,9 +69,10 @@ game_id,player_id,milestone_type,event_key):
 import argparse
 import sys
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from db import get_client
-from pipeline_common import get_logger, nhl_get
+from pipeline_common import NHL_REGULAR_SEASON, get_logger, nhl_get, select_all
 
 log = get_logger(__name__)
 
@@ -75,6 +88,24 @@ SEASON_GOAL_THRESHOLDS = [50]
 SEASON_POINT_THRESHOLDS = [100]
 CAREER_POINT_THRESHOLDS = [500, 1000, 1500]
 CAREER_WIN_THRESHOLDS = [200, 300, 400]
+
+ET = ZoneInfo("America/New_York")
+
+# Dates the nightly default re-scans, ending yesterday (ET).
+CATCH_UP_DAYS = 3
+
+# game_ids per .in_() filter -- keeps the PostgREST URL short.
+IN_CHUNK = 150
+
+
+def today_et() -> date:
+    return datetime.now(ET).date()
+
+
+def catch_up_dates(today: date | None = None) -> list[str]:
+    """The last CATCH_UP_DAYS ET dates, oldest first, ending yesterday."""
+    today = today or today_et()
+    return [(today - timedelta(days=n)).isoformat() for n in range(CATCH_UP_DAYS, 0, -1)]
 
 
 def _time_to_seconds(t: str | None) -> int:
@@ -108,6 +139,88 @@ def get_games_for_date(sb, target_date: str) -> list[dict]:
     for row in r.data or []:
         seen[row["game_id"]] = row
     return list(seen.values())
+
+
+class LaterGames:
+    """What players did in games played AFTER the date being scanned.
+
+    Season totals (player_seasons) and career totals (the NHL landing
+    endpoint) include every game played so far. When an older date is
+    re-scanned, a player may have played since, so "crossed a threshold in
+    this game" must be judged on total-minus-later-games. One instance per
+    scanned date; each lookup is cached and only made for a player who is
+    at or past a threshold today (anyone below can't have crossed it then).
+    """
+
+    def __init__(self, sb, target_date: str):
+        self.sb = sb
+        self.target_date = target_date
+        self._rows: dict[int, list[dict]] = {}
+        self._scoring: dict[tuple, tuple[int, int]] = {}
+        self._wins: dict[tuple, int] = {}
+
+    def rows(self, season: int) -> list[dict]:
+        """game_log rows (one per team per game) of this season after the date."""
+        if season not in self._rows:
+            self._rows[season] = select_all(
+                lambda: (
+                    self.sb.table("game_log")
+                    .select(
+                        "game_id, season, game_date, home_team, away_team, game_type, "
+                        "team, team_score, opp_score"
+                    )
+                    .eq("season", season)
+                    .gt("game_date", self.target_date)
+                )
+            )
+        return self._rows[season]
+
+    def game_ids(self, season: int, game_type: int) -> list[int]:
+        return sorted({r["game_id"] for r in self.rows(season) if r.get("game_type") == game_type})
+
+    def scoring(self, player_id: int, season: int, game_type: int) -> tuple[int, int]:
+        """(goals, points) the player had in later games of this game type."""
+        key = (player_id, season, game_type)
+        if key not in self._scoring:
+            goals = points = 0
+            ids = self.game_ids(season, game_type)
+            for i in range(0, len(ids), IN_CHUNK):
+                r = (
+                    self.sb.table("game_scoring")
+                    .select("scorer_id, assist1_id, assist2_id")
+                    .in_("game_id", ids[i : i + IN_CHUNK])
+                    .neq("period", SHOOTOUT_PERIOD)
+                    .or_(
+                        f"scorer_id.eq.{player_id},assist1_id.eq.{player_id},"
+                        f"assist2_id.eq.{player_id}"
+                    )
+                    .execute()
+                )
+                for row in r.data or []:
+                    if row.get("scorer_id") == player_id:
+                        goals += 1
+                        points += 1
+                    elif player_id in (row.get("assist1_id"), row.get("assist2_id")):
+                        points += 1
+            self._scoring[key] = (goals, points)
+        return self._scoring[key]
+
+    def goalie_wins(self, goalie_id: int, team: str, season: int) -> int:
+        """Regular-season wins credited to this goalie in later games (same
+        full-game rule as detect_goalie_win_milestones)."""
+        key = (goalie_id, team, season)
+        if key not in self._wins:
+            wins = 0
+            for row in self.rows(season):
+                if row.get("team") != team or row.get("game_type") != NHL_REGULAR_SEASON:
+                    continue
+                if (row.get("team_score") or 0) <= (row.get("opp_score") or 0):
+                    continue
+                a = get_goalie_appearances(self.sb, row).get(goalie_id)
+                if a and a["full_game"] and a["team"] == team:
+                    wins += 1
+            self._wins[key] = wins
+        return self._wins[key]
 
 
 # ---------------------------------------------------------------------------
@@ -337,13 +450,16 @@ def detect_shutouts(appearances: dict, game: dict) -> list[dict]:
     return milestones
 
 
-def detect_goalie_win_milestones(sb, appearances: dict, game: dict) -> list[dict]:
+def detect_goalie_win_milestones(
+    sb, appearances: dict, game: dict, later: LaterGames | None = None
+) -> list[dict]:
     """
     Win credit requires: this goalie played the full game AND their team
     won (per game_log's team-perspective team_score/opp_score for that
     team+game_id). Only fetches career totals for goalies who actually
     earned a credited win tonight — cheap (1-2 per game), not a
-    league-wide nightly scan.
+    league-wide nightly scan. `later` (a re-scanned older date) takes off
+    wins from games played since.
     """
     milestones = []
     for goalie_id, a in appearances.items():
@@ -371,6 +487,8 @@ def detect_goalie_win_milestones(sb, appearances: dict, game: dict) -> list[dict
         career_wins = career.get("wins")
         if career_wins is None:
             continue
+        if later is not None and career_wins >= min(CAREER_WIN_THRESHOLDS):
+            career_wins -= later.goalie_wins(goalie_id, a["team"], game["season"])
 
         pre_game_wins = career_wins - 1  # this win is included in career_wins already
         for threshold in CAREER_WIN_THRESHOLDS:
@@ -398,13 +516,16 @@ def detect_goalie_win_milestones(sb, appearances: dict, game: dict) -> list[dict
 # ---------------------------------------------------------------------------
 
 
-def detect_season_milestones(sb, game: dict, scoring_rows: list[dict]) -> list[dict]:
+def detect_season_milestones(
+    sb, game: dict, scoring_rows: list[dict], later: LaterGames | None = None
+) -> list[dict]:
     """
     For every player who scored/assisted tonight, check if tonight's
     activity pushed their SEASON total (from player_seasons, already
     updated by nhl_stats.py before this runs) across a goal/point
     threshold. "Crossed tonight" = season_total - tonight_total < threshold
-    <= season_total.
+    <= season_total, where season_total is as of this game's date: `later`
+    (a re-scanned older date) takes off what the player did in games since.
     """
     milestones = []
 
@@ -444,6 +565,15 @@ def detect_season_milestones(sb, game: dict, scoring_rows: list[dict]) -> list[d
         team = season_row["team"]
 
         season_goals = season_row.get("goals") or 0
+        season_points = season_row.get("points") or 0
+        if later is not None and (
+            season_goals >= min(SEASON_GOAL_THRESHOLDS)
+            or season_points >= min(SEASON_POINT_THRESHOLDS)
+        ):
+            later_goals, later_points = later.scoring(pid, game["season"], game["game_type"])
+            season_goals -= later_goals
+            season_points -= later_points
+
         pre_game_goals = season_goals - tonight_goals.get(pid, 0)
         for threshold in SEASON_GOAL_THRESHOLDS:
             if pre_game_goals < threshold <= season_goals:
@@ -463,7 +593,6 @@ def detect_season_milestones(sb, game: dict, scoring_rows: list[dict]) -> list[d
                     }
                 )
 
-        season_points = season_row.get("points") or 0
         pre_game_points = season_points - tonight_points.get(pid, 0)
         for threshold in SEASON_POINT_THRESHOLDS:
             if pre_game_points < threshold <= season_points:
@@ -501,13 +630,20 @@ def get_career_totals(player_id: int) -> dict | None:
 
 
 def detect_career_milestones(
-    game: dict, player_id: int, team: str, tonight_points: int, tonight_goals: int
+    game: dict,
+    player_id: int,
+    team: str,
+    tonight_points: int,
+    tonight_goals: int,
+    later: LaterGames | None = None,
 ) -> list[dict]:
     """
     Career POINT milestones only. Career WIN milestones are handled
     separately by detect_goalie_win_milestones(), which can properly
     determine whether tonight's appearance earned a credited win —
-    something not derivable from skater scoring rows.
+    something not derivable from skater scoring rows. `later` (a re-scanned
+    older date) takes off regular-season points from games since (the
+    landing endpoint's careerTotals are regular season only).
     """
     career = get_career_totals(player_id)
     if not career:
@@ -516,6 +652,8 @@ def detect_career_milestones(
     milestones = []
     career_points = career.get("points")
     if career_points is not None:
+        if later is not None:
+            career_points -= later.scoring(player_id, game["season"], NHL_REGULAR_SEASON)[1]
         pre_game = career_points - tonight_points
         for threshold in CAREER_POINT_THRESHOLDS:
             if pre_game < threshold <= career_points:
@@ -598,6 +736,7 @@ def run_for_date(sb, target_date: str):
 
     log.info(f"  {len(games)} game(s) found.")
     all_milestones = []
+    later = LaterGames(sb, target_date)
 
     for game in games:
         log.info(f"  Game {game['game_id']}: {game['away_team']} @ {game['home_team']}")
@@ -616,10 +755,10 @@ def run_for_date(sb, target_date: str):
 
         appearances = get_goalie_appearances(sb, game)
         all_milestones.extend(detect_shutouts(appearances, game))
-        all_milestones.extend(detect_goalie_win_milestones(sb, appearances, game))
+        all_milestones.extend(detect_goalie_win_milestones(sb, appearances, game, later))
 
         season_milestones, tonight_goals, tonight_points = detect_season_milestones(
-            sb, game, scoring_rows
+            sb, game, scoring_rows, later
         )
         all_milestones.extend(season_milestones)
 
@@ -631,7 +770,7 @@ def run_for_date(sb, target_date: str):
             team = next((m["team"] for m in season_milestones if m["player_id"] == pid), None)
             all_milestones.extend(
                 detect_career_milestones(
-                    game, pid, team, tonight_points.get(pid, 0), tonight_goals.get(pid, 0)
+                    game, pid, team, tonight_points.get(pid, 0), tonight_goals.get(pid, 0), later
                 )
             )
 
@@ -657,15 +796,17 @@ def run_for_date(sb, target_date: str):
 
 def main():
     parser = argparse.ArgumentParser(description="EyeWall milestone detection")
-    parser.add_argument("--date", help="Specific date (YYYY-MM-DD). Default: yesterday.")
-    parser.add_argument("--since", help="Scan every date from this YYYY-MM-DD through yesterday.")
+    parser.add_argument("--date", help="Specific date (YYYY-MM-DD). Default: the last 3 days (ET).")
+    parser.add_argument(
+        "--since", help="Scan every date from this YYYY-MM-DD through yesterday (ET)."
+    )
     args = parser.parse_args()
 
     sb = get_client()
 
     if args.since:
         start = datetime.strptime(args.since, "%Y-%m-%d").date()
-        end = date.today() - timedelta(days=1)
+        end = today_et() - timedelta(days=1)
         if start > end:
             log.error("--since date is after yesterday; nothing to do.")
             sys.exit(1)
@@ -676,8 +817,8 @@ def main():
     elif args.date:
         run_for_date(sb, args.date)
     else:
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-        run_for_date(sb, yesterday)
+        for d in catch_up_dates():
+            run_for_date(sb, d)
 
 
 if __name__ == "__main__":

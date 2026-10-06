@@ -84,17 +84,14 @@ Run order: after shift_data and shot_events (both must be populated).
 import argparse
 from collections import defaultdict
 
-import requests
-
 from db import NHL_SEASON, get_client
 
 # A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
 # rapm.py (this file used to keep its own copy).
 from nhl_shot_xg import shot_xg
-from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, FetchError
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, FetchError, nhl_get
 
 NHL_BASE = "https://api-web.nhle.com/v1"
-HEADERS = {"User-Agent": "EyeWall-Analytics/1.0 (eyewallanalytics.com)"}
 
 MIN_PAIR_SECS = 60  # ignore pairs with < 1 min shared ice (noise)
 MIN_UNIT_SECS = 300  # a unit must have 5+ min together to surface in UI
@@ -380,15 +377,6 @@ def cluster_into_units(pair_toi, positions, min_unit_secs):
 
 
 # ── Prior-season blend ────────────────────────────────────────────────────────
-
-
-def nhl_get(url, params=None):
-    try:
-        r = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise FetchError(f"NHL GET failed: {url} — {e}") from e
 
 
 def fetch_current_roster_ids(team):

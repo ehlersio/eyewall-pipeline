@@ -541,19 +541,21 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
 ### `milestones.py`
-Nightly (yesterday's completed games only). Detects hat tricks, natural hat tricks (3 *consecutive* goals by one skater, no other scorer of either team between them), shorthanded goals (from real `situation_code`, shootout-period goals excluded), shutouts (goalie played the whole game, 0 goals against), and threshold crossings — season goals (50), season points (100), career points (500/1000/1500, via a live NHL `/player/{id}/landing` call, only for players who crossed a season threshold tonight), career wins (200/300/400, goalie must have earned a credited win tonight). Writes into the shared `milestones` table (see [Shared Tables](#shared-tables-both-leagues-one-table)) with `is_pwhl=false`. Mirrored by PWHL's `pwhl_milestones.py` below — every `milestone_type` string is intentionally identical between the two pipelines except the numeric thresholds themselves, which are tuned per league (see that module's docstring for why PWHL's are much lower).
+Nightly, over the last 3 days' completed games in Eastern time (2026-10; was runner-UTC yesterday only, so a failed night lost its milestones for good). Re-scanning is idempotent: the upsert key makes a repeat a no-op, and threshold milestones are judged on the totals as they stood after that date (`LaterGames` takes off what the player did in games played since, since `player_seasons` and the NHL career totals include them). Detects hat tricks, natural hat tricks (3 *consecutive* goals by one skater, no other scorer of either team between them), shorthanded goals (from real `situation_code`, shootout-period goals excluded), shutouts (goalie played the whole game, 0 goals against), and threshold crossings — season goals (50), season points (100), career points (500/1000/1500, via a live NHL `/player/{id}/landing` call, only for players who crossed a season threshold tonight), career wins (200/300/400, goalie must have earned a credited win tonight). Writes into the shared `milestones` table (see [Shared Tables](#shared-tables-both-leagues-one-table)) with `is_pwhl=false`. Mirrored by PWHL's `pwhl_milestones.py` below — every `milestone_type` string is intentionally identical between the two pipelines except the numeric thresholds themselves, which are tuned per league (see that module's docstring for why PWHL's are much lower).
 
 ```bash
-python milestones.py                    # yesterday's games
+python milestones.py                    # the last 3 days' games (ET)
 python milestones.py --date 2026-06-15  # specific date
-python milestones.py --since 2026-06-01 # date range through yesterday
+python milestones.py --since 2026-06-01 # date range through yesterday (ET)
 ```
 
 ### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
 
 #### Model provider: OpenRouter
 
-**`ai_client.py`** (2026-08, model switched 2026-09) — shared `generate(prompt, system=None, max_tokens=1024)` used by all 6 AI-generation scripts (`ai_scouting.py`, `ai_summaries.py`, `ai_predictions.py`, `power_rankings.py`, `trivia_questions.py`, and — via `ai_scouting.py`'s re-export — `ai_results_vs_process.py`/`ai_line_chemistry.py`), replacing 5 near-identical copies of the same HTTP call. Calls OpenRouter's `deepseek/deepseek-v4.1-flash`, switched from `google/gemma-4-26b-a4b-it` (itself switched from Cloudflare Workers AI's `llama-3.1-8b-instruct-fp8-fast`) after a side-by-side test on this pipeline's real game-summary prompt found Gemma miscalculating a playoff series record and a derived save-count stat, and leaking untranslated English slang into French output — errors DeepSeek didn't reproduce in the same test. No provider is pinned — OpenRouter's default routing already picks among DeepSeek's own listing and third-party hosts by price/health.
+**`ai_client.py`** (2026-08, model switched 2026-09) — shared `generate(prompt, system=None, max_tokens=1024)` used by all 6 AI-generation scripts (`ai_scouting.py`, `ai_summaries.py`, `ai_predictions.py`, `power_rankings.py`, `trivia_questions.py`, and — via `ai_scouting.py`'s re-export — `ai_results_vs_process.py`/`ai_line_chemistry.py`), replacing 5 near-identical copies of the same HTTP call. Calls OpenRouter's `deepseek/deepseek-v4.1-flash`, switched from `google/gemma-4-26b-a4b-it` (itself switched from Cloudflare Workers AI's `llama-3.1-8b-instruct-fp8-fast`) after a side-by-side test on this pipeline's real game-summary prompt found Gemma miscalculating a playoff series record and a derived save-count stat, and leaking untranslated English slang into French output — errors DeepSeek didn't reproduce in the same test. No provider is pinned — OpenRouter's default routing already picks among DeepSeek's own listing and third-party hosts by price/health. Since 2026-10 it retries twice (2 s, then 4 s) on a 429, a 5xx, a timeout or a dropped connection before returning `None`.
+
+**NHL API retries (2026-10):** `pipeline_common.nhl_get` is the one NHL GET helper (`nhl_stats`, `shot_events`, `shift_data`, `zone_starts`, `game_scoring` and `line_combinations` used to carry their own copies, none of which retried). It takes a path under `api-web.nhle.com/v1` or a full URL, tries 3 times with 1 s/2 s backoff on timeouts, connection errors and 429/5xx, fails at once on any other HTTP error, and raises `FetchError` when it gives up — the same shape as the HockeyTech helper. Covered by `test_retries.py`.
 
 Why the switch: side-by-side testing against this pipeline's actual persona prompts (both English and French) found real accuracy problems with the old model that generic benchmarks alone wouldn't have caught — a fabricated power-play goal stat not present in the input data, and wrong-sport vocabulary in French output ("balle"/ball instead of "rondelle"/puck, "coups de poing"/punches instead of "mises en échec"/hits). The new model didn't reproduce either failure in the same test. Cost impact at this pipeline's real volume is negligible either way (well under $1/month).
 
@@ -801,14 +803,15 @@ python pwhl_news.py    # Fetch and POST to Worker
 ### `pwhl_milestones.py`
 Mirrors `milestones.py` (NHL) in structure — see that module's entry above for the shared detection categories. Same shared `milestones` table, `is_pwhl=true`. Key differences from the NHL version:
 - Thresholds are tuned to real PWHL scoring volume (30 GP/season, not NHL's 82) rather than scaled proportionally — season goals 15/20, season points 20/30, career points 50/100, career wins 25/50. All verified against real data (career wins confirmed 2026-08-14: leader is Ann-Renée Desbiens at 42, 25 already fired for the top 3 goalies, 50 is a real future target).
+- Same 3-day ET catch-up window and as-of-date threshold totals as `milestones.py` (2026-10).
 - Career point/win totals need no external API call — the PWHL launched Jan 2024, so summing every historical `season_type='regular'` row already covers full career history.
 - Shorthanded-goal detection uses HockeyTech's ground-truth `is_short_handed` flag where available (merged from `gameSummary`), falling back to a penalty-window heuristic for older/un-merged rows.
 - `milestone_type` values are identical to `milestones.py`'s across every category, including `"sh_goal"` — this diverged as `"shorthanded_goal"` for a period (until 2026-08-13), which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal (both keyed only on the literal string `"sh_goal"`). If you ever add a new milestone type to either pipeline, keep the string identical on both sides unless there's a real reason not to.
 
 ```bash
-python pwhl_milestones.py                    # yesterday's games
+python pwhl_milestones.py                    # the last 3 days' games (ET)
 python pwhl_milestones.py --date 2026-03-15   # specific date
-python pwhl_milestones.py --since 2026-01-01  # date range through yesterday
+python pwhl_milestones.py --since 2026-01-01  # date range through yesterday (ET)
 python pwhl_milestones.py --game 261          # single game_id (debugging/spot-checks)
 ```
 

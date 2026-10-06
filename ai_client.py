@@ -42,13 +42,25 @@ binding.
 """
 
 import os
+import time
 
 import requests
 
 MODEL = "deepseek/deepseek-v4.1-flash"
 
+# Retried with backoff (2 s, then 4 s): OpenRouter's rate limit, its and its
+# hosts' 5xx, timeouts and dropped connections. Two retries, three attempts in
+# all. Anything else (a 400/401, an unexpected body) fails at once.
+RETRIES = 2
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# Indirection so tests can skip the backoff.
+_sleep = time.sleep
+
 
 def generate(prompt: str, system: str = None, max_tokens: int = 1024) -> str | None:
+    """The model's reply, stripped, or None when generation failed (callers
+    log it and move on; the --missing scripts retry the row next night)."""
     api_key = os.environ["OPENROUTER_API_KEY"]
 
     messages = []
@@ -56,24 +68,35 @@ def generate(prompt: str, system: str = None, max_tokens: int = 1024) -> str | N
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    try:
-        r = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "reasoning": {"enabled": False},
-            },
-            timeout=120,
-        )
-        r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"]
-        return text.strip() or None
-    except Exception as e:
-        print(f"  OpenRouter error: {e}")
-        return None
+    for attempt in range(RETRIES + 1):
+        try:
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "reasoning": {"enabled": False},
+                },
+                timeout=120,
+            )
+            if r.status_code in RETRY_STATUSES:
+                err = f"HTTP {r.status_code}"
+            else:
+                r.raise_for_status()
+                text = r.json()["choices"][0]["message"]["content"]
+                return text.strip() or None
+        except (requests.Timeout, requests.ConnectionError) as e:
+            err = str(e)
+        except Exception as e:
+            print(f"  OpenRouter error: {e}")
+            return None
+        if attempt < RETRIES:
+            print(f"  OpenRouter {err}, retrying (attempt {attempt + 1}/{RETRIES + 1})")
+            _sleep(2 * 2**attempt)
+    print(f"  OpenRouter error: {err} after {RETRIES + 1} attempts")
+    return None
