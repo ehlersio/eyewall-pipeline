@@ -5,27 +5,58 @@ on:
     - cron: '0 7 * * *'   # 3:00 AM ET (UTC-4 during EDT)
   workflow_dispatch:
 
+# One run at a time: a manual or Worker dispatch overlapping a late scheduled
+# run would otherwise double-run the delete-then-insert writers. Queued, not
+# cancelled.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+# gh run list (the "Skip if already ran today" guard) needs actions: read.
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: .
 
     steps:
+      - name: Skip if already ran today
+        id: guard
+        # The Worker dispatches this workflow once a day (eyewall-poller
+        # src/dispatch.js); the cron above is only the fallback. A scheduled
+        # run skips when a run already succeeded today (UTC). A
+        # workflow_dispatch run (the Worker's, or a manual one) never skips.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow nightly.yml --status success --created ">=$(date -u +%Y-%m-%dT00:00:00Z)" --json databaseId --jq length) || n=0
+          echo "Successful nightly.yml runs today (UTC): ${n:-0}"
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Checkout repo
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/checkout@v7
 
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
       - name: Run pipeline
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -34,6 +65,7 @@ jobs:
         run: python run.py
 
       - name: Run milestones.py
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -46,6 +78,7 @@ jobs:
       # pins, so this only ever catches a direct push to main -- not worth
       # a night of data. The step still shows its findings in the log.
       - name: Lint (Ruff, informational)
+        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true
         run: |
           # Pinned -- an unpinned install previously picked up a new ruff
@@ -60,4 +93,9 @@ jobs:
 
       - name: Notify on failure
         if: failure()
-        run: echo "Pipeline failed — check logs above"
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"nightly.yml\",\"status\":\"failure\",\"title\":\"EyeWall Nightly Pipeline failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"

@@ -9,12 +9,18 @@ on:
     # dropped here along with the frequency.
     - cron: '0 */4 * * *'
   workflow_dispatch: # allow manual trigger
-  push:
-    branches: [session-news-ingestion-fixes] # TEMP: verify new feeds live before PR
+
+# One run at a time: a manual or Worker dispatch overlapping a late scheduled
+# run would otherwise double-run the delete-then-insert writers. Queued, not
+# cancelled.
+concurrency:
+  group: sbnation-ingest
+  cancel-in-progress: false
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Fetch all SBNation atom feeds and POST to worker
         run: |
@@ -102,3 +108,12 @@ jobs:
             echo "Atom ingest failed with status $HTTP_STATUS"
             exit 1
           fi
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"sbnation-ingest.yml\",\"status\":\"failure\",\"title\":\"SBNation News Ingest failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"

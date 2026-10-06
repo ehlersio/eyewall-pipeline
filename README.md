@@ -98,7 +98,7 @@ python ahl_game_boxscore.py                # per-game skater/goalie box scores
 python ahl_shot_events.py                  # shot events + goals with coordinates
 python ahl_shot_events.py --game 1028362   # single game (debug)
 python ahl_penalty_shots.py                # penalty shots (makes + misses)
-python ahl_live_refresh.py                 # narrow live game_state/score refresh (5-min cron)
+python ahl_live_refresh.py                 # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python ahl_news.py                         # AHL news -> Worker
 
 # ECHL — run individually (no orchestrator yet)
@@ -107,7 +107,7 @@ python echl_stats.py 73                    # specific season_id (73 = 2025-26 Re
 python echl_game_boxscore.py               # per-game skater/goalie box scores
 python echl_shot_events.py                 # shot events + goals with coordinates
 python echl_penalty_shots.py               # penalty shots (makes + misses)
-python echl_live_refresh.py                # narrow live game_state/score refresh (5-min cron)
+python echl_live_refresh.py                # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python echl_news.py                        # ECHL news -> Worker
 ```
 
@@ -963,7 +963,9 @@ No coordinate data exists for penalty shots (make or miss) — same as PWHL, `ah
 ### `ahl_live_refresh.py`
 Lightweight, frequent refresh of just `ahl_game_log`'s live-volatile fields (`game_state`, `game_status_code`, `home_score`, `away_score`, `ended_in`) for games in a ±1-day window around today.
 
-**`ended_in` (2026-10):** `'OT'`/`'SO'` for a final that went past regulation, else null, read by `hockeytech_leagues.ended_in()` from scorebar's `GameStatusStringLong` ("Final OT"/"Final SO"). The short `GameStatusString` stored in `game_state` says "Final" for all three. Written here and by `hockeytech_stats.py`'s `fetch_game_log()`, for both AHL and ECHL; needs `docs/hockeytech_game_log_ended_in.sql` run first. `pwhl_live_refresh.py` now sets `pwhl_game_log.ot`/`shootout` from the same field, so a PWHL OT final shows the same night instead of after the nightly run. Run via `live-score-refresh.yml`'s 5-minute cron, separate from `ahl_stats.py`'s full nightly ingest.
+**`ended_in` (2026-10):** `'OT'`/`'SO'` for a final that went past regulation, else null, read by `hockeytech_leagues.ended_in()` from scorebar's `GameStatusStringLong` ("Final OT"/"Final SO"). The short `GameStatusString` stored in `game_state` says "Final" for all three. Written here and by `hockeytech_stats.py`'s `fetch_game_log()`, for both AHL and ECHL; needs `docs/hockeytech_game_log_ended_in.sql` run first. `pwhl_live_refresh.py` now sets `pwhl_game_log.ot`/`shootout` from the same field, so a PWHL OT final shows the same night instead of after the nightly run. Run by hand via `live-score-refresh.yml` (`workflow_dispatch` only since 2026-10), separate from `ahl_stats.py`'s full nightly ingest.
+
+**The Worker writes finals now (2026-10).** eyewall-poller's per-minute HockeyTech poll (`hockeytech.js` `pollGame`, `pwhl.js` `pollPWHLGame`) PATCHes `{league}_game_log` twice per game: live state and scores at puck drop, and `game_state` 'Final' / `game_status_code` / scores / `ended_in` when it sends the final push. The old `*/5` schedule of `live-score-refresh.yml` actually fired every 3–10 hours (GitHub cron lateness), so it was removed; the scripts stay as manual backfill tools for a game the Worker missed.
 
 **Why this exists:** `ahl_stats.py` only runs once nightly (3:40 AM ET) and writes the whole season including future/scheduled games — nothing updates `game_state`/scores again until the following night. A game happening today would sit at whatever status the last nightly snapshot showed for the entire day, even after it goes live or finishes, meaning the Worker's per-minute live-game polling could never actually see a live game. This traced back to a real gap found while building AHL/PWHL live-tracking parity: `pwhl_game_log.game_state` had exactly the same problem, so `pwhl_live_refresh.py` was built as a companion fix in the same PR (#97) rather than an AHL-only patch.
 
@@ -1178,15 +1180,26 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
-| `nightly.yml` | 3 AM ET daily | NHL-only pipeline (`run.py`, then `milestones.py`, then an informational Ruff lint that can't block ingest — `ci.yml` is the real gate) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
-| `pwhl-nightly.yml` | 3:20 AM ET daily | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia — 20 min offset to avoid Supabase contention. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow |
-| `ahl-nightly.yml` | 3:40 AM ET daily | AHL news, stats/rosters/standings, per-game box scores, shot events, penalty shots — 20 min offset after PWHL's own nightly run. `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
-| `echl-nightly.yml` | 4:00 AM ET daily | Same step order as `ahl-nightly.yml` (news, stats, box scores, shot events, penalty shots), 20 min after AHL's own nightly run |
-| `live-score-refresh.yml` | Every 5 minutes | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py` in sequence — a narrow refresh of just `game_state`/`game_status_code`/scores so a live game doesn't sit stale until the next nightly run for any of the 3 leagues. 5 minutes is GitHub Actions' practical scheduling floor, not a hard real-time guarantee |
-| `moneypuck-ingest.yml` | Nightly | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
+| `nightly.yml` | Worker dispatch 07:00 UTC; cron 07:00 UTC fallback | NHL-only pipeline (`run.py`, then `milestones.py`, then an informational Ruff lint that can't block ingest — `ci.yml` is the real gate) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
+| `pwhl-nightly.yml` | Worker dispatch 07:20 UTC; cron fallback | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow. `workflow_dispatch` accepts an optional `season_id` (2026-10), passed to every per-season step, so a playoff round can be backfilled from GitHub (`gh workflow run pwhl-nightly.yml -f season_id=<id>`) |
+| `ahl-nightly.yml` | Worker dispatch 07:40 UTC; cron fallback | AHL news, stats/rosters/standings, per-game box scores, shot events, penalty shots. `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
+| `echl-nightly.yml` | Worker dispatch 08:00 UTC; cron fallback | Same step order and `season_id` input as `ahl-nightly.yml` (news, stats, box scores, shot events, penalty shots) |
+| `moneypuck-ingest.yml` | Worker dispatch 10:00 UTC; cron fallback | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
+| `ai_pipeline.yml` | Worker dispatch 14:00 UTC; cron fallback | Morning job: `ai_predictions.py`. A bare dispatch (the Worker's) runs the morning job only (`job` input defaults to `morning`). The night job (summaries, scouting, results-vs-process) has no schedule, since `run.py` already runs those every night; run it by hand with `-f job=night` or `-f job=all` |
+| `live-score-refresh.yml` | Manual only (2026-10) | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py`. The Worker now writes live state and finals to `{league}_game_log` itself (see `ahl_live_refresh.py` above); this is a manual backfill for a game it missed. Its old `*/5` cron fired every 3–10 hours in practice |
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
+| `social-posts.yml` | 20 crons (10 posts + backups) | Instagram + Facebook posts, see `social_posts.py` above |
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
+| `ci.yml` | Every PR | Ruff check + format check + pytest |
+
+### Pipeline scheduling (2026-10)
+
+GitHub's cron runs 3–8 hours late for this repo (the 07:00 UTC nightlies started 12:00–16:40 UTC in October 2026), so the six daily workflows above are **dispatched by the Worker's minute cron** (eyewall-poller `src/dispatch.js`, which needs the `GITHUB_DISPATCH_TOKEN` Worker secret: a fine-grained PAT with Actions: write on this repo). Each keeps its `schedule:` as a fallback, and the fallback's first step, "Skip if already ran today", ends the run when `gh run list` finds a successful run of the same workflow since 00:00 UTC. A `workflow_dispatch` run never skips. Until the Worker secret is set, the cron fallbacks run exactly as before.
+
+Every writer workflow has `concurrency: { group: <workflow>, cancel-in-progress: false }`, so a manual dispatch that overlaps a late scheduled run queues instead of double-running the delete-then-insert writers (`line_combinations.py`, `projected_lines.py`, `injuries.py`, `special_teams.py`), and every job has a `timeout-minutes`.
+
+**Failure alerts:** every workflow except `ci.yml` ends with a "Notify on failure" step that POSTs `{source: "<workflow file>", status: "failure", title, body: <run url>, url: <run url>}` to the Worker's `/ops/notify?secret=…` (secrets `WORKER_URL`, falling back to the production Worker URL, and `EYEWALL_POLL_SECRET`). The Worker records it under `health:ops:<workflow>` (shown on `/admin/health`) and sends a push to the devices subscribed to ops alerts, at most one per workflow per 30 minutes. `ci.yml` is left out: a failing PR check is the author's feedback, not an ops event.
 
 ---
 

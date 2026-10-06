@@ -1,5 +1,16 @@
 name: AI Pipeline
 
+# Which job runs (2026-10):
+#   - The Worker (eyewall-poller src/dispatch.js) dispatches this workflow at
+#     14:00 UTC with no inputs, so `job` takes its default, "morning": a bare
+#     dispatch runs predictions only, never the night job.
+#   - The 14:00 UTC cron is the fallback for that dispatch and also runs the
+#     morning job only; its first step skips when a run already succeeded
+#     today (a manual night-only run that day counts too).
+#   - The night job has no schedule (nightly.yml's run.py already runs those
+#     stages every night). It runs only on a manual dispatch with job =
+#     "night" or "all".
+
 on:
   schedule:
     # Morning job — predictions (2PM UTC = 10AM ET, morning of game day)
@@ -7,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "Which job to run"
-        required: true
-        default: "night"
+        description: "Which job to run (the Worker's daily dispatch uses the default, morning)"
+        required: false
+        default: "morning"
         type: choice
         options:
           - night
@@ -23,6 +34,17 @@ env:
   NHL_SEASON: ${{ secrets.NHL_SEASON }}
   PRIMARY_TEAM_ABBR: "CAR"
 
+# One run at a time: queued, not cancelled.
+concurrency:
+  group: ai_pipeline
+  cancel-in-progress: false
+
+# gh run list (the morning job's "Skip if already ran today" guard) needs
+# actions: read.
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   # --------------------------------------------------------------------------
   # NIGHT JOB — post-game summaries + missing scouting blurbs
@@ -34,6 +56,7 @@ jobs:
   ai-night:
     name: "Night — Summaries + Scouting"
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: |
       github.event_name == 'workflow_dispatch' && (inputs.job == 'night' || inputs.job == 'all')
 
@@ -62,31 +85,69 @@ jobs:
         run: python ai_results_vs_process.py --missing
         continue-on-error: false
 
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"ai_pipeline.yml\",\"status\":\"failure\",\"title\":\"AI Pipeline (night) failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
+
   # --------------------------------------------------------------------------
   # MORNING JOB — pre-game predictions
-  # Runs: daily at 2PM UTC (10AM ET)
-  # Manual: workflow_dispatch with job = "morning" or "all"
+  # Runs: daily at 2PM UTC (10AM ET), dispatched by the Worker; the cron is
+  # the fallback.
+  # Manual: workflow_dispatch with job = "morning" (default) or "all"
   # --------------------------------------------------------------------------
   ai-morning:
     name: "Morning — Predictions"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: |
       (github.event_name == 'schedule' && github.event.schedule == '0 14 * * *') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.job == 'morning' || inputs.job == 'all'))
+      (github.event_name == 'workflow_dispatch' && (inputs.job == '' || inputs.job == 'morning' || inputs.job == 'all'))
 
     steps:
+      - name: Skip if already ran today
+        id: guard
+        # The Worker dispatches this workflow once a day (eyewall-poller
+        # src/dispatch.js); the cron above is only the fallback. A scheduled
+        # run skips when a run already succeeded today (UTC). A
+        # workflow_dispatch run (the Worker's, or a manual one) never skips.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ai_pipeline.yml --status success --created ">=$(date -u +%Y-%m-%dT00:00:00Z)" --json databaseId --jq length) || n=0
+          echo "Successful ai_pipeline.yml runs today (UTC): ${n:-0}"
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Checkout
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/checkout@v7
 
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: "pip"
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
       - name: Run ai_predictions.py
+        if: steps.guard.outputs.skip != 'true'
         run: python ai_predictions.py
         continue-on-error: false
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"ai_pipeline.yml\",\"status\":\"failure\",\"title\":\"AI Pipeline (morning predictions) failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"

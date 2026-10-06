@@ -8,6 +8,13 @@ on:
     - cron: '0 14 27 6 *'
   workflow_dispatch: # manual backup trigger
 
+# One run at a time: a manual or Worker dispatch overlapping a late scheduled
+# run would otherwise double-run the delete-then-insert writers. Queued, not
+# cancelled.
+concurrency:
+  group: draft-ingest
+  cancel-in-progress: false
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -79,3 +86,12 @@ jobs:
       - name: Summary
         if: always()
         run: echo "Draft ingest job finished."
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"draft-ingest.yml\",\"status\":\"failure\",\"title\":\"Draft Day Ingest failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
