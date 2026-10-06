@@ -6,7 +6,7 @@ All functions return plain dicts/lists — no model calls happen here.
 
 from db import NHL_SEASON, get_client
 from db import PRIMARY_TEAM_ABBR as PRIMARY_TEAM
-from early_season import EARLY_SEASON_K, blend_stat, game_id_range, prior_season
+from early_season import EARLY_SEASON_K, blend_stat, decided_in, game_id_range, prior_season
 from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_get, select_all
 
 supabase = get_client()
@@ -80,6 +80,7 @@ def get_game_context(game_id: int, team: str = None) -> dict:
         "opp_score": row["opp_score"],
         "result": "win" if row["team_score"] > row["opp_score"] else "loss",
         "period_end": row["period_end"],
+        "decided_in": decided_in(row["period_end"], row["game_type"]),
         "team_scored_first": row.get("team_scored_first"),
         # Advanced — may be null for playoffs
         "home_cf_pct": row.get("home_cf_pct"),
@@ -536,9 +537,19 @@ def get_active_goalies(game_id: int) -> dict:
 
 def get_playoff_series_context(game_id: int, home_team: str, away_team: str) -> dict | None:
     """
-    For playoff games, returns series record and game number.
-    Looks at game_log for prior games between the same two teams in the same season.
-    Returns None for regular season games.
+    For playoff games, returns the game number and the series record going
+    into this game. Returns None for regular season games.
+
+    The series is every playoff game this season between the two teams,
+    whoever was home: one game_log row per game, from home_team's side
+    (team = home_team, opponent = away_team). Until 2026-10 this filtered
+    on home_team/away_team, which kept only the games played in this
+    game's arena -- so from Game 3 on the game number and series score were
+    wrong (2026 Cup Final G6, VGK home, read "Game 3, series tied 1-1";
+    the stored summary had CAR "taking a 2-1 lead" in the clinching game).
+    Wins are counted per team, not per home/away side. "Before this game" is
+    by game_id, which counts up through a series (2025030411 is G1), so it
+    holds whether or not this game's own row is in game_log yet.
     """
     # Get this game's season and type
     game_row = (
@@ -553,43 +564,53 @@ def get_playoff_series_context(game_id: int, home_team: str, away_team: str) -> 
         return None
 
     season = game_row[0]["season"]
-    game_date = game_row[0]["game_date"]
 
-    # All playoff games between these two teams this season up to and including this one
     series_games = (
         supabase.table("game_log")
-        .select(
-            "game_id, game_date, home_team, away_team, home_score, away_score, team_score, opp_score, team"
-        )
+        .select("game_id, game_date, home_team, away_team, home_score, away_score")
         .eq("season", season)
         .eq("game_type", 3)
-        .eq("home_team", home_team)
-        .eq("away_team", away_team)
-        .eq("team", home_team)  # one row per game
-        .lte("game_date", game_date)
-        .order("game_date")
+        .eq("team", home_team)
+        .eq("opponent", away_team)
+        .order("game_id")
         .execute()
         .data
     )
+    return series_record(series_games, game_id, home_team, away_team)
 
-    if not series_games:
+
+def series_record(series_games: list[dict], game_id: int, home_team: str, away_team: str):
+    """The series context for `game_id` from the series' game_log rows (any
+    home/away order): game number and each team's wins before it."""
+    prior = [g for g in series_games or [] if g["game_id"] < game_id]
+    if not prior and not any(g["game_id"] == game_id for g in series_games or []):
         return None
 
-    game_number = len(series_games)
-    home_wins = sum(1 for g in series_games[:-1] if g["home_score"] > g["away_score"])
-    away_wins = sum(1 for g in series_games[:-1] if g["away_score"] > g["home_score"])
+    wins = {home_team: 0, away_team: 0}
+    for g in prior:
+        if g.get("home_score") is None or g.get("away_score") is None:
+            continue
+        if g["home_score"] == g["away_score"]:
+            continue
+        winner = g["home_team"] if g["home_score"] > g["away_score"] else g["away_team"]
+        if winner in wins:
+            wins[winner] += 1
 
+    game_number = len(prior) + 1
+    home_wins, away_wins = wins[home_team], wins[away_team]
+    if away_wins > home_wins:
+        label = f"Game {game_number} — {away_team} leads {away_wins}-{home_wins}"
+    elif home_wins > away_wins:
+        label = f"Game {game_number} — {home_team} leads {home_wins}-{away_wins}"
+    else:
+        label = f"Game {game_number} — Series tied {home_wins}-{away_wins}"
     return {
         "game_number": game_number,
         "home_team": home_team,
         "away_team": away_team,
         "home_wins": home_wins,
         "away_wins": away_wins,
-        "series_label": f"Game {game_number} — {away_team} leads {away_wins}-{home_wins}"
-        if away_wins > home_wins
-        else f"Game {game_number} — {home_team} leads {home_wins}-{away_wins}"
-        if home_wins > away_wins
-        else f"Game {game_number} — Series tied {home_wins}-{away_wins}",
+        "series_label": label,
     }
 
 
@@ -707,7 +728,8 @@ def get_recent_form(team: str = None, n_games: int = 10, season: int = None) -> 
                 "opp_score": r["opp_score"],
                 "result": "W" if r["team_score"] > r["opp_score"] else "L",
                 "game_type": "playoff" if r["game_type"] == NHL_PLAYOFFS else "regular",
-                "went_to_ot": r["period_end"] > 3,
+                # "OT", "SO" or None -- a shootout isn't overtime.
+                "decided_in": decided_in(r["period_end"], r["game_type"]),
             }
         )
     return result

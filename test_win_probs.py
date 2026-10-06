@@ -111,3 +111,10 @@ class TestRun:
 
     def test_dry_run_writes_nothing(self):
         assert self._run(dry_run=True) == ("ok", [])
+
+    def test_every_write_stamps_updated_at(self):
+        # The column default only applies on insert; rows are rewritten each
+        # morning until puck drop.
+        _, writes = self._run(dry_run=False)
+        stamps = {r["updated_at"] for r in writes[0][1]}
+        assert len(stamps) == 1 and next(iter(stamps)).startswith("20")

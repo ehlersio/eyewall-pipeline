@@ -334,6 +334,24 @@ def post_pwhl_recap(client, today, dry_run):
     )
 
 
+def latest_final_date(client, key, season_id, today):
+    """The date of the season's latest Final game on or before today, from
+    {key}_game_log -- the date the season tables (written by the same
+    nightly run as the game log) go through. None if there's none."""
+    rows = (
+        client.table(f"{key}_game_log")
+        .select("game_date")
+        .eq("season_id", season_id)
+        .eq("game_state", "Final")
+        .lte("game_date", today.isoformat())
+        .order("game_date", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return date.fromisoformat(rows[0]["game_date"][:10]) if rows else None
+
+
 def post_pwhl_leaders(client, today, dry_run, season_id=None):
     start, end = sp.last_week(today)
     season_id = season_id or get_pwhl_season()["season_id"]
@@ -395,6 +413,12 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
     )
     season_g = season_goalies_by_sv_pct(g_season, names)
     span = sp.fmt_span(start, end)
+    # The season slides come from pwhl_player_seasons/pwhl_goalie_seasons,
+    # HockeyTech's running totals, which can't be cut off at Sunday: label
+    # them with the last game they include, not the week's Sunday (they
+    # used to read "Through Sun" with Mon-Wed's games in them).
+    through = latest_final_date(client, "pwhl", season_id, today) or end
+    season_sub = f"Through {sp.fmt_day(through)}"
     week_sections = [("Points", sp.skater_points_rows(week_sk))]
     if week_g:
         week_sections.append((f"Save % (min {sp.WEEK_MIN_GOALIE_GP} GP)", sp.goalie_rows(week_g)))
@@ -410,7 +434,7 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
             week_sections, PWHL_NOTE, teams=PWHL_TEAMS,
         ),
         sp.render_leaders(
-            "PWHL · Season", "Season Leaders", f"Through {sp.fmt_day(end)}",
+            "PWHL · Season", "Season Leaders", season_sub,
             season_sections, PWHL_NOTE, teams=PWHL_TEAMS,
         ),
     ]  # fmt: skip
@@ -446,7 +470,7 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
     if gax and gsax:
         images.append(
             sp.render_leaders(
-                "PWHL \u00b7 Season", "Beyond the Box Score", f"Through {sp.fmt_day(end)}",
+                "PWHL \u00b7 Season", "Beyond the Box Score", season_sub,
                 [
                     ("Goals above expected", [
                         {"name": p["name"], "team": p["team"], "value": sp.signed(p["gax"]),

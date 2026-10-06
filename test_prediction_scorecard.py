@@ -181,6 +181,12 @@ class TestRun:
             assert ps.run(20262027) == "ok"
         ((table, rows, key),) = writes
         assert (table, key) == ("prediction_scorecard", "model,kind,period")
+        # Stamped on every run: the column default only applies on insert,
+        # so /scorecard read "Updated Sep 14" while grading games through
+        # Oct 4 (2026-10-05).
+        stamps = {r["updated_at"] for r in rows}
+        assert len(stamps) == 1
+        assert ps.datetime.fromisoformat(stamps.pop()) > ps.datetime(2026, 9, 14, tzinfo=ps.UTC)
         assert [(r["model"], r["kind"], r["period"], r["status"]) for r in rows] == [
             ("game_winner", "live", "2026-27", "pending"),
             ("starting_goalie", "live", "2026-27", "pending"),
