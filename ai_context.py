@@ -15,6 +15,7 @@ from early_season import (
     prior_season,
 )
 from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_get, select_all
+from shot_events import roster_players
 
 supabase = get_client()
 
@@ -27,33 +28,55 @@ def _fmt_toi(seconds: int | None) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Situation code decoder
-# Format: 4 digits — home_skaters + away_skaters + home_goalie + away_goalie
-# e.g. 1551 = 5v5, 1541 = 5v4 (home PP), 1451 = 4v5 (home PK)
 # ---------------------------------------------------------------------------
 
 
-def decode_situation(code: str) -> str:
-    """code = [awayGoalie][awaySkaters][homeSkaters][homeGoalie]."""
-    if not code or len(code) != 4:
+def decode_situation(code: str, shooter_is_home: bool | None = None) -> str:
+    """Strength label for a shot or goal from its play's situationCode, read
+    [awayGoalie][awaySkaters][homeSkaters][homeGoalie] -- the Worker's
+    goalStrengthTags rule (eyewall-poller src/nhl.js).
+
+    A goalie digit of 0 is a side with its goalie pulled, and that side's
+    skater digit then counts the extra attacker. So a pulled goalie means
+    different things to the two sides: a shot by the other team is into an
+    empty net ("en"); a shot by the team that pulled its own goalie is an
+    extra-attacker shot -- its opponent's goalie is in net. Until 2026-10
+    every code with a 6 in it read "en": 2026020037's P3 18:10 FLA goal
+    (code 0651, FLA's goalie pulled, ANA's in net) was printed "[en]".
+
+    The extra attacker is taken back out before the sides are compared, so
+    a goal by a team that pulled its goalie on a power play is still a
+    power-play goal (2025030413 P3 18:18, CAR 6-on-4 = "away_pp"), and a
+    6-on-5 goal is "extra_attacker". `shooter_is_home` says whose shot it
+    is; without it a code with a goalie out is "unknown", since EN and
+    extra attacker can't be told apart. A code that can't be true (the
+    Worker's isValidSituationCode) is "unknown" too.
+    """
+    if not code or len(code) != 4 or not code.isdigit():
         return "unknown"
-    a_sk, h_sk = int(code[1]), int(code[2])
-    if h_sk == 5 and a_sk == 5:
-        return "5v5"
-    if h_sk == 5 and a_sk == 4:
-        return "home_pp"
-    if h_sk == 4 and a_sk == 5:
-        return "away_pp"
-    if h_sk == 4 and a_sk == 4:
-        return "4v4"
-    if h_sk == 3 and a_sk == 3:
-        return "3v3"
-    if {h_sk, a_sk} == {0, 1}:
+    if {int(code[1]), int(code[2])} == {0, 1}:
         # 1010/0101: one shooter, one goalie -- a penalty shot (a
         # regular-season shootout's attempts are counted apart, see
         # get_shot_context). Was printed as "1v0"/"0v1".
         return "penalty_shot"
-    if h_sk == 6 or a_sk == 6:
-        return "en"
+    if code[0] not in "01" or code[3] not in "01":
+        return "unknown"
+    if not all(3 <= int(c) <= 6 for c in code[1:3]):
+        return "unknown"
+    away_g, home_g = code[0] == "1", code[3] == "1"
+    a_sk = int(code[1]) - (0 if away_g else 1)
+    h_sk = int(code[2]) - (0 if home_g else 1)
+    if not (away_g and home_g):
+        if shooter_is_home is None:
+            return "unknown"
+        if not (away_g if shooter_is_home else home_g):
+            return "en"
+        if h_sk == a_sk:
+            return "extra_attacker"
+    if h_sk == 5 and a_sk == 4:
+        return "home_pp"
+    if h_sk == 4 and a_sk == 5:
+        return "away_pp"
     return f"{h_sk}v{a_sk}"
 
 
@@ -161,7 +184,9 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
     for r in rows:
         team = r["team"]
         etype = r["event_type"]
-        sit = decode_situation(r.get("situation_code", ""))
+        sit = decode_situation(
+            r.get("situation_code", ""), team == home_team if home_team else None
+        )
         period = r.get("period", 0)
 
         playoff = game_type == NHL_PLAYOFFS if game_type is not None else bool(r.get("is_playoff"))
@@ -190,7 +215,7 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
         elif etype == "blocked-shot":
             t["blocked_shots"] += 1
 
-        # by_situation (5v5, pp, pk, en)
+        # by_situation (5v5, home_pp/away_pp, en, extra_attacker...)
         sit_key = sit
         if sit_key not in summary["by_situation"]:
             summary["by_situation"][sit_key] = {"goals": 0, "shots_on_goal": 0}
@@ -250,9 +275,11 @@ def get_game_xg(game_id: int) -> list:
 # ---------------------------------------------------------------------------
 
 
-def get_goal_scorers(game_id: int) -> list:
+def get_goal_scorers(game_id: int, home_team: str | None = None) -> list:
     """
     Returns goal-by-goal scoring summary for a game with names resolved.
+    `home_team` (read from game_log when not given) is what tells an
+    empty-net goal from an extra-attacker one (decode_situation).
     """
     rows = (
         supabase.table("game_scoring")
@@ -281,9 +308,22 @@ def get_goal_scorers(game_id: int) -> list:
     )
     name_map = {p["id"]: p["name"] for p in players}
 
+    if home_team is None:
+        game = (
+            supabase.table("game_log")
+            .select("home_team")
+            .eq("game_id", game_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        home_team = game[0].get("home_team") if game else None
+
     result = []
     for r in rows:
-        sit = decode_situation(r.get("situation_code", ""))
+        sit = decode_situation(
+            r.get("situation_code", ""), r["team"] == home_team if home_team else None
+        )
         result.append(
             {
                 "period": r["period"],
@@ -318,12 +358,14 @@ PLAYER_SEASON_COLUMNS = (
 
 
 def get_player_context(
-    team: str = None, season: int = None, top_n: int = 12, min_gp: int = 5
+    team: str = None, season: int = None, top_n: int = 12, min_gp: int = 5, game_id: int = None
 ) -> list:
     """
     Returns top_n players by points for a team with key stats and RAPM.
     min_gp filters out players who barely appeared (traded in/out early).
-    Used for scouting and prediction context.
+    Used for scouting and prediction context. Names come from `game_id`'s
+    roster when given, then the players table; a player with no name is
+    left out (see _player_info).
     """
     team = team or PRIMARY_TEAM
     season = season or NHL_SEASON
@@ -344,19 +386,10 @@ def get_player_context(
     if not rows:
         return []
 
-    # Fetch player names
-    player_ids = [r["player_id"] for r in rows]
-    players = (
-        supabase.table("players").select("id, name, position").in_("id", player_ids).execute().data
-    )
-    name_map = {p["id"]: {"name": p["name"], "position": p["position"]} for p in players}
-
-    result = []
-    for r in rows:
-        pid = r["player_id"]
-        info = name_map.get(pid, {"name": f"Player {pid}", "position": "?"})
-        result.append(_player_season_dict(r, info))
-    return result
+    name_map = _player_info([r["player_id"] for r in rows], game_id=game_id)
+    return [
+        _player_season_dict(r, name_map[r["player_id"]]) for r in rows if r["player_id"] in name_map
+    ]
 
 
 def _float_or_none(v):
@@ -419,16 +452,13 @@ def get_results_vs_process_context(team: str = None, season: int = None, top_n: 
     if not rows:
         return []
 
-    player_ids = [r["player_id"] for r in rows]
-    players = (
-        supabase.table("players").select("id, name, position").in_("id", player_ids).execute().data
-    )
-    name_map = {p["id"]: {"name": p["name"], "position": p["position"]} for p in players}
+    name_map = _player_info([r["player_id"] for r in rows])
 
     result = []
     for r in rows:
-        pid = r["player_id"]
-        info = name_map.get(pid, {"name": f"Player {pid}", "position": "?"})
+        info = name_map.get(r["player_id"])
+        if not info:
+            continue  # no name to give him -- never a made-up "Player <id>"
         result.append(
             {
                 "name": info["name"],
@@ -474,16 +504,16 @@ def get_goalie_context(team: str = None, season: int = None, min_gp: int = 5) ->
     if not rows:
         return []
 
-    player_ids = [r["player_id"] for r in rows]
-    players = supabase.table("players").select("id, name").in_("id", player_ids).execute().data
-    name_map = {p["id"]: p["name"] for p in players}
+    name_map = _player_info([r["player_id"] for r in rows])
 
     result = []
     for r in rows:
         pid = r["player_id"]
+        if pid not in name_map:
+            continue  # no name to give him -- never a made-up "Goalie <id>"
         result.append(
             {
-                "name": name_map.get(pid, f"Goalie {pid}"),
+                "name": name_map[pid]["name"],
                 "position": "G",
                 "games_played": r.get("games_played"),
                 "wins": r.get("wins"),
@@ -657,8 +687,8 @@ def get_zone_starts_context(
     game_id: int = None, team: str = None, season: int = None, top_n: int = 12
 ) -> list:
     """
-    If game_id provided: zone starts for that specific game.
-    Otherwise: aggregated regular-season zone starts for a team's top
+    If game_id provided: zone starts for that specific game, named from
+    that game's own roster first. Otherwise: aggregated regular-season zone starts for a team's top
     players. zone_starts has no game_type column and its `season` also
     covers preseason and playoff games, so the season path filters on the
     regular-season game-id range; it pages because a team's season is
@@ -701,17 +731,17 @@ def get_zone_starts_context(
         agg[pid]["dz"] += r.get("dz_starts") or 0
         agg[pid]["nz"] += r.get("nz_starts") or 0
 
-    # Fetch names
-    name_map = {pid: info["name"] for pid, info in _player_info(list(agg.keys())).items()}
+    # A player with no name is left out, never listed as "Player <id>".
+    name_map = _player_info(list(agg.keys()), game_id=game_id)
 
     result = []
     for pid, counts in agg.items():
         total = counts["oz"] + counts["dz"] + counts["nz"]
-        if total == 0:
+        if total == 0 or pid not in name_map:
             continue
         result.append(
             {
-                "name": name_map.get(pid, f"Player {pid}"),
+                "name": name_map[pid]["name"],
                 "oz_starts": counts["oz"],
                 "dz_starts": counts["dz"],
                 "nz_starts": counts["nz"],
@@ -783,9 +813,10 @@ def build_game_summary_context(game_id: int, team: str = None) -> dict:
     team = team or PRIMARY_TEAM
     game = get_game_context(game_id, team=team)
     shots = get_shot_context(game_id, team=team)
-    goals = get_goal_scorers(game_id)
+    goals = get_goal_scorers(game_id, home_team=game.get("home_team"))
     xg = get_game_xg(game_id)
-    players = get_player_context(team=team, min_gp=10)  # min 10 GP filters departed players
+    # min 10 GP filters departed players
+    players = get_player_context(team=team, min_gp=10, game_id=game_id)
     zones = get_zone_starts_context(game_id=game_id, team=team)
     form = get_recent_form(team=team, n_games=5)
     goalies = get_active_goalies(game_id)
@@ -839,18 +870,55 @@ MAX_NEWCOMERS = 3
 _roster_cache: dict = {}
 
 
-def _player_info(player_ids) -> dict:
-    """{player_id: {"name", "position"}} from the players table."""
-    if not player_ids:
+_game_roster_cache: dict = {}
+
+
+def fetch_game_roster(game_id: int) -> dict:
+    """{player_id: {"name", "position"}} for everyone on a game's roster,
+    from its api-web play-by-play rosterSpots -- the game's own record of
+    who dressed, so it names a call-up or a new player `players` doesn't
+    have yet. {} if it can't be fetched. Cached for the process -- a run
+    builds a recap per team and locale."""
+    if game_id in _game_roster_cache:
+        return _game_roster_cache[game_id]
+    try:
+        pbp = nhl_get(f"/gamecenter/{game_id}/play-by-play")
+    except Exception as e:
+        print(f"  WARN: couldn't fetch game {game_id}'s roster: {e}")
         return {}
-    rows = (
-        supabase.table("players")
-        .select("id, name, position")
-        .in_("id", list(player_ids))
-        .execute()
-        .data
-    )
-    return {p["id"]: {"name": p["name"], "position": p.get("position") or "?"} for p in rows}
+    roster = {
+        pid: {"name": p["name"], "position": p.get("position") or "?"}
+        for pid, p in roster_players(pbp).items()
+    }
+    _game_roster_cache[game_id] = roster
+    return roster
+
+
+def _player_info(player_ids, game_id: int = None) -> dict:
+    """{player_id: {"name", "position"}}: from `game_id`'s roster when one
+    is given, then the players table. A player found in neither (or with
+    no name) isn't in the result -- callers leave him out rather than make
+    up a "Player <id>" name, which used to reach the prompt."""
+    ids = {pid for pid in player_ids or [] if pid is not None}
+    if not ids:
+        return {}
+    info = {}
+    if game_id:
+        roster = fetch_game_roster(game_id)
+        info = {pid: roster[pid] for pid in ids if pid in roster}
+    missing = ids - set(info)
+    if missing:
+        rows = (
+            supabase.table("players")
+            .select("id, name, position")
+            .in_("id", list(missing))
+            .execute()
+            .data
+        )
+        for p in rows or []:
+            if p.get("name") and p["id"] in missing:
+                info[p["id"]] = {"name": p["name"], "position": p.get("position") or "?"}
+    return info
 
 
 def fetch_current_roster(team: str) -> dict | None:
@@ -967,12 +1035,13 @@ def get_prediction_players(
     if missing:
         info.update(_player_info(missing))
 
-    def who(pid):
-        return info.get(pid, {"name": f"Player {pid}", "position": "?"})
+    # A player with no name is left out, never listed as "Player <id>".
+    top = [r for r in top if r["player_id"] in info]
+    newcomers = [r for r in newcomers if r["player_id"] in info]
 
     players = []
     for r in top:
-        p = _player_season_dict(r, who(r["player_id"]))
+        p = _player_season_dict(r, info[r["player_id"]])
         p["stats_season"] = last
         teams = [t.strip() for t in (r.get("team") or "").split(",") if t.strip()]
         p["last_season_teams"] = teams if teams and teams != [team] else None
@@ -984,7 +1053,7 @@ def get_prediction_players(
 
     newcomer_dicts = []
     for r in newcomers:
-        p = _player_season_dict(r, who(r["player_id"]))
+        p = _player_season_dict(r, info[r["player_id"]])
         p["stats_season"] = season
         newcomer_dicts.append(p)
 
@@ -1077,12 +1146,13 @@ def get_prediction_zones(
     names.update({pid: i["name"] for pid, i in _player_info(missing).items()})
     zones = [
         {
-            "name": names.get(e["pid"], f"Player {e['pid']}"),
+            "name": names[e["pid"]],
             "oz_pct": e["oz_pct"],
             "dz_pct": e["dz_pct"],
             "games_this_season": e["games_this_season"],
         }
         for e in entries
+        if names.get(e["pid"])  # no name: left out, never "Player <id>"
     ]
     return {"mode": "early", "season": season, "zones": zones}
 
