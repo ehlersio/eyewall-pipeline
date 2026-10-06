@@ -133,8 +133,13 @@ def get_single_results_vs_process_context(
         .execute()
         .data
     )
-    name = player_info["name"] if player_info else f"Player {player_id}"
-    position = player_info["position"] if player_info else "?"
+    if not player_info or not player_info.get("name"):
+        # No name to give him -- a blurb about a made-up "Player <id>" is
+        # worse than none.
+        print(f"  No players row (name) for player_id={player_id}")
+        return None, None
+    name = player_info["name"]
+    position = player_info.get("position") or "?"
 
     player = {
         "name": name,
@@ -165,7 +170,7 @@ def narrate_player(
     Generate and store a results-vs-process blurb for one player.
     Returns 'ok', 'skip', or 'fail'.
     """
-    name = player.get("name", f"Player {player_id}")
+    name = player["name"]
 
     if not force and already_narrated(player_id, season, team, locale):
         print(f"  skip  {name} ({team}, {locale}) — narrative exists")

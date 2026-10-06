@@ -155,6 +155,13 @@ def _present(v) -> bool:
     return v is not None and not (isinstance(v, float) and math.isnan(v))
 
 
+def _situation_text(sit: str) -> str:
+    """ai_context.decode_situation's label as the prompt prints it.
+    "extra_attacker" is a team scoring (or shooting) with its own goalie
+    pulled -- the other net wasn't empty, so it's never written as EN."""
+    return "extra attacker" if sit == "extra_attacker" else sit
+
+
 def _goal_line(g: dict, game_type) -> str:
     """One GOAL SCORING line. A missing period, time, scorer, situation or
     score is left out rather than printed as "None"; a shootout goal is
@@ -170,7 +177,7 @@ def _goal_line(g: dict, game_type) -> str:
     assists = [a for a in (g.get("assist1"), g.get("assist2")) if a]
     assist_str = f" (assists: {', '.join(assists)})" if assists else " (unassisted)"
     sit = g.get("situation")
-    sit_str = f" [{sit}]" if sit and sit not in ("5v5", "unknown") else ""
+    sit_str = f" [{_situation_text(sit)}]" if sit and sit not in ("5v5", "unknown") else ""
     away_after, home_after = g.get("away_score_after"), g.get("home_score_after")
     score = f" ({away_after}-{home_after})" if _present(away_after) and _present(home_after) else ""
     return f"  {when + ' ' if when else ''}— {g.get('team')}: {scorer}{assist_str}{sit_str}{score}"
@@ -301,7 +308,10 @@ def format_game_context(ctx: dict) -> str:
     if by_sit:
         lines.append("\nSHOTS BY SITUATION")
         for sit, stats in by_sit.items():
-            lines.append(f"{sit}: {stats['goals']} goals, {stats['shots_on_goal']} shots on goal")
+            lines.append(
+                f"{_situation_text(sit)}: {stats['goals']} goals, "
+                f"{stats['shots_on_goal']} shots on goal"
+            )
 
     by_period = []
     for period, teams in (shots.get("by_period") or {}).items():

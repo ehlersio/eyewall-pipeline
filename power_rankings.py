@@ -565,7 +565,9 @@ def build_power_rankings_prompt(
     stats_seasons = set()
     for p in top_players[:5]:
         pid = p.get("player_id")
-        name = player_names.get(pid, f"Player {pid}")
+        name = player_names.get(pid)
+        if not name:
+            continue  # left out, never named as a made-up "Player <id>"
         war = p.get("war")
         pts = p.get("points") or 0
         pgp = p.get("games_played") or 0
