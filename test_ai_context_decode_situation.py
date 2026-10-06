@@ -37,6 +37,11 @@ class TestDecodeSituation:
     def test_empty_net(self):
         assert decode_situation("1560") == "en"
 
+    def test_penalty_shot(self):
+        # 2025030413 P3 04:04, Mitch Marner (VGK, home) -- api-web code 1010
+        assert decode_situation("1010") == "penalty_shot"
+        assert decode_situation("0101") == "penalty_shot"
+
     def test_malformed_code_returns_unknown(self):
         assert decode_situation("") == "unknown"
         assert decode_situation("155") == "unknown"

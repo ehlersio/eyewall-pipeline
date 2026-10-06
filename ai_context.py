@@ -6,7 +6,14 @@ All functions return plain dicts/lists — no model calls happen here.
 
 from db import NHL_SEASON, get_client
 from db import PRIMARY_TEAM_ABBR as PRIMARY_TEAM
-from early_season import EARLY_SEASON_K, blend_stat, decided_in, game_id_range, prior_season
+from early_season import (
+    EARLY_SEASON_K,
+    blend_stat,
+    decided_in,
+    ending_label,
+    game_id_range,
+    prior_season,
+)
 from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, nhl_get, select_all
 
 supabase = get_client()
@@ -40,6 +47,11 @@ def decode_situation(code: str) -> str:
         return "4v4"
     if h_sk == 3 and a_sk == 3:
         return "3v3"
+    if {h_sk, a_sk} == {0, 1}:
+        # 1010/0101: one shooter, one goalie -- a penalty shot (a
+        # regular-season shootout's attempts are counted apart, see
+        # get_shot_context). Was printed as "1v0"/"0v1".
+        return "penalty_shot"
     if h_sk == 6 or a_sk == 6:
         return "en"
     return f"{h_sk}v{a_sk}"
@@ -81,6 +93,8 @@ def get_game_context(game_id: int, team: str = None) -> dict:
         "result": "win" if row["team_score"] > row["opp_score"] else "loss",
         "period_end": row["period_end"],
         "decided_in": decided_in(row["period_end"], row["game_type"]),
+        # "OT", "2OT"... or "SO" -- the period named as the prompt names it.
+        "ended_in": ending_label(row["period_end"], row["game_type"]),
         "team_scored_first": row.get("team_scored_first"),
         # Advanced — may be null for playoffs
         "home_cf_pct": row.get("home_cf_pct"),
@@ -101,12 +115,20 @@ def get_game_context(game_id: int, team: str = None) -> dict:
 def get_shot_context(game_id: int, team: str = None) -> dict:
     """
     Summarizes shot events for a game.
-    Returns shot/goal counts by team and situation, plus per-period breakdown.
+    Returns shot/goal counts by team and situation, plus per-period breakdown
+    keyed by period number (ai_persona names it: P1-P3, OT, 2OT...).
+
+    A shootout's attempts are kept out of all three and counted on their
+    own under "shootout" ({team: {"attempts", "goals"}}): they aren't shots
+    on goal in the box score, and their situation codes (0101/1010) aren't
+    a manpower state. Until 2026-10 they were counted as period-5 shots and
+    goals and as "0v1"/"1v0" situations. The NHL stores a regular-season
+    shootout as period 5; in the playoffs period 5 is double overtime.
     """
     team = team or PRIMARY_TEAM
     rows = (
         supabase.table("shot_events")
-        .select("team, event_type, situation_code, period")
+        .select("team, event_type, situation_code, period, is_playoff")
         .eq("game_id", game_id)
         .execute()
         .data
@@ -117,7 +139,7 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
     # Determine home/away from game_log
     game = (
         supabase.table("game_log")
-        .select("home_team, away_team")
+        .select("home_team, away_team, game_type")
         .eq("game_id", game_id)
         .eq("team", team)
         .single()
@@ -127,10 +149,13 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
     home_team = game["home_team"] if game else None
     away_team = game["away_team"] if game else None
 
+    game_type = game.get("game_type") if game else None
+
     summary = {
         "by_team": {},
         "by_situation": {},
         "by_period": {},
+        "shootout": {},
     }
 
     for r in rows:
@@ -138,6 +163,14 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
         etype = r["event_type"]
         sit = decode_situation(r.get("situation_code", ""))
         period = r.get("period", 0)
+
+        playoff = game_type == NHL_PLAYOFFS if game_type is not None else bool(r.get("is_playoff"))
+        if period == 5 and not playoff:
+            so = summary["shootout"].setdefault(team, {"attempts": 0, "goals": 0})
+            so["attempts"] += 1
+            if etype == "goal":
+                so["goals"] += 1
+            continue
 
         # by_team
         if team not in summary["by_team"]:
@@ -170,7 +203,7 @@ def get_shot_context(game_id: int, team: str = None) -> dict:
         # by_period
         if not period:
             continue
-        p_key = f"period_{period}"
+        p_key = period
         if p_key not in summary["by_period"]:
             summary["by_period"][p_key] = {}
         if team not in summary["by_period"][p_key]:
@@ -256,7 +289,8 @@ def get_goal_scorers(game_id: int) -> list:
                 "period": r["period"],
                 "time": r["time_in_period"],
                 "team": r["team"],
-                "scorer": name_map.get(r["scorer_id"], "Unknown"),
+                # None (not a made-up "Unknown") when the id has no name.
+                "scorer": name_map.get(r["scorer_id"]),
                 "assist1": name_map.get(r["assist1_id"]) if r.get("assist1_id") else None,
                 "assist2": name_map.get(r["assist2_id"]) if r.get("assist2_id") else None,
                 "situation": sit,
@@ -728,8 +762,9 @@ def get_recent_form(team: str = None, n_games: int = 10, season: int = None) -> 
                 "opp_score": r["opp_score"],
                 "result": "W" if r["team_score"] > r["opp_score"] else "L",
                 "game_type": "playoff" if r["game_type"] == NHL_PLAYOFFS else "regular",
-                # "OT", "SO" or None -- a shootout isn't overtime.
-                "decided_in": decided_in(r["period_end"], r["game_type"]),
+                # "OT", "2OT"... (playoffs), "SO" or None -- a shootout isn't
+                # overtime, and a playoff double overtime isn't plain "OT".
+                "decided_in": ending_label(r["period_end"], r["game_type"]),
             }
         )
     return result
