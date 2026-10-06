@@ -25,18 +25,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Lint (Ruff)
-        run: |
-          # Pinned -- an unpinned install previously picked up a new ruff
-          # release that promoted Markdown formatting from preview-only to
-          # default behavior, silently breaking CI on pre-existing .md files
-          # local dev had never been checking against (found 2026-07-23).
-          # Bump deliberately, not by surprise.
-          # The pin lives in requirements-dev.txt, shared with ci.yml.
-          pip install -r requirements-dev.txt --quiet
-          ruff check .
-          ruff format --check .
-
       - name: Run pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -51,6 +39,24 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python milestones.py
         continue-on-error: false
+
+      # Informational, after ingest: a Ruff failure here used to run first
+      # and skip the whole night's NHL data (2026-07-09, and again per the
+      # README's ECHL formatting note). ci.yml gates every PR with the same
+      # pins, so this only ever catches a direct push to main -- not worth
+      # a night of data. The step still shows its findings in the log.
+      - name: Lint (Ruff, informational)
+        continue-on-error: true
+        run: |
+          # Pinned -- an unpinned install previously picked up a new ruff
+          # release that promoted Markdown formatting from preview-only to
+          # default behavior, silently breaking CI on pre-existing .md files
+          # local dev had never been checking against (found 2026-07-23).
+          # Bump deliberately, not by surprise.
+          # The pin lives in requirements-dev.txt, shared with ci.yml.
+          pip install -r requirements-dev.txt --quiet
+          ruff check .
+          ruff format --check .
 
       - name: Notify on failure
         if: failure()
