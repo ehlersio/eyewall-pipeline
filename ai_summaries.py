@@ -3,25 +3,47 @@ ai_summaries.py — EyeWall AI Pipeline
 Generates post-game summaries for completed games and stores them in Supabase.
 
 Usage:
-    python ai_summaries.py                        # current season, all unprocessed games
+    python ai_summaries.py                        # current season, games of the last 7 days
     python ai_summaries.py 20242025               # specific season
+    python ai_summaries.py --days 30              # games of the last 30 days (0 = whole season)
     python ai_summaries.py --game 2025030414      # single game
     python ai_summaries.py --game 2025030414 --force  # regenerate even if exists
+
+Scope (2026-10): only regular-season and playoff games (game_type 2 and 3)
+get a summary -- game_log also holds preseason finals (game_type 1), and
+every September exhibition used to get a two-locale recap. The nightly
+scan covers games dated in the last RECENT_DAYS days rather than the whole
+season, and the rows already in game_summaries are read in one batched
+query per run instead of one count query per game x team x locale.
 """
 
 import argparse
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from ai_client import generate
 from ai_context import build_game_summary_context
 from ai_persona import build_game_card_prompt, build_game_summary_prompt, get_system_prompt
 from ai_scouting import LOCALES
 from db import NHL_SEASON, get_client
-from pipeline_common import select_all
+from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, select_all
 
 supabase = get_client()
 
 REQUEST_DELAY = 1.0  # seconds between generation calls
+RECENT_DAYS = 7  # the nightly scan's window; --days 0 rescans the season
+GAME_TYPES = [NHL_REGULAR_SEASON, NHL_PLAYOFFS]  # never preseason
+ET = ZoneInfo("America/New_York")
+
+
+def recent_cutoff(days: int, today=None) -> str | None:
+    """ISO date `days` days before today (ET -- game_log's game_date is the
+    ET game date), or None for no cutoff (days <= 0)."""
+    if days <= 0:
+        return None
+    today = today or datetime.now(ET).date()
+    return (today - timedelta(days=days)).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -64,16 +86,44 @@ def save_summary(
     ).execute()
 
 
-def get_completed_games(season: int) -> list:
-    """Returns all completed games from game_log for the season, by date."""
-    # Paged: game_log has two rows per game, well past Supabase's 1,000-row cap.
-    rows = select_all(
-        lambda: (
+def fetch_generated(game_ids: list[int]) -> set[tuple[int, str, str]]:
+    """The (game_id, team, locale) triples already in game_summaries for
+    `game_ids` -- one read per 200 games instead of a count query per
+    game x team x locale."""
+    done: set[tuple[int, str, str]] = set()
+    ids = sorted(set(game_ids))
+    for i in range(0, len(ids), 200):
+        batch = ids[i : i + 200]
+        rows = select_all(
+            lambda batch=batch: (
+                supabase.table("game_summaries")
+                .select("game_id, team, locale")
+                .in_("game_id", batch)
+            ),
+            order="id",
+        )
+        done.update((r["game_id"], r["team"], r["locale"]) for r in rows)
+    return done
+
+
+def get_completed_games(season: int, since: str | None = None) -> list:
+    """Completed regular-season and playoff games from game_log for the
+    season, by date -- never preseason (game_type 1, which game_log also
+    holds). `since` (ISO date) limits the scan to games on or after it."""
+
+    def query():
+        q = (
             supabase.table("game_log")
             .select("game_id, season, home_team, away_team, game_date, game_type")
             .eq("season", season)
+            .in_("game_type", GAME_TYPES)
         )
-    )
+        if since:
+            q = q.gte("game_date", since)
+        return q
+
+    # Paged: game_log has two rows per game, well past Supabase's 1,000-row cap.
+    rows = select_all(query)
     rows.sort(key=lambda r: r["game_date"])
     # Deduplicate — game_log has one row per team per game
     seen = set()
@@ -95,15 +145,23 @@ def process_game(
     away_team: str,
     force: bool = False,
     locale: str = "en",
+    generated: set[tuple[int, str, str]] | None = None,
 ) -> tuple[bool, bool]:
     """
     Generates and saves summaries for both teams in a completed game.
     Returns (home_success, away_success).
+
+    `generated` is the batched set from fetch_generated(); when given, the
+    existence check reads it instead of querying per team.
     """
     system_prompt = get_system_prompt(locale)
     results = []
     for team in (home_team, away_team):
-        if not force and already_generated(game_id, team, locale):
+        if generated is not None:
+            exists = (game_id, team, locale) in generated
+        else:
+            exists = already_generated(game_id, team, locale)
+        if not force and exists:
             print(f"  {game_id} {team} ({locale}) — already generated, skipping")
             results.append(True)
             continue
@@ -170,6 +228,12 @@ def main():
         default=None,
         help="Generate only this locale (default: both en and fr)",
     )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=RECENT_DAYS,
+        help=f"Scan games of the last N days (default {RECENT_DAYS}; 0 = whole season)",
+    )
     args = parser.parse_args()
 
     season = args.season
@@ -200,14 +264,17 @@ def main():
             )
         return
 
-    # Full season mode
-    print(f"Processing season {season} summaries...")
-    games = get_completed_games(season)
+    # Scan mode: the season's regular-season/playoff games of the last N days
+    since = recent_cutoff(args.days)
+    window = f"since {since}" if since else "whole season"
+    print(f"Processing season {season} summaries ({window})...")
+    games = get_completed_games(season, since=since)
 
     if not games:
         print("No completed games found — exiting")
         return
 
+    generated = set() if args.force else fetch_generated([g["game_id"] for g in games])
     total = len(games)
     generated = 0
     failed = 0
@@ -222,7 +289,13 @@ def main():
             )
 
             home_ok, away_ok = process_game(
-                game_id, season, home_team, away_team, force=args.force, locale=locale
+                game_id,
+                season,
+                home_team,
+                away_team,
+                force=args.force,
+                locale=locale,
+                generated=generated,
             )
 
             generated += (1 if home_ok else 0) + (1 if away_ok else 0)

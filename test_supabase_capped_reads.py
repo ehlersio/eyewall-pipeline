@@ -33,6 +33,14 @@ class FakeQuery:
         self._rows = [r for r in self._rows if r[col] == val]
         return self
 
+    def in_(self, col, vals):
+        self._rows = [r for r in self._rows if r[col] in set(vals)]
+        return self
+
+    def gte(self, col, val):
+        self._rows = [r for r in self._rows if r[col] >= val]
+        return self
+
     def order(self, col, desc=False):
         self._order = (col, desc)
         return self
