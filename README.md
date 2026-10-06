@@ -177,6 +177,8 @@ python shot_events.py --reprocess 20252026   # a past season (~1,400 games, slow
 ### `shift_data.py`
 Per-player shift start/end times. Falls back to HTML shift reports when JSON API returns no data. Used by `rapm.py`. Incremental.
 
+**Skaters only (2026-10).** Goalie shifts are dropped on both paths by the game's play-by-play roster (`positionCode == 'G'`). The JSON path used to test `detailCode == 1`, which never matches a goalie (it is 0 on every shift row), so every goalie shift since the module began was stored and counted as an on-ice skater by `rapm.py`'s design matrix, `line_combinations.py` and `special_teams.py` (the last now filters them itself, #197). Rows already ingested keep their goalie shifts until the season is re-ingested: delete that season's `shift_events` rows, then `python shift_data.py <season>` (RAPM changes on the next nightly run after that). Covered by `test_shift_data_goalies.py`.
+
 ### `zone_starts.py`
 OZ/DZ/NZ faceoff start counts per player per game. Away team zones flipped. Used by `rapm.py`.
 
@@ -531,6 +533,7 @@ PP/PK unit inference from shift + shot events → `special_teams_units` table.
 - **Each run** deletes a game type's inferred units before writing new ones, so nothing older survives a run that infers fewer. `source='manual'` units are never touched.
 - **Season:** the module now uses the live-resolved `NHL_SEASON`; it used to read the `NHL_SEASON` env var with a hardcoded 20252026 default.
 - **Home/away map:** now read in full. It was a single capped request, which covered only about 500 of a season's games.
+- **PP and PK gated separately (2026-10):** PP units need `MIN_PP_SHOTS` of the team's own power-play shots, PK units `MIN_PK_SHOTS` of opponents' power-play shots against it (both 10). Both used to hang off the PP count, so a team short on power plays (WSH, 2026-10-06) got no PK units either.
 
 **32-team fix (2026-07):** same `car_game` trap as `line_combinations.py` above — this module's own per-team shot fetch (`fetch_pp_shots_for_team`) was still silently CAR-scoped after that fix landed. Now resolves each team's own `game_id`s from `game_log` first (`fetch_game_ids_for_team`), then fetches PP and PK shots from the same situational-rows fetch (`fetch_situational_shots_for_team` + `filter_pp_shots`/`filter_pk_shots`) instead of a `car_game=True` filter.
 
