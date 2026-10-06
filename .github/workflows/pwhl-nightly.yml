@@ -4,39 +4,81 @@ on:
   schedule:
     - cron: '20 7 * * *'  # 3:20 AM ET (UTC-4 during EDT) — offset 20min after NHL pipeline
   workflow_dispatch:
+    inputs:
+      season_id:
+        description: 'HockeyTech season_id to backfill, e.g. a playoff season (blank = live-resolved current regular season, same as the nightly cron)'
+        required: false
+        default: ''
+
+# One run at a time: a manual or Worker dispatch overlapping a late scheduled
+# run would otherwise double-run the delete-then-insert writers. Queued, not
+# cancelled.
+concurrency:
+  group: pwhl-nightly
+  cancel-in-progress: false
+
+# gh run list (the "Skip if already ran today" guard) needs actions: read.
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   run-pwhl-pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: .
 
     steps:
+      - name: Skip if already ran today
+        id: guard
+        # The Worker dispatches this workflow once a day (eyewall-poller
+        # src/dispatch.js); the cron above is only the fallback. A scheduled
+        # run skips when a run already succeeded today (UTC). A
+        # workflow_dispatch run (the Worker's, or a manual one) never skips.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow pwhl-nightly.yml --status success --created ">=$(date -u +%Y-%m-%dT00:00:00Z)" --json databaseId --jq length) || n=0
+          echo "Successful pwhl-nightly.yml runs today (UTC): ${n:-0}"
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Checkout repo
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/checkout@v7
 
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install -r requirements.txt
 
       - name: Fetch PWHL news and push to Worker
+        if: steps.guard.outputs.skip != 'true'
         env:
           WORKER_URL: ${{ secrets.WORKER_URL }}
           EYEWALL_POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
         run: python pwhl_news.py
 
       - name: Run pwhl_stats.py (rosters, player/goalie/team stats, game log)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_stats.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_stats.py "$SEASON_ID"
+        # SEASON_ID is the workflow_dispatch season_id input (blank on the
+        # cron and the Worker's dispatch = the live-resolved PWHL_SEASON).
+        # Every per-season step below takes it too, so a playoff round can
+        # be backfilled from GitHub: gh workflow run pwhl-nightly.yml -f season_id=<id>
         # Populates pwhl_game_log (which games are Final), pwhl_players,
         # pwhl_player_seasons, pwhl_goalie_seasons, pwhl_team_seasons.
         # Everything below this step depends on pwhl_game_log/pwhl_players
@@ -45,11 +87,13 @@ jobs:
         # nightly against whatever game_log snapshot was last set by hand.
 
       - name: Ingest PWHL shot events (goals, shots, blocked shots)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_shot_events.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_shot_events.py "$SEASON_ID"
         # Skips games already in pwhl_shot_events (idempotent by default).
         # This is the actual source of goal data for pwhl_milestones.py —
         # separate from and unrelated to pwhl_pbp_events.py below, which
@@ -57,11 +101,13 @@ jobs:
         # goalie changes instead). Also was NOT previously scheduled.
 
       - name: Compute PWHL game-winning-goals rollup
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_stats.py --gw-goals-rollup-only
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_stats.py --gw-goals-rollup-only "$SEASON_ID"
         # Must run AFTER pwhl_shot_events.py directly above -- rolls up
         # pwhl_shot_events.is_game_winning_goal into
         # pwhl_player_seasons.gw_goals (pwhl_stats.py's main run()
@@ -74,11 +120,13 @@ jobs:
         # pwhl_game_boxscore.py.
 
       - name: Ingest PWHL PBP events (current season)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_pbp_events.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_pbp_events.py "$SEASON_ID"
         # Skips games already in pwhl_pbp_events (idempotent by default).
         # Only processes new completed games since last run.
         # For the initial full backfill, run locally:
@@ -90,11 +138,13 @@ jobs:
         # step's comment (Session 52).
 
       - name: Compute PWHL team shot totals (Corsi/Fenwick from tonight's games)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_stats.py --shot-totals-only
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_stats.py --shot-totals-only "$SEASON_ID"
         # Must run AFTER pwhl_shot_events.py above, not as part of the
         # pwhl_stats.py step earlier in this file. run_team_shot_totals()
         # (pwhl_team_seasons.corsi_for_pct etc.) reads from pwhl_shot_events —
@@ -111,11 +161,13 @@ jobs:
         # same freshness reasoning as the pwhl_shot_events dependency above.
 
       - name: Ingest PWHL game box scores (per-player TOI/hits/blocks/faceoffs)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_game_boxscore.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_game_boxscore.py "$SEASON_ID"
         # Skips games already in pwhl_skater_game_box (idempotent by default,
         # see get_processed_games()). Was previously manual-only (Session 41
         # built it but never wired it in) -- same gap pwhl_goal_on_ice.py and
@@ -132,11 +184,13 @@ jobs:
         # PBP backfill pattern.
 
       - name: Compute PWHL TOI/game rollup (percentile parity piece 1)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_stats.py --toi-rollup-only
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_stats.py --toi-rollup-only "$SEASON_ID"
         # Must run AFTER pwhl_game_boxscore.py above -- rolls up
         # pwhl_skater_game_box.toi_seconds into
         # pwhl_player_seasons.toi_per_game (pwhl_stats.py's main run()
@@ -145,11 +199,13 @@ jobs:
         # the percentiles step below.
 
       - name: Compute PWHL shot-based xG proxy (percentile parity piece 2)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_shot_xg.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_shot_xg.py "$SEASON_ID"
         # Reads pwhl_shot_events (ingested earlier this run) to compute a
         # distance-bucket xG proxy per shooter (xg_for, finishing) --
         # PWHL-native equivalent of rapm.py's NHL shot_xg(), independent
@@ -162,11 +218,13 @@ jobs:
         # upserts nothing) rather than failing for that season/type.
 
       - name: Compute PWHL skater percentiles (percentile parity piece 3)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_percentiles.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_percentiles.py "$SEASON_ID"
         # Must run AFTER both steps above -- computes pct_goals/pct_a1/
         # pct_penalties/pct_finishing from pwhl_player_seasons.toi_per_game
         # (piece 1) and .finishing (piece 2). See pwhl_percentiles.py's
@@ -174,11 +232,13 @@ jobs:
         # decisions and the same season-9-playoffs data gap.
 
       - name: Compute PWHL goalie percentiles
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
-        run: python pwhl_goalie_percentiles.py
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_goalie_percentiles.py "$SEASON_ID"
         # Goalie-side analogue of the skater percentile parity pieces
         # above -- GSAX-proxy (reusing the same danger-zone xG bucket
         # values as piece 2) plus 5v5/HD/MD/PK SV%, ranked into
@@ -192,6 +252,7 @@ jobs:
         # NHL-calibrated bucket values as piece 2, unvalidated for PWHL).
 
       - name: Run pwhl_milestones.py
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -203,6 +264,7 @@ jobs:
         # Placed last regardless since it doesn't hurt to wait.
 
       - name: Generate daily PWHL trivia (easy + medium)
+        if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -223,7 +285,7 @@ jobs:
         # the live Worker call is ever unreachable during this job.
 
       - name: PWHL Elo ratings + win probabilities (hockeytech_elo.py)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -235,7 +297,7 @@ jobs:
         # Tables: docs/pwhl_elo_ddl.sql.
 
       - name: Ingest upcoming PWHL schedules (preseason + next season game logs)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -260,4 +322,9 @@ jobs:
 
       - name: Notify on failure
         if: failure()
-        run: echo "PWHL pipeline failed — check logs above"
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"pwhl-nightly.yml\",\"status\":\"failure\",\"title\":\"EyeWall PWHL Nightly Pipeline failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
