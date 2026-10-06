@@ -3,7 +3,7 @@ ai_predictions.py — EyeWall AI Pipeline
 Generates pre-game predictions for upcoming games and stores them in Supabase.
 
 Usage:
-    python ai_predictions.py                        # current season, all upcoming games
+    python ai_predictions.py                        # today's games (ET), both locales
     python ai_predictions.py 20242025               # specific season
     python ai_predictions.py --game 2025030415      # single game
     python ai_predictions.py --game 2025030415 --force  # regenerate even if exists
@@ -12,12 +12,21 @@ Usage:
 Each game gets one row per locale in game_predictions (keyed on game_id +
 locale, docs/session_locale_predictions.sql) -- same Track B pattern as
 ai_summaries.py / ai_scouting.py.
+
+Game day only (2026-10): the NHL /schedule/{date} response is a 7-day
+gameWeek, and until then every day of it was predicted on the first run
+that saw it -- up to six days early, with that day's injuries, lines and
+form -- and already_generated() then never refreshed it. Only games dated
+today in Eastern time are predicted now, so each prediction is written the
+morning of the game. Dates are ET because the NHL schedule's day["date"]
+is the ET game date (a 10 PM ET game is still "today" at 02:30 UTC).
 """
 
 import argparse
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from ai_client import generate
 from ai_context import build_matchup_context, build_prediction_context
@@ -31,17 +40,29 @@ supabase = get_client()
 
 REQUEST_DELAY = 1.0
 
+ET = ZoneInfo("America/New_York")
+
+
+def today_et() -> date:
+    """Today's date in Eastern time -- the NHL schedule's day["date"] is the
+    ET game date, so this is the date the schedule request and the game-day
+    filter must share."""
+    return datetime.now(ET).date()
+
 
 # ---------------------------------------------------------------------------
 # NHL API helpers
 # ---------------------------------------------------------------------------
 
 
-def get_upcoming_games() -> list:
+def get_upcoming_games(today: str | None = None) -> list:
     """
-    Returns all upcoming games league-wide for today using the NHL schedule API.
+    Returns today's upcoming games league-wide from the NHL schedule API.
+
+    `today` is an ISO date (default: today in ET). The schedule response
+    is a 7-day gameWeek; only the day whose date equals `today` is used.
     """
-    today = datetime.now(UTC).date().isoformat()
+    today = today or today_et().isoformat()
     try:
         data = nhl_get(f"/schedule/{today}")
     except Exception as e:
@@ -54,6 +75,8 @@ def get_upcoming_games() -> list:
     seen = set()
 
     for day in data.get("gameWeek", []):
+        if day.get("date") != today:
+            continue
         for g in day.get("games", []):
             game_id = g.get("id")
             state = g.get("gameState", "")
@@ -238,16 +261,17 @@ def main():
             "game_id": args.game,
             "home_team": args.home.upper(),
             "away_team": args.away.upper(),
-            "game_date": datetime.now(UTC).date().isoformat(),
+            "game_date": today_et().isoformat(),
             "game_type": 2,
         }
         for locale in locales:
             process_game(game, force=args.force, locale=locale)
         return
 
-    # Full upcoming games mode
-    print(f"Fetching upcoming games for {datetime.now(UTC).date().isoformat()}...")
-    games = get_upcoming_games()
+    # Game-day mode
+    today = today_et().isoformat()
+    print(f"Fetching today's games ({today} ET)...")
+    games = get_upcoming_games(today)
 
     if not games:
         print("No upcoming games found — exiting")
