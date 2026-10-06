@@ -1,0 +1,57 @@
+name: Meta Token Check
+
+# Weekly read-only check of the Instagram/Facebook credentials that
+# social-posts.yml publishes with (`python social_posts.py check`): the Page
+# token reaches the Page and the linked Instagram account, Instagram
+# publishing is allowed, and -- via Graph API debug_token -- neither the
+# token nor its data access ends within 14 days. The Page token itself
+# doesn't expire, but Meta's data-access window on it does (the owner's
+# renewal date was 2026-12-17), and posting stops when it lapses. A failure
+# here pushes an ops alert through the Worker (Notify on failure below), so
+# there are at least two weekly warnings before the date. Posts nothing.
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'  # Mondays 12:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: meta-token-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Meta credentials and token lifetime
+        env:
+          # social_posts.py imports db.py, which reads these at import time.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+        run: python social_posts.py check
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"meta-token-check.yml\",\"status\":\"failure\",\"title\":\"Meta Token Check failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"

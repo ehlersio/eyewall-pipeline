@@ -45,7 +45,10 @@ recap needs graded games. Missing data exits non-zero (the backup cron
 retries later); a genuinely empty day (no games, offseason) exits 0.
 
 Credentials (GitHub secrets): META_PAGE_TOKEN -- a Page access token for the
-EyeWall Page, from a long-lived user token, so it doesn't expire -- plus
+EyeWall Page, from a long-lived user token, so the token itself doesn't
+expire, but its data access does (Meta's ~90-day window, renewed by
+re-authorising the app; `check` fails 14 days ahead, weekly via
+meta-token-check.yml) -- plus
 IG_USER_ID (the Instagram account linked to that Page) and FB_PAGE_ID. A
 platform whose id or the token is missing is uploaded but not published
 (logged, exit 0).
@@ -1375,9 +1378,40 @@ def graph_get(path, token, **params):
     return res.json()
 
 
-def check_credentials():
-    """Read-only: can the token reach the Page and the Instagram account?
-    Posts nothing. Returns an exit code."""
+# `check` fails when the token or its data access ends within this many days.
+TOKEN_WARN_DAYS = 14
+
+
+def token_lifetime_problems(info: dict, now: datetime) -> list[str]:
+    """What's wrong with a debug_token response, or [] if nothing: the token
+    must be valid, and neither it nor its data access may end within
+    TOKEN_WARN_DAYS. expires_at 0 means the token never expires; a Page
+    token's data_access_expires_at must be there (fail closed, since that's
+    the date that actually stops posting)."""
+    d = info.get("data") or {}
+    problems = []
+    if not d.get("is_valid"):
+        msg = (d.get("error") or {}).get("message")
+        problems.append("token is not valid" + (f" ({msg})" if msg else ""))
+    for field, label, required in (
+        ("expires_at", "token expires", False),
+        ("data_access_expires_at", "data access expires", True),
+    ):
+        ts = d.get(field)
+        if not ts:
+            if required:
+                problems.append(f"debug_token reported no {field}")
+            continue
+        when = datetime.fromtimestamp(ts, UTC)
+        if when - now < timedelta(days=TOKEN_WARN_DAYS):
+            problems.append(f"{label} {when:%Y-%m-%d}, under {TOKEN_WARN_DAYS} days away")
+    return problems
+
+
+def check_credentials(now: datetime | None = None):
+    """Read-only: can the token reach the Page and the Instagram account,
+    and does its data access last another TOKEN_WARN_DAYS? Posts nothing.
+    Returns an exit code."""
     token = os.environ.get("META_PAGE_TOKEN")
     page_id, ig_id = os.environ.get("FB_PAGE_ID"), os.environ.get("IG_USER_ID")
     missing = [
@@ -1427,6 +1461,22 @@ def check_credentials():
             continue
         extra = detail(res)
         print(f"  ok    {label}" + (f" ({extra})" if extra else ""))
+    # The Page token "doesn't expire", but Meta's data-access window on it
+    # does, and posting stops when it lapses. debug_token reports both.
+    label = f"token and data access last {TOKEN_WARN_DAYS}+ days"
+    try:
+        info = graph_get("debug_token", token, input_token=token)
+    except (RuntimeError, httpx.HTTPError) as e:
+        print(f"  FAIL  {label}: {e}")
+        ok = False
+    else:
+        problems = token_lifetime_problems(info, now or datetime.now(UTC))
+        if problems:
+            print(f"  FAIL  {label}: {'; '.join(problems)}")
+            ok = False
+        else:
+            ts = (info.get("data") or {})["data_access_expires_at"]
+            print(f"  ok    {label} (data access until {datetime.fromtimestamp(ts, UTC):%Y-%m-%d})")
     print(
         "  Facebook posting (pages_manage_posts) can't be proven without posting;"
         " the first real post will confirm it."
