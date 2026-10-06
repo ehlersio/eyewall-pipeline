@@ -21,6 +21,13 @@ regular-season game has no inferred units, and each run replaces a game
 type's inferred units rather than leaving older ones behind. Manual units
 are never touched.
 
+Goalies (2026-10): shift_events carries goalie shifts too (shift_data.py's
+detailCode==1 check does not catch them), and a goalie is on the ice for
+every power play, so every unit used to include one -- CAR PP1 with
+Kochetkov, UTA PP2 with two goalies. The team's goalie ids are looked up
+from `players` (position G) and their shifts dropped before inference, so
+units are skaters only.
+
 Run order: after shift_data.py (needs fresh shift_events).
 
 Usage:
@@ -277,6 +284,35 @@ def fetch_shifts_for_team(team: str, season: int, game_type: int) -> list[dict]:
     return rows
 
 
+def fetch_goalie_ids(player_ids: set[int]) -> set[int]:
+    """The ids among `player_ids` whose `players.position` is G.
+
+    shift_events includes goalie shifts (shift_data.py's detailCode==1
+    filter never matched the shiftcharts feed), and a goalie is on the ice
+    for every PP/PK shot, so without this every inferred unit carried one."""
+    goalies: set[int] = set()
+    ids = sorted(player_ids)
+    for i in range(0, len(ids), 200):
+        rows = (
+            supabase.table("players")
+            .select("id")
+            .in_("id", ids[i : i + 200])
+            .eq("position", "G")
+            .execute()
+            .data
+        )
+        goalies.update(r["id"] for r in (rows or []))
+    return goalies
+
+
+def exclude_goalies(shifts: list[dict], goalie_ids: set[int]) -> list[dict]:
+    """`shifts` without any goalie's shifts -- the shift index only ever
+    sees skaters, so a goalie can't be counted as a unit member."""
+    if not goalie_ids:
+        return shifts
+    return [s for s in shifts if s["player_id"] not in goalie_ids]
+
+
 def fetch_existing_manual_units(team: str, season: int, game_type: int) -> set[tuple]:
     """Returns set of (unit_type, unit_number) that are manually set — never overwrite."""
     rows = (
@@ -467,6 +503,12 @@ def run_team_game_type(
     shifts = fetch_shifts_for_team(team, season, game_type)
     if not shifts:
         print("no shifts — skip")
+        return
+
+    goalie_ids = fetch_goalie_ids({s["player_id"] for s in shifts})
+    shifts = exclude_goalies(shifts, goalie_ids)
+    if not shifts:
+        print("no skater shifts — skip")
         return
 
     shift_idx = build_shift_index(shifts)

@@ -186,3 +186,102 @@ class TestRunTeamByGameType:
         calls = self._patch(monkeypatch, {2: {2026020001}})
         special_teams.run_team("CAR", 20262027, {}, dry_run=True)
         assert calls == [("infer", 2, [2026020001])]
+
+
+class TestGoaliesExcluded:
+    """shift_events carries goalie shifts (shift_data.py's detailCode==1
+    check never matches), and a goalie is on the ice for every PP/PK shot,
+    so until 2026-10 every inferred unit carried one (CAR PP1 with
+    Kochetkov, UTA PP2 with two goalies). Goalies come from players.position
+    and are dropped before inference."""
+
+    GOALIE = 8480000
+    SKATERS = (1, 2, 3, 4, 5)
+
+    def _shifts(self, game_id=2026020001):
+        # Everyone, goalie included, is on the ice for the whole period.
+        return [
+            {
+                "id": i,
+                "game_id": game_id,
+                "player_id": pid,
+                "period": 1,
+                "start_secs": 0,
+                "end_secs": 1200,
+            }
+            for i, pid in enumerate([self.GOALIE, *self.SKATERS], start=1)
+        ]
+
+    def test_fetch_goalie_ids_queries_players_by_position(self):
+        q = _query_recorder([{"id": self.GOALIE}])
+        client = MagicMock()
+        client.table.return_value = q
+        special_teams.supabase = client
+
+        result = special_teams.fetch_goalie_ids({self.GOALIE, 1, 2})
+
+        assert result == {self.GOALIE}
+        client.table.assert_called_once_with("players")
+        calls = [(n, a, k) for n, a, k in q.calls]
+        assert ("eq", ("position", "G"), {}) in calls
+        assert ("in_", ("id", [1, 2, self.GOALIE]), {}) in calls
+
+    def test_fetch_goalie_ids_batches_by_200(self):
+        q = _query_recorder([])
+        client = MagicMock()
+        client.table.return_value = q
+        special_teams.supabase = client
+
+        special_teams.fetch_goalie_ids(set(range(1, 402)))
+
+        in_calls = [a[1] for n, a, _ in q.calls if n == "in_"]
+        assert [len(b) for b in in_calls] == [200, 200, 1]
+
+    def test_exclude_goalies_drops_only_goalie_shifts(self):
+        shifts = self._shifts()
+        kept = special_teams.exclude_goalies(shifts, {self.GOALIE})
+        assert tuple(s["player_id"] for s in kept) == self.SKATERS
+        assert special_teams.exclude_goalies(shifts, set()) is shifts
+
+    def test_goalie_on_ice_for_every_pp_shot_is_not_a_unit_member(self, monkeypatch):
+        game_id = 2026020001
+        pp_shots = [
+            {
+                "game_id": game_id,
+                "period": 1,
+                "time_in_period": f"{m:02d}:00",
+                "situation_code": "1451",
+            }
+            for m in range(12)
+        ]
+        written = []
+        monkeypatch.setattr(special_teams, "fetch_existing_manual_units", lambda *_: set())
+        monkeypatch.setattr(
+            special_teams, "fetch_shifts_for_team", lambda *_: self._shifts(game_id)
+        )
+        monkeypatch.setattr(special_teams, "fetch_situational_shots_for_team", lambda *_: pp_shots)
+        monkeypatch.setattr(special_teams, "fetch_goalie_ids", lambda ids: {self.GOALIE} & ids)
+        monkeypatch.setattr(
+            special_teams,
+            "upsert_unit",
+            lambda t, s, gt, ut, un, ids: written.append((ut, un, sorted(ids))),
+        )
+
+        special_teams.run_team_game_type("CAR", 20262027, 2, {game_id}, {game_id: ("CAR", "WSH")})
+
+        assert ("PP", 1, list(self.SKATERS)) in written
+        for _, _, ids in written:
+            assert self.GOALIE not in ids
+
+    def test_only_goalie_shifts_skips_the_team(self, monkeypatch):
+        monkeypatch.setattr(special_teams, "fetch_existing_manual_units", lambda *_: set())
+        monkeypatch.setattr(special_teams, "fetch_shifts_for_team", lambda *_: self._shifts()[:1])
+        monkeypatch.setattr(special_teams, "fetch_goalie_ids", lambda ids: set(ids))
+        calls = []
+        monkeypatch.setattr(
+            special_teams, "fetch_situational_shots_for_team", lambda *a: calls.append(a) or []
+        )
+
+        special_teams.run_team_game_type("CAR", 20262027, 2, {1}, {1: ("CAR", "WSH")})
+
+        assert calls == []
