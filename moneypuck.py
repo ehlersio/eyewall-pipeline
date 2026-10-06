@@ -13,6 +13,7 @@ import traceback
 import requests
 
 from db import NHL_SEASON, get_client
+from nhl_stats import fetch_schedule
 from pipeline_common import NHL_PLAYOFFS, NHL_REGULAR_SEASON, select_all
 
 # MoneyPuck's URL scheme wants the season's START year (e.g. 2025 for the
@@ -953,18 +954,45 @@ def _run_substage(failures: list, label: str, fn, *args, **kwargs):
         failures.append(f"moneypuck.{label} ({type(e).__name__})")
 
 
-# WAR's replacement-level term: what a full regular season adds on top of
-# goals above average / GOALS_PER_WIN.
+# WAR's replacement-level term: what a FULL regular season adds on top of
+# goals above average / GOALS_PER_WIN. A player is credited his share of it
+# -- regular season: games played / the season's games
+# (regular_season_replacement); playoffs: 5v5 ice time / a full regular
+# season's (run_playoff_skaters). Until 2026-10 the regular season added the
+# whole 0.5 at any GP, so in October every skater's WAR was ~0.5 (602 of
+# them with 1-4 GP, median 0.491) and call-ups were credited a full season
+# of replacement value (a 1-GP player in BOS's 2025-26 top 5 at 0.524).
 REPLACEMENT_WAR = 0.5
+
+
+def regular_season_replacement(row, season_games: int) -> float:
+    """The regular-season replacement term for one MoneyPuck "all" row:
+    REPLACEMENT_WAR x min(1, games played / the season's games per team).
+    A full season (82 games through 2025-26, 84 from 2026-27) keeps the
+    whole 0.5, so full-season WAR is unchanged; 41 games earn 0.25; a call-up
+    with 4 games 0.024. Capped at 1 for a player traded into more games
+    than his team plays."""
+    gp = n(row.get("games_played", 0))
+    return REPLACEMENT_WAR * min(1.0, gp / season_games)
+
+
+def season_games(season: int) -> int | None:
+    """Regular-season games per team in `season`, counted from the NHL's own
+    schedule (one club's; every team plays the same number). None if the
+    schedule can't be fetched -- run() then leaves WAR as it was rather than
+    prorate by a guessed season length."""
+    games = sum(1 for g in fetch_schedule("TOR", season) if g.get("gameType") == 2)
+    return games or None
 
 
 def war_from_rapm(row, ev_row, rapm, replacement: float = REPLACEMENT_WAR) -> float | None:
     """RAPM-derived WAR (beta) for one MoneyPuck "all" row: the RAPM
     coefficient (marginal xG/60 at 5v5) over the player's 5v5 hours, plus
     penalties and finishing, in goals above average, then wins, plus the
-    replacement term. None under 6 minutes of 5v5 ice. The regular season's
-    replacement term is a full REPLACEMENT_WAR; a playoff one is scaled by
-    ice time (run_playoff_skaters)."""
+    replacement term. None under 6 minutes of 5v5 ice. The replacement term
+    is the caller's share of REPLACEMENT_WAR: by games played in the regular
+    season (regular_season_replacement), by ice time in the playoffs
+    (run_playoff_skaters)."""
     it = n(ev_row.get("icetime", 0)) / 3600 if ev_row else 0.0  # hours of EV ice
     if it < 0.1:
         return None
@@ -1419,6 +1447,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
         ]
     )
 
+    games_in_season = season_games(season)
+    if games_in_season is None:
+        print("  !! No schedule for the season -- WAR left as it was this run")
+
     def compute_war(row, is_fwd: bool) -> float | None:
         ev = ev_map.get(row["playerId"])
         if not ev:
@@ -1427,9 +1459,10 @@ def run(season: int = NHL_SEASON) -> list[str]:
         if it < 0.1:
             return None
 
+        replacement = regular_season_replacement(row, games_in_season)
         rapm = rapm_map.get(int(row["playerId"]))
         if rapm is not None:
-            return war_from_rapm(row, ev, rapm)
+            return war_from_rapm(row, ev, rapm, replacement)
 
         # Fallback: xGoals-above-average method (original approach)
         pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
@@ -1441,7 +1474,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
         ev_gaa = (xgf60 - avg_xgf) * it + (avg_xga - xga60) * it
 
         gaa = ev_gaa + pen * 0.3 + fin * 0.3
-        war = gaa / GOALS_PER_WIN + REPLACEMENT_WAR
+        war = gaa / GOALS_PER_WIN + replacement
         return round(war, 3)
 
     # ── Compute and upsert analytics for all NHL players ──────────
@@ -1472,7 +1505,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
         pen_val = penalties60(row)
         comp_val = competition(row)
         tm_val = teammates(row)
-        war_val = compute_war(row, is_fwd)
+        war_val = compute_war(row, is_fwd) if games_in_season else None
         toi_ok = meets_toi_floor(is_fwd, row.get("icetime", 0))
 
         box_vals = {stat: fn(row) for stat, fn in box_fns.items()}
@@ -1508,8 +1541,9 @@ def run(season: int = NHL_SEASON) -> list[str]:
                 "player_id": int(pid),
                 "season": season,
                 "game_type": NHL_REGULAR_SEASON,  # the /regular/ file
-                # Analytics
-                "war": war_val,
+                # Analytics (no "war" key when the season length is
+                # unknown, so the upsert keeps last night's value)
+                **({"war": war_val} if games_in_season else {}),
                 **skater_rate_columns(pid, row, metric_fns, pp_map, pk_map),
                 # Percentiles -- all nulled below MIN_TOI_MINUTES (see toi_ok
                 # above) regardless of pool membership; a player can still be
