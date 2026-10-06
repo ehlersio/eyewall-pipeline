@@ -23,10 +23,9 @@ from starting_goalie import (
 
 
 class TestGuards:
-    """The 2026-09-13 dry run found training-camp rosters (5-6 goalies per
-    team) spreading probability over camp invitees. Two guards: only
-    predict a game within PREDICT_WINDOW_DAYS, and skip a team with more
-    than MAX_CANDIDATES healthy roster goalies (roster not cut yet)."""
+    """Only predict a game within PREDICT_WINDOW_DAYS, and with more than
+    MAX_CANDIDATES healthy roster goalies, keep the ones carrying the
+    team's recent starts (the model was fit on the 2-3 who dressed)."""
 
     def test_window(self):
         from datetime import date
@@ -37,13 +36,23 @@ class TestGuards:
         assert within_window(game, date(2026, 9, 28 - PREDICT_WINDOW_DAYS)) is False
         assert within_window(game, date(2026, 9, 13)) is False
 
-    def test_camp_roster_is_skipped_but_injuries_can_bring_it_under_the_cap(self):
-        camp = [{"id": i, "name": f"Goalie {i}"} for i in range(1, MAX_CANDIDATES + 2)]
-        assert predict_team(GAME, camp, TIMELINE, None, weights=WEIGHTS) == []
-        day = {"ids": {camp[-1]["id"]: "injured-reserve"}, "names": {}}
-        rows = predict_team(GAME, camp, TIMELINE, day, weights=WEIGHTS)
-        assert len(rows) == MAX_CANDIDATES
+    def test_more_than_the_cap_keeps_the_goalies_with_recent_starts(self):
+        # 1 and 2 share the starts; 3 and 4 have none -- tied, so both stay
+        # rather than one being dropped arbitrarily.
+        four = [*ROSTER, {"id": 4, "name": "Fourth"}]
+        rows = predict_team(GAME, four, TIMELINE, None, weights=WEIGHTS)
+        assert {r["goalie_id"] for r in rows} == {1, 2, 3, 4}
+        # A fifth with a start beats the two with none.
+        timeline = [("2026-10-01", 1, 20262027, 5, frozenset({1, 5})), *TIMELINE]
+        five = [*four, {"id": 5, "name": "Fifth"}]
+        rows = predict_team(GAME, five, timeline, None, weights=WEIGHTS)
+        assert {r["goalie_id"] for r in rows} == {1, 2, 5}
         assert abs(sum(r["start_prob"] for r in rows) - 1) < 1e-3
+        # Injuries are excluded before the cap.
+        day = {"ids": {5: "injured-reserve"}, "names": {}}
+        rows = predict_team(GAME, five, timeline, day, weights=WEIGHTS)
+        assert {r["goalie_id"] for r in rows} == {1, 2, 3, 4}
+        assert len(rows) > MAX_CANDIDATES
 
 
 def _sched(gid, day, home, away, game_type=2, state="FUT"):
@@ -150,3 +159,50 @@ class TestPredictTeam:
         feats = gm.candidate_features(3, TIMELINE, "2026-10-12")
         three = next(r for r in rows if r["goalie_id"] == 3)
         assert three["factors"]["no_recent"] is True and feats["no_recent"] == 1.0
+
+
+class TestRosterGoalies:
+    """Candidates come from the live NHL roster, not players.team: on
+    2026-10-05 players.team still filed Jacob Fowler (sent to the AHL) under
+    MTL, while roster/MTL/current listed only Dobes and Montembeault."""
+
+    def test_goalies_from_the_live_roster(self, monkeypatch):
+        import starting_goalie
+
+        # api-web roster/MTL/current, 2026-10-05 (goalies, trimmed).
+        roster = {
+            "goalies": [
+                {
+                    "id": 8482487,
+                    "firstName": {"default": "Jakub"},
+                    "lastName": {"default": "Dobes"},
+                },
+                {
+                    "id": 8478470,
+                    "firstName": {"default": "Samuel"},
+                    "lastName": {"default": "Montembeault"},
+                },
+            ],
+        }
+        paths = []
+
+        def fake_get(path):
+            paths.append(path)
+            return roster
+
+        monkeypatch.setattr(starting_goalie, "nhl_get", fake_get)
+        goalies = starting_goalie.fetch_roster_goalies("MTL")
+        assert paths == ["/roster/MTL/current"]
+        assert goalies == [
+            {"id": 8482487, "name": "Jakub Dobes"},
+            {"id": 8478470, "name": "Samuel Montembeault"},
+        ]
+
+    def test_unavailable_roster_is_none_not_empty(self, monkeypatch):
+        import starting_goalie
+
+        def boom(path):
+            raise OSError("timeout")
+
+        monkeypatch.setattr(starting_goalie, "nhl_get", boom)
+        assert starting_goalie.fetch_roster_goalies("MTL") is None

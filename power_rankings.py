@@ -2,8 +2,10 @@
 power_rankings.py — EyeWall nightly power rankings pipeline.
 
 For each of the 32 NHL teams:
-  1. Computes a roster WAR score from player_seasons (top-18 skater WAR +
-     starting goalie GSAX). Falls back to prior season if current GP < 10.
+  1. Computes a roster WAR score for each team's CURRENT roster (live NHL
+     roster): top-18 skater WAR per game + the best goalie's GSAX per game,
+     each blended with the player's last-season rate early on (see
+     projected_rate) -- a few games of WAR are noise.
   2. Writes roster_war_score to team_seasons.
   3. Computes the blended 32-team power ranking (same formula as the frontend,
      run server-side so prior_rank is available for movement arrows).
@@ -34,6 +36,8 @@ from dotenv import load_dotenv
 from supabase import ClientOptions, create_client
 
 from ai_client import generate
+from early_season import prior_season, season_label
+from pipeline_common import nhl_get
 from season_lookup import get_nhl_season
 
 load_dotenv()
@@ -206,36 +210,69 @@ def fetch_prior_ranks(season: int, today: date) -> dict[str, int | None]:
     return prior
 
 
-def fetch_top_players_for_team(team: str, season: int, skater_rows: list[dict]) -> list[dict]:
-    """
-    Top 5 skaters by WAR for a team. If current season GP < 10, falls back
-    to fetching prior season rows from Supabase.
-    """
-    current = [r for r in skater_rows if r["team"] == team and r.get("war") is not None]
-    current.sort(key=lambda x: x["war"] or 0, reverse=True)
+# Games of this season before a player's current-season numbers stand on
+# their own: until then they're blended with last season's (projected_rate)
+# and the prompt shows last season's line, labeled. Same 20 games over which
+# the roster WAR weight fades out (compute_rankings' alpha), and
+# early_season.py's k for goal rates.
+EARLY_GAMES = 20
 
-    max_gp = max((r.get("games_played") or 0 for r in current), default=0)
-    if max_gp >= 10:
-        return current[:5]
 
-    # Fall back to prior season
-    prior_season = season - 10001  # e.g. 20252026 → 20242025
-    print(f"    {team}: <10 GP current season, falling back to {prior_season} WAR")
+def fetch_current_roster(team: str) -> dict | None:
+    """{"skaters": {ids}, "goalies": {ids}} from the team's live NHL roster
+    (api-web /roster/{team}/current), or None if it can't be fetched. The
+    live roster is the only reliable "who's on the team now": last season's
+    player_seasons rows still file Matias Maccelli and Nick Robertson under
+    TOR, though they're on NYI and PIT."""
     try:
-        prior_rows = (
-            supabase.table("player_seasons")
-            .select("player_id,team,games_played,war,goals,assists,points")
-            .eq("season", prior_season)
-            .eq("game_type", 2)
-            .eq("team", team)
-            .order("war", desc=True)
-            .limit(5)
-            .execute()
-            .data
-        )
-        return prior_rows or []
-    except Exception:
-        return []
+        data = nhl_get(f"/roster/{team}/current")
+    except Exception as e:
+        print(f"    {team}: couldn't fetch the current roster: {e}")
+        return None
+    ids = {
+        group: {int(p["id"]) for p in data.get(group) or [] if p.get("id") is not None}
+        for group in ("forwards", "defensemen", "goalies")
+    }
+    if not any(ids.values()):
+        return None
+    return {"skaters": ids["forwards"] | ids["defensemen"], "goalies": ids["goalies"]}
+
+
+def fetch_top_players_for_team(
+    team: str,
+    season: int,
+    skater_rows: list[dict],
+    prior_rows: list[dict],
+    roster: dict | None,
+) -> list[dict]:
+    """Top 5 skaters by WAR on the team's current roster.
+
+    Once the team's players have EARLY_GAMES games, this season's rows.
+    Before that, last season's rows of the players on the current roster
+    (whatever team they played for), each tagged `stats_season` so the
+    prompt labels them as last season's, with any games this season
+    attached as `current`. Without a roster (fetch failed), only this
+    season's rows filed under the team -- never last season's by team,
+    which lists players who have left."""
+    current = {r["player_id"]: r for r in skater_rows if r.get("war") is not None}
+    if roster is not None:
+        mine = [current[pid] for pid in roster["skaters"] if pid in current]
+    else:
+        mine = [r for r in current.values() if r["team"] == team]
+    mine.sort(key=lambda x: x["war"], reverse=True)
+
+    max_gp = max((r.get("games_played") or 0 for r in mine), default=0)
+    if max_gp >= EARLY_GAMES or roster is None:
+        return mine[:5]
+
+    prior = [
+        {**r, "stats_season": prior_season(season), "current": current.get(r["player_id"])}
+        for r in prior_rows
+        if r["player_id"] in roster["skaters"] and r.get("war") is not None
+    ]
+    prior.sort(key=lambda x: x["war"], reverse=True)
+    print(f"    {team}: <{EARLY_GAMES} GP this season, top players from {prior_season(season)}")
+    return prior[:5]
 
 
 def fetch_player_names(player_ids: list[int]) -> dict[int, str]:
@@ -248,39 +285,85 @@ def fetch_player_names(player_ids: list[int]) -> dict[int, str]:
 # ── Roster WAR score ──────────────────────────────────────────────────────────
 
 
+def projected_rate(cur_total, cur_gp, prior_total, prior_gp, k: int = EARLY_GAMES):
+    """A player's per-game rate of a counting stat (WAR, GSAX), credibility-
+    weighted early in the season:
+
+        (this season's total + last season's rate x min(last GP, k))
+        / max(this season's GP + min(last GP, k), k)
+
+    From k games this season, this season's rate alone. Last season counts
+    as at most k games. While the two together are under k games the
+    denominator is still k, i.e. the missing games count at 0 -- the
+    replacement level WAR is measured from (average, for GSAX) -- so a
+    rookie's first two games can't make him the league's best player. None
+    when neither season has the stat."""
+    cur_gp = cur_gp or 0
+    has_cur = cur_total is not None and cur_gp > 0
+    has_prior = prior_total is not None and (prior_gp or 0) > 0
+    if not has_cur and not has_prior:
+        return None
+    if has_cur and cur_gp >= k:
+        return float(cur_total) / cur_gp
+    weight = min(prior_gp, k) if has_prior else 0
+    total = (float(cur_total) if has_cur else 0.0) + (
+        float(prior_total) / prior_gp * weight if has_prior else 0.0
+    )
+    return total / max((cur_gp if has_cur else 0) + weight, k)
+
+
 def compute_roster_war_scores(
-    skater_rows: list[dict], goalie_rows: list[dict], season: int
+    skater_rows: list[dict],
+    goalie_rows: list[dict],
+    season: int,
+    prior_skaters: list[dict] | None = None,
+    prior_goalies: list[dict] | None = None,
+    rosters: dict[str, dict | None] | None = None,
 ) -> dict[str, float]:
     """
-    For each team: sum top-18 skater WAR + top goalie GSAX.
-    Returns {team: raw_war_score} (not yet normalised).
-    """
-    # Build goalie GSAX map: team → best goalie GSAX. A goalie with no GSAX
-    # yet is left out rather than counted as 0, and a team's best can be
-    # negative -- starting the max at 0 used to score a team whose goalies
-    # were all below expected as if they were average.
-    goalie_map: dict[str, float] = {}
-    for g in goalie_rows:
-        if g.get("gsax") is None:
-            continue
-        team, gsax = g["team"], float(g["gsax"])
-        goalie_map[team] = max(goalie_map.get(team, gsax), gsax)
+    For each team: the sum of its top-18 skaters' projected WAR per game
+    plus its best goalie's projected GSAX per game (projected_rate), over
+    the players on its current roster (`rosters`, from fetch_current_roster).
+    A team whose roster couldn't be fetched uses the players this season's
+    rows file under it. Returns {team: raw score} (not yet normalised).
 
-    # Group skater WAR by team
-    by_team: dict[str, list[float]] = {}
-    for r in skater_rows:
-        team = r["team"]
-        war = r.get("war")
-        if war is None:
-            continue
-        by_team.setdefault(team, []).append(float(war))
+    Until 2026-10 this summed this season's WAR totals only: at 3 GP that's
+    noise plus how many skaters had logged 5v5 time (OTT, 16 skaters with
+    WAR, normalised to 0.0; PIT/SEA/EDM to 1.0).
+    """
+    rosters = rosters or {}
+    by_id = {
+        "skater": {r["player_id"]: r for r in skater_rows},
+        "goalie": {r["player_id"]: r for r in goalie_rows},
+    }
+    prior_by_id = {
+        "skater": {r["player_id"]: r for r in prior_skaters or []},
+        "goalie": {r["player_id"]: r for r in prior_goalies or []},
+    }
+
+    def rate(kind, pid, stat):
+        cur = by_id[kind].get(pid) or {}
+        prev = prior_by_id[kind].get(pid) or {}
+        return projected_rate(
+            cur.get(stat), cur.get("games_played"), prev.get(stat), prev.get("games_played")
+        )
 
     scores: dict[str, float] = {}
     for team in ALL_TEAMS:
-        wars = sorted(by_team.get(team, []), reverse=True)[:18]
-        skater_war = sum(wars)
-        gsax = goalie_map.get(team, 0.0)
-        scores[team] = skater_war + gsax
+        roster = rosters.get(team)
+        if roster is not None:
+            skaters, goalies = roster["skaters"], roster["goalies"]
+        else:
+            skaters = {r["player_id"] for r in skater_rows if r.get("team") == team}
+            goalies = {r["player_id"] for r in goalie_rows if r.get("team") == team}
+        wars = sorted(
+            (w for w in (rate("skater", pid, "war") for pid in skaters) if w is not None),
+            reverse=True,
+        )[:18]
+        # A goalie with no GSAX in either season is left out rather than
+        # counted as 0, and a team's best can be negative.
+        gsax = [g for g in (rate("goalie", pid, "gsax") for pid in goalies) if g is not None]
+        scores[team] = sum(wars) + (max(gsax) if gsax else 0.0)
 
     return scores
 
@@ -479,6 +562,7 @@ def build_power_rankings_prompt(
 
     # Top players block — only names from this list may be referenced
     player_lines = []
+    stats_seasons = set()
     for p in top_players[:5]:
         pid = p.get("player_id")
         name = player_names.get(pid, f"Player {pid}")
@@ -486,9 +570,39 @@ def build_power_rankings_prompt(
         pts = p.get("points") or 0
         pgp = p.get("games_played") or 0
         war_str = f"WAR {war:+.2f}" if war is not None else "WAR n/a"
-        player_lines.append(f"  {name}: {pts}pts in {pgp}GP | {war_str}")
+        stats_season = p.get("stats_season")
+        if stats_season:
+            # Last season's line, labeled -- with the team he played for
+            # if it wasn't this one, and whatever he's done this season.
+            stats_seasons.add(stats_season)
+            where = "" if p.get("team") == team else f", with {p.get('team')}"
+            line = f"  {name}: {season_label(stats_season)}{where}: {pts}pts in {pgp}GP | {war_str}"
+            cur = p.get("current") or {}
+            if cur.get("games_played"):
+                line += (
+                    f" | {season_label(season)} so far: {cur.get('points') or 0}pts "
+                    f"in {cur['games_played']}GP"
+                )
+            player_lines.append(line)
+        else:
+            player_lines.append(f"  {name}: {pts}pts in {pgp}GP | {war_str}")
 
     players_block = "\n".join(player_lines) if player_lines else "  No player data available."
+    if stats_seasons:
+        labels = ", ".join(season_label(s) for s in sorted(stats_seasons))
+        players_header = (
+            f"TOP PLAYERS ON {team}'S CURRENT ROSTER (by WAR; too few games this season, so "
+            f"the stats are from {labels}, last season -- ONLY reference players listed here):"
+        )
+        season_rule = (
+            f"\n- The player stats above are from {labels} (last season), not this season. "
+            "Say so if you cite them; never present them as this season's numbers."
+        )
+    else:
+        players_header = (
+            f"TOP PLAYERS ON {team} ROSTER (by WAR — ONLY reference players listed here):"
+        )
+        season_rule = ""
 
     # Full rankings snapshot (top 10 + this team's neighbourhood)
     def rank_line(t):
@@ -526,7 +640,7 @@ COMPONENT BREAKDOWN FOR {team}:
   5v5 xGF%:      {f"{xgf_pct * 100:.1f}%" if xgf_pct else "no data yet"} (rank {xgf_rank}/32)
   Special teams: PP {pp_pct:.1f}% / PK {pk_pct:.1f}% (rank {sp_rank}/32)
 
-TOP PLAYERS ON {team} ROSTER (by WAR — ONLY reference players listed here):
+{players_header}
 {players_block}
 
 ACCURACY RULES — STRICTLY ENFORCED:
@@ -535,7 +649,7 @@ ACCURACY RULES — STRICTLY ENFORCED:
 - {team} has played {gp} games. Do not describe them as "early in the season" if gp > 30, or "deep in the season" if gp < 50.
 - This is {"the offseason" if offseason else "the regular season"}. Do not reference playoff series or games in progress.
 - Do not describe any game as a "playoff opener", "Game 1", "Game 7", or any specific playoff game unless that data is provided.
-- If prior rank is null or this is the first ranking, do not mention movement or prior rank.
+- If prior rank is null or this is the first ranking, do not mention movement or prior rank.{season_rule}
 
 ALL 32 TEAMS (for league context — do not reference teams other than {team} by name unless directly comparing):
 {all_32_summary}
@@ -610,12 +724,22 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
     print("  Fetching player WAR...")
     skater_rows = fetch_player_seasons_for_war(season)
     goalie_rows = fetch_goalie_seasons_for_gsax(season)
+    prior_skaters = fetch_player_seasons_for_war(prior_season(season))
+    prior_goalies = fetch_goalie_seasons_for_gsax(prior_season(season))
+
+    print("  Fetching current rosters...")
+    rosters = {t: fetch_current_roster(t) for t in ALL_TEAMS}
+    missing = [t for t, r in rosters.items() if r is None]
+    if missing:
+        print(f"  No live roster for {missing}: using this season's rows filed under them")
 
     print("  Fetching prior ranks...")
     prior_ranks = fetch_prior_ranks(season, today)
 
     # 2. Roster WAR scores
-    raw_war = compute_roster_war_scores(skater_rows, goalie_rows, season)
+    raw_war = compute_roster_war_scores(
+        skater_rows, goalie_rows, season, prior_skaters, prior_goalies, rosters
+    )
     war_norm = normalise(raw_war)
 
     if not dry_run:
@@ -641,7 +765,9 @@ def run(season: int = None, team: str = None, dry_run: bool = False, no_narrativ
 
         rank = team_rank_data["rank"]
         prior_rank = prior_ranks.get(t)
-        top_players = fetch_top_players_for_team(t, season, skater_rows)
+        top_players = fetch_top_players_for_team(
+            t, season, skater_rows, prior_skaters, rosters.get(t)
+        )
         player_ids = [p["player_id"] for p in top_players if p.get("player_id")]
         names = fetch_player_names(player_ids)
 

@@ -4,11 +4,15 @@ team's next NHL regular-season game -> `goalie_start_probs`.
 
 For every team's NEXT regular-season game (only the next one: the game
 after that depends on who starts this one), once it's within
-PREDICT_WINDOW_DAYS (2), the candidates are the team's
-current roster goalies (players.position = 'G', refreshed nightly by
-nhl_stats.py), minus any listed out / injured-reserve on the latest
-injury report (player_injury_history, within 3 days -- same rule as
-scratches.py). A day-to-day goalie stays a candidate; his status is
+PREDICT_WINDOW_DAYS (2), the candidates are the goalies on the team's
+live NHL roster (api-web /roster/{team}/current), minus any listed out /
+injured-reserve on the latest injury report (player_injury_history,
+within 3 days -- same rule as scratches.py). Until 2026-10 they came from
+players.team, which nhl_stats.py sets for this season's roster members but
+never clears: goalies sent to the AHL (Jacob Fowler, MTL) and camp
+invitees kept their NHL team, so 28 of 32 teams had more than
+MAX_CANDIDATES and got no prediction, and the rest gave AHL goalies a
+share. A day-to-day goalie stays a candidate; his status is
 recorded in `factors` but doesn't change the number, since the model has
 never seen injury data (the history starts 2026-09-12) and a guess would
 be dressed up as a fitted result.
@@ -35,8 +39,8 @@ Usage:
   python starting_goalie.py --dry-run
   python run.py starting_goalie        # via orchestrator
 
-Run order: after nhl_stats (rosters), injuries (today's snapshot) and
-goalie_starts (last night's starters).
+Run order: after injuries (today's snapshot) and goalie_starts (last
+night's starters).
 """
 
 import argparse
@@ -49,6 +53,7 @@ from db import NHL_SEASON, get_client, upsert
 from injuries import normalize_name
 from injury_impact import snapshot_for
 from nhl_stats import ALL_TEAMS, fetch_schedule
+from pipeline_common import nhl_get
 from scratches import MAX_SNAPSHOT_LAG_DAYS, build_history_index, fetch_keyset
 
 # Conditional-logit weights in goalie_model.FEATURES order (share_last10,
@@ -104,17 +109,36 @@ def injury_status(goalie, team, day_index):
     return status
 
 
-# More healthy roster goalies than this means the roster hasn't been cut
-# to NHL size (training camp lists every invitee) -- the model was fit on
-# choices among the 2-3 goalies who dressed, so a 5-6 goalie "roster"
-# would spread probability over camp bodies. Skip the team instead.
+# The model was fit on choices among the 2-3 goalies who dressed. A live
+# NHL roster carries 2 or 3 (2026-10-05: 26 teams 2, six teams 3). If a
+# team lists more (an injured goalie still on the roster and not on the
+# injury report, or a roster in flux), only the MAX_CANDIDATES who have
+# carried the most of the team's recent starts are candidates -- see
+# top_candidates().
 MAX_CANDIDATES = 3
+
+
+def top_candidates(candidates, limit=MAX_CANDIDATES):
+    """The `limit` candidates with the largest share of the team's last
+    10 starts, then the most recent start; anyone tied with the last one
+    kept stays (a tie is a tie, not something to break arbitrarily)."""
+    if len(candidates) <= limit:
+        return candidates
+
+    def rank(c):
+        f = c[2]
+        return (f["share_last10"], -f["log_days_rest"])
+
+    ordered = sorted(candidates, key=rank, reverse=True)
+    cutoff = rank(ordered[limit - 1])
+    return [c for c in ordered if rank(c) >= cutoff]
 
 
 def predict_team(game, roster_goalies, timeline, day_index, weights=WEIGHTS):
     """goalie_start_probs rows for one team's next game. [] when no
-    candidate is left (every roster goalie out / IR, or none on file) or
-    when there are more than MAX_CANDIDATES (camp roster, not cut yet)."""
+    candidate is left (every roster goalie out / IR, or none on file).
+    More than MAX_CANDIDATES healthy goalies are cut to the ones carrying
+    the recent starts (top_candidates)."""
     history = [h for h in timeline or [] if h[0] < game["game_date"]]
     candidates = []
     for g in roster_goalies:
@@ -123,8 +147,9 @@ def predict_team(game, roster_goalies, timeline, day_index, weights=WEIGHTS):
             continue
         feats = gm.candidate_features(int(g["id"]), history, game["game_date"])
         candidates.append((g, status, feats))
-    if not candidates or len(candidates) > MAX_CANDIDATES:
+    if not candidates:
         return []
+    candidates = top_candidates(candidates)
     X = np.array([[f[k] for k in gm.FEATURES] for _, _, f in candidates])
     probs = gm.softmax_probs(weights, X) if len(candidates) > 1 else np.array([1.0])
     rows = []
@@ -161,13 +186,24 @@ def load_history(client, season):
     )
 
 
-def load_roster_goalies(client):
-    rows = client.table("players").select("id,name,team").eq("position", "G").execute().data or []
-    by_team = {}
-    for r in rows:
-        if r.get("team"):
-            by_team.setdefault(r["team"], []).append(r)
-    return by_team
+def fetch_roster_goalies(team):
+    """[{id, name}] for the goalies on the team's live NHL roster
+    (api-web /roster/{team}/current), or None if it can't be fetched --
+    the caller skips the team rather than fall back to players.team,
+    which still lists goalies the team sent down (see module docstring)."""
+    try:
+        data = nhl_get(f"/roster/{team}/current")
+    except Exception as e:
+        print(f"  WARN: couldn't fetch the current {team} roster: {e}")
+        return None
+    goalies = []
+    for p in data.get("goalies") or []:
+        if p.get("id") is None:
+            continue
+        first = (p.get("firstName") or {}).get("default", "")
+        last = (p.get("lastName") or {}).get("default", "")
+        goalies.append({"id": int(p["id"]), "name": f"{first} {last}".strip()})
+    return goalies
 
 
 def load_injury_day(client, today):
@@ -200,12 +236,9 @@ def delete_stale(client, game_ids, kept):
 
 
 # Only predict a game this close: the morning-of prediction is the one that
-# matters, and further out the roster is the wrong candidate set -- in
-# training camp players.team lists 5-6 goalies per team (every invitee), and
-# spreading probability over all of them (found in the 2026-09-13 dry run:
-# BOS's starter at 52%, five camp goalies at 10% each) isn't what the model
-# was fit on (the 2-3 goalies who dressed). NHL rosters are cut to the real
-# 2-3 before opening night, so a 2-day window only ever sees real rosters.
+# matters, and further out the roster can still change. (The 2026-09-13 dry
+# run, on players.team, found 5-6 camp goalies per team; the live roster
+# is cut to the real 2-3.)
 PREDICT_WINDOW_DAYS = 2
 
 
@@ -221,7 +254,6 @@ def run(season=None, dry_run=False, today=None):
     print(f"\n=== Starting goalie probabilities -- season {season}, {today} ===")
 
     timelines = gm.team_timelines(load_history(client, season))
-    rosters = load_roster_goalies(client)
     day_index = load_injury_day(client, today)
     if day_index is None:
         print("  (no injury snapshot within 3 days -- nobody excluded for injury)")
@@ -234,7 +266,11 @@ def run(season=None, dry_run=False, today=None):
         if not within_window(game, today):
             too_far += 1
             continue
-        team_rows = predict_team(game, rosters.get(team, []), timelines.get(team), day_index)
+        roster = fetch_roster_goalies(team)
+        if roster is None:
+            skipped.append(team)
+            continue
+        team_rows = predict_team(game, roster, timelines.get(team), day_index)
         if not team_rows:
             skipped.append(team)
             continue
@@ -245,8 +281,8 @@ def run(season=None, dry_run=False, today=None):
     print(
         f"  {len(rows)} goalie rows for {len({(r['game_id'], r['team']) for r in rows})} team-games "
         f"({len(games)} games); {too_far} team(s) whose next game is more than "
-        f"{PREDICT_WINDOW_DAYS} days out; skipped (no healthy goalie, or more than "
-        f"{MAX_CANDIDATES} -- camp roster not cut yet): {skipped or 'none'}"
+        f"{PREDICT_WINDOW_DAYS} days out; skipped (roster unavailable or no healthy "
+        f"goalie): {skipped or 'none'}"
     )
     for r in sorted(rows, key=lambda r: (r["game_date"], r["team"], -r["start_prob"]))[:12]:
         print(

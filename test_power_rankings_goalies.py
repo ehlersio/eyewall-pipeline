@@ -44,14 +44,15 @@ class TestFetchGoalieSeasons:
 
 class TestRosterWarGoalieTerm:
     def test_best_goalie_counts_even_when_negative(self):
+        # 20+ GP: this season's GSAX per game stands alone.
         goalies = [
-            {"team": "CAR", "gsax": 12.0},
-            {"team": "CAR", "gsax": -2.0},
-            {"team": "SJS", "gsax": -4.5},
-            {"team": "SJS", "gsax": -8.0},
-            {"team": "SJS", "gsax": None},  # no GSAX yet: left out, not 0
+            {"player_id": 1, "team": "CAR", "gsax": 12.0, "games_played": 40},
+            {"player_id": 2, "team": "CAR", "gsax": -2.0, "games_played": 20},
+            {"player_id": 3, "team": "SJS", "gsax": -4.5, "games_played": 30},
+            {"player_id": 4, "team": "SJS", "gsax": -8.0, "games_played": 20},
+            {"player_id": 5, "team": "SJS", "gsax": None, "games_played": 3},  # left out
         ]
         scores = pr.compute_roster_war_scores([], goalies, 20252026)
-        assert scores["CAR"] == 12.0
-        assert scores["SJS"] == -4.5
+        assert scores["CAR"] == 12.0 / 40
+        assert scores["SJS"] == -4.5 / 30
         assert scores["BOS"] == 0.0  # no goalie data at all
