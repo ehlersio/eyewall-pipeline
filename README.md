@@ -894,9 +894,12 @@ All AHL modules use the same HockeyTech/LeagueStat vendor API as PWHL (`lscluste
 Fetches rosters, skater/goalie/team stats, and the game log. Structurally mirrors `pwhl_stats.py` (same vendor, same `sections[].data[].row` shape for `feed=statviewfeed` views — `extract_rows()` is an unmodified copy), but `feed=modulekit` views (`roster`, `teamsbyseason`, `seasons`, `scorebar`) nest everything under a top-level `"SiteKit"` key instead, handled by a separate `_modulekit_get()` helper.
 
 ```bash
-python ahl_stats.py                  # current season (live-resolved)
+python ahl_stats.py                  # current season (live-resolved), plus the upcoming season's game log
 python ahl_stats.py 90               # specific season_id (90 = 2025-26 Regular)
+python ahl_stats.py --upcoming-game-logs   # only the upcoming season's game log
 ```
+
+**Upcoming season's game log (2026-10):** the nightly run (no season given) also writes the game log of every regular season that starts after the current one, per the Worker's `/config/seasons/{league}-seasons` (`upcoming_seasons()`), so the app can show a season's schedule before the Worker makes it current. The case that prompted it was ECHL 2026-27 (season 78), which opens 2026-10-17 while 2025-26 (73) stays current until then. If the Worker's season list is unavailable, this step logs a warning and skips. `echl_stats.py` behaves the same way.
 
 **Real field/param differences from PWHL, confirmed live and written up in `docs/hockeytech-ahl-api-notes.md`:**
 - `feed=modulekit&view=roster` wants `season_id`, not `season` — sending `season` silently returns an empty roster rather than an error. `teamsbyseason` wants the opposite param name (`season`, not `season_id`).

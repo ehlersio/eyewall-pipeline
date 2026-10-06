@@ -723,12 +723,59 @@ def fetch_game_log(lg: League, sb, season_id: str) -> None:
     log.info(f"  {n} games upserted")
 
 
+def upcoming_seasons(lg: League, current_id) -> list[dict] | None:
+    """The league's next regular season(s) after the current one, from the
+    Worker's /config/seasons/{league}-seasons: regular seasons that start
+    after the current season does. [] when there's none yet (the AHL on
+    2026-10-05, already in 2026-27), None when the Worker's list is
+    unavailable or doesn't include the current season.
+
+    Their game logs are ingested nightly so the app can show a season's
+    schedule before it becomes current: ECHL 2026-27 (season 78) opens
+    2026-10-17 but the Worker keeps 2025-26 (73) current until then, so
+    {league}_game_log had no 2026-27 rows and the app's 2026-27 chip
+    (eyewallanalytics #449) had nothing to show. Same idea as pwhl_stats.py's
+    --upcoming-game-logs."""
+    seasons = get_hockeytech_seasons(lg.key)
+    if seasons is None:
+        return None
+    current = next((s for s in seasons if str(s.get("seasonId")) == str(current_id)), None)
+    if current is None or not current.get("startDate"):
+        return None
+    return sorted(
+        (
+            s
+            for s in seasons
+            if s.get("seasonType") == "regular"
+            and str(s.get("seasonId")) != str(current_id)
+            and (s.get("startDate") or "") > current["startDate"]
+        ),
+        key=lambda s: s["startDate"],
+    )
+
+
+def run_upcoming_game_logs(lg: League, sb=None, current_id=None) -> None:
+    """fetch_game_log() for every upcoming_seasons() season. Logs and
+    returns when the Worker can't say which they are."""
+    sb = sb or create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    if current_id is None:
+        current_id = resolve_current_season(lg)["season_id"]
+    upcoming = upcoming_seasons(lg, current_id)
+    if upcoming is None:
+        log.warning(f"  Can't tell {lg.label}'s upcoming seasons -- no upcoming game logs")
+        return
+    for s in upcoming:
+        log.info(f"  Upcoming {lg.label} season {s['seasonId']} ({s.get('seasonName')})")
+        fetch_game_log(lg, sb, str(s["seasonId"]))
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
 def run(lg: League, season_id: str | None = None) -> None:
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+    nightly = not season_id
     if season_id:
         season_type = resolve_season_type(lg, season_id)
     else:
@@ -743,10 +790,20 @@ def run(lg: League, season_id: str | None = None) -> None:
     fetch_goalie_stats(lg, sb, season_id, season_type)
     fetch_team_stats(lg, sb, season_id, season_type)
     fetch_game_log(lg, sb, season_id)
+    if nightly:
+        # The nightly run (no season given) also keeps the next season's
+        # schedule current -- see upcoming_seasons().
+        run_upcoming_game_logs(lg, sb, season_id)
 
     log.info(f"=== {lg.label} stats run complete ===")
 
 
 def main(lg: League) -> None:
-    """CLI: `python {league}_stats.py [season_id]` -- blank means current."""
-    run(lg, sys.argv[1] if len(sys.argv) > 1 else None)
+    """CLI: `python {league}_stats.py [season_id]` -- blank means current
+    (plus the upcoming seasons' game logs); `--upcoming-game-logs` runs
+    only the latter."""
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    if arg == "--upcoming-game-logs":
+        run_upcoming_game_logs(lg)
+    else:
+        run(lg, arg)

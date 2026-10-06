@@ -225,6 +225,11 @@ def scorebar(L):
          "GameStatusString": "2nd", "GameStatus": ""},
         {"ID": "999", "SeasonID": "1", "Date": "2001-01-01"},
         {"SeasonID": str(L.regular)},
+        # Next season's opener: written only by the nightly run's upcoming
+        # game-log pass (hockeytech_stats.upcoming_seasons).
+        {"ID": "1100", "SeasonID": str(L.next_season), "Date": "2026-10-17",
+         "HomeID": str(L.team_a), "VisitorID": str(L.team_b), "HomeGoals": "0",
+         "VisitorGoals": "0", "GameStatusString": "7:05 pm", "GameStatus": "1"},
     ]  # fmt: skip
 
 
