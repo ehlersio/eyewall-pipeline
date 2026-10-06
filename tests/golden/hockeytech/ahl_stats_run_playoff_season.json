@@ -519,6 +519,74 @@
     {
       "params": {
         "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "team": "335",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "team": "323",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "player_id": "6683",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "player"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
         "context": "overall",
         "feed": "statviewfeed",
         "key": "ccb91f29d6744675",
@@ -530,6 +598,59 @@
         "season": "92",
         "site_id": "3",
         "sort": "wins",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "team": "335",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "team": "323",
         "view": "players"
       },
       "referer": "https://theahl.com/",
@@ -668,7 +789,7 @@
           "pim": 0,
           "player_id": 6682,
           "plus_minus": 0,
-          "points": 0,
+          "points": 1,
           "pp_goals": 0,
           "season_id": 92,
           "season_type": "playoffs",
@@ -738,6 +859,24 @@
           "toi": "1800:00",
           "updated_at": "2026-01-15T17:00:00+00:00",
           "wins": 17
+        },
+        {
+          "gaa": null,
+          "goals_against": 0,
+          "gp": 0,
+          "losses": 0,
+          "ot_losses": 0,
+          "player_id": 7002,
+          "saves": 0,
+          "season_id": 92,
+          "season_type": "playoffs",
+          "shots_against": 0,
+          "shutouts": 0,
+          "sv_pct": null,
+          "team_id": 335,
+          "toi": null,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "wins": 0
         }
       ],
       "table": "ahl_goalie_seasons"

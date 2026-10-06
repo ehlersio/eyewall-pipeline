@@ -85,6 +85,7 @@ python pwhl_shot_events.py 9   # Specific season
 python pwhl_shot_events.py --backfill-goals    # Merge gameSummary onto already-ingested goal rows missing it
 python pwhl_shot_events.py --backfill-goals 9  # Backfill a specific season
 python pwhl_shot_events.py --game 338          # Single game (debug -- ingest + merge just this game)
+python pwhl_shot_events.py 8 --reingest        # Re-ingest every completed game of a season (idempotent; restores same-second shots dropped before 2026-07-04)
 python pwhl_salaries.py        # Salary scraper (PWHLPA PDF)
 python pwhl_salaries.py --dry-run  # Parse only, don't upsert
 python pwhl_news.py            # Fetch PWHL news and POST to Worker
@@ -893,8 +894,9 @@ python ahl_stats.py 90               # specific season_id (90 = 2025-26 Regular)
 ```
 
 **Real field/param differences from PWHL, confirmed live and written up in `docs/hockeytech-ahl-api-notes.md`:**
-- `feed=modulekit&view=roster` wants `season_id`, not `season` — sending `season` silently returns an empty roster rather than an error. `teamsbyseason` wants the opposite param name (`season`, not `season_id`).
+- `feed=modulekit&view=roster` wants `season_id`, not `season` — sending `season` silently returns an empty roster rather than an error. `teamsbyseason` takes `season_id` too: checked 2026-10-05, `season` is ignored and returns the current season's teams (ECHL `season=73` came back as season 77, without Iowa and Utah).
 - Roster is a flat list (no Forwards/Defenders/Goalies sections the way PWHL's is), height is hyphenated feet-inches (`"6-3"`, its own `_parse_height_inches()` — not PWHL's apostrophe-format regex), and `weight` is real data (PWHL's is always `"0"`, never ingested there).
+- **Skater and goalie season rows are per (player, team)** (2026-10). The league-wide `players` view has one row per player, his whole season under his last team, so a traded player vanished from his earlier teams and the last one got his totals (AHL 2025-26: Graeme Clarke 65 GP / 43 pts under BEL; 50 GP / 24 pts of it came with HER). Each team's rows now come from the same view with `team=<id>` (teams from `teamsbyseason`). That view lists a player's latest team with his season total, and can list a team he was only registered with, so a player listed by more than one team gets his per-team lines from his own `view=player` (`careerStats`), and his rows for teams he has no line with are deleted. Checked live against AHL season 90 and ECHL season 73: every player's lines add up to his league-wide GP and points. The league-wide view still feeds the `{league}_players` stubs (current team).
 - The skater `players` view has no `shooting_percentage`/`power_play_assists`/`short_handed_assists` fields at all — confirmed absent, not occasionally null — so `ahl_player_seasons` has no columns for them.
 - `wins` on the team-stats view is already the season total (regulation + OT/SO) — no PWHL-style `regulation_wins + non_reg_wins` addition needed. `ot_losses` and `shootout_losses` are reported as two separate columns, unlike PWHL's single combined `non_reg_losses`.
 - The game log comes from `feed=modulekit&view=scorebar` — a completely different view from PWHL's `feed=statviewfeed&view=schedule`, found via live network capture. It gives `HomeID`/`VisitorID` directly, no PWHL-style city-name-to-team_id mapping needed.

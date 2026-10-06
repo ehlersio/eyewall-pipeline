@@ -148,16 +148,38 @@ TEAM_ID_MAP = {
 # upsert's conflict key, so each run inserted another copy of them (84
 # skater + 12 goalie rows by 2026-06). Same failure the ECHL's Iowa and
 # Utah rows hit; see hockeytech_leagues.py (2026-09).
-TEAM_CODE_ALIASES = {"MON": "3"}
+#
+# The 2026-27 expansion teams are the same story: TEAM_ID_MAP files them
+# as "LV" and "SJS" (the app's codes), but HockeyTech's feed calls team 12
+# "VEG" in the 2026-27 preseason (season 10) and "VGS" in the regular
+# season (season 11), and team 13 "SJ" in both (teamsbyseason and
+# statviewfeed view=teams, checked 2026-10-05). Unmapped, every Las Vegas
+# and San Jose skater, goalie and standings row was skipped.
+TEAM_CODE_ALIASES = {"MON": "3", "VEG": "12", "VGS": "12", "SJ": "13"}
 
 CODE_TO_TEAM_ID = {code: team_id for team_id, code in TEAM_ID_MAP.items()} | TEAM_CODE_ALIASES
 
 
-def team_id_for(team_code: str) -> str | None:
-    """The team_id a feed row's team_code belongs to, or None for a code we
-    don't know. Callers skip rows they can't place rather than writing
-    team_id NULL -- see TEAM_CODE_ALIASES."""
+def team_id_for(team_code: str, team_link: str | None = None) -> str | None:
+    """The team_id a feed row belongs to, or None for a team we don't know.
+
+    `team_link` is the feed's own numeric team id for the row (statviewfeed
+    puts it in prop.team_code.teamLink, which extract_rows() copies to
+    row["_team_link"]). It's preferred when it names a team we know, since
+    codes drift between seasons (MON/MTL, VEG/VGS) while ids don't. The
+    code is the fallback for rows without one. Callers skip rows they
+    can't place rather than writing team_id NULL -- see TEAM_CODE_ALIASES."""
+    link = str(team_link or "").strip()
+    if link in TEAM_ID_MAP:
+        return link
     return CODE_TO_TEAM_ID.get((team_code or "").strip())
+
+
+def row_team_id(row: dict) -> str | None:
+    """team_id_for() a statviewfeed row: its teamLink first, then its
+    team_code with any clinch prefix ("x - MTL") stripped."""
+    code = (row.get("team_code") or "").split(" - ")[-1].strip()
+    return team_id_for(code, row.get("_team_link"))
 
 
 def warn_unresolved(unresolved: dict, kind: str) -> None:
@@ -259,6 +281,10 @@ def extract_rows(data: list | dict) -> list[dict]:
             if row:
                 # Tag with section title so caller can infer position group
                 row["_section"] = section.get("title", "")
+                # The feed's numeric team id for the row (see team_id_for).
+                link = ((item.get("prop") or {}).get("team_code") or {}).get("teamLink")
+                if link:
+                    row["_team_link"] = str(link)
                 rows.append(row)
     return rows
 
@@ -443,7 +469,7 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
     player_stubs = []
     for p in rows_raw:
         pid = p.get("player_id")
-        team_id = team_id_for(p.get("team_code", ""))
+        team_id = row_team_id(p)
         if not pid or not team_id:
             continue
         full_name = p.get("name", "")
@@ -467,7 +493,7 @@ def fetch_skater_stats(sb, season_id: str, season_type: str) -> None:
         if not pid:
             continue
         team_code = p.get("team_code", "")
-        team_id = team_id_for(team_code)
+        team_id = row_team_id(p)
         if not team_id:
             unresolved[team_code] = unresolved.get(team_code, 0) + 1
             continue
@@ -541,7 +567,7 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
     goalie_stubs = []
     for g in rows_raw:
         pid = g.get("player_id")
-        team_id = team_id_for(g.get("team_code", ""))
+        team_id = row_team_id(g)
         if not pid or not team_id:
             continue
         full_name = g.get("name", "")
@@ -565,7 +591,7 @@ def fetch_goalie_stats(sb, season_id: str, season_type: str) -> None:
         if not pid:
             continue
         team_code = g.get("team_code", "")
-        team_id = team_id_for(team_code)
+        team_id = row_team_id(g)
         if not team_id:
             unresolved[team_code] = unresolved.get(team_code, 0) + 1
             continue
@@ -766,22 +792,20 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
         log.warning(f"  No special teams data: {e}")
         data_special = None
 
-    # Build special teams map: team_code → row
+    # Build special teams map: team_id → row
     special_map = {}
     if data_special:
         for r in extract_rows(data_special):
-            raw = r.get("team_code", "")
-            code = raw.split(" - ")[-1].strip()
-            special_map[code] = r
+            special_map[row_team_id(r)] = r
 
     rows_raw = extract_rows(data)
     rows = []
 
     for t in rows_raw:
-        # team_code may have clinch prefixes like "x - MTL", "y - BOS" — strip them
+        # team_code may have clinch prefixes like "x - MTL", "y - BOS";
+        # row_team_id() strips them (and prefers the row's teamLink id)
         raw_code = t.get("team_code", "")
-        team_code = raw_code.split(" - ")[-1].strip()
-        team_id = team_id_for(team_code)
+        team_id = row_team_id(t)
         if not team_id:
             log.warning(f"  Unknown team_code: '{raw_code}' — skipping")
             continue
@@ -806,21 +830,21 @@ def fetch_team_stats(sb, season_id: str, season_type: str) -> None:
                 "goals_for": int(t.get("goals_for", 0) or 0),
                 "goals_against": int(t.get("goals_against", 0) or 0),
                 # Special teams from separate HockeyTech call (special=true)
-                "pp_pct": _parse_pct(special_map.get(team_code, {}).get("power_play_pct")),
-                "pk_pct": _parse_pct(special_map.get(team_code, {}).get("penalty_kill_pct")),
-                "pp_goals": int(special_map.get(team_code, {}).get("power_play_goals", 0) or 0),
-                "pp_opportunities": int(special_map.get(team_code, {}).get("power_plays", 0) or 0),
+                "pp_pct": _parse_pct(special_map.get(team_id, {}).get("power_play_pct")),
+                "pk_pct": _parse_pct(special_map.get(team_id, {}).get("penalty_kill_pct")),
+                "pp_goals": int(special_map.get(team_id, {}).get("power_play_goals", 0) or 0),
+                "pp_opportunities": int(special_map.get(team_id, {}).get("power_plays", 0) or 0),
                 "pk_goals_against": int(
-                    special_map.get(team_code, {}).get("power_play_goals_against", 0) or 0
+                    special_map.get(team_id, {}).get("power_play_goals_against", 0) or 0
                 ),
                 "times_shorthanded": int(
-                    special_map.get(team_code, {}).get("times_short_handed", 0) or 0
+                    special_map.get(team_id, {}).get("times_short_handed", 0) or 0
                 ),
                 "sh_goals_for": int(
-                    special_map.get(team_code, {}).get("short_handed_goals_for", 0) or 0
+                    special_map.get(team_id, {}).get("short_handed_goals_for", 0) or 0
                 ),
                 "sh_goals_against": int(
-                    special_map.get(team_code, {}).get("short_handed_goals_against", 0) or 0
+                    special_map.get(team_id, {}).get("short_handed_goals_against", 0) or 0
                 ),
                 "shots_for_pg": None,
                 "shots_against_pg": None,
