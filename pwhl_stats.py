@@ -85,7 +85,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from hockeytech_leagues import ended_in
-from pipeline_common import FetchError, hockeytech_statview_get
+from pipeline_common import FetchError, OnRosterMarker, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
 from season_lookup import (
@@ -367,11 +367,14 @@ def _existing_heights(sb) -> dict[int, int]:
     return {row["player_id"]: row["height_inches"] for row in (res.data or [])}
 
 
-def fetch_roster(sb, season_id: str) -> None:
-    """Fetch all team rosters and upsert to pwhl_players."""
+def fetch_roster(sb, season_id: str, mark_on_roster: bool = False) -> None:
+    """Fetch all team rosters and upsert to pwhl_players. `mark_on_roster`
+    (the nightly, current-season run only) also keeps pwhl_players.on_roster
+    current -- see pipeline_common.OnRosterMarker."""
     log.info("Fetching rosters...")
 
     known_heights = _existing_heights(sb)
+    marker = OnRosterMarker(sb, "pwhl_players", enabled=mark_on_roster)
 
     for team_id, team_code in TEAM_ID_MAP.items():
         try:
@@ -434,7 +437,11 @@ def fetch_roster(sb, season_id: str) -> None:
                     }
                 )
 
-        n = upsert_chunk(sb, "pwhl_players", players_to_upsert, "player_id")
+        n = marker.write(
+            int(team_id),
+            players_to_upsert,
+            lambda rows: upsert_chunk(sb, "pwhl_players", rows, "player_id"),
+        )
         log.info(f"  {team_code}: {n} players upserted")
         time.sleep(0.3)
 
@@ -1508,6 +1515,9 @@ def fetch_game_log(sb, season_id: str) -> None:
 
 
 def run(season_id: str | None = None) -> None:
+    # Only the nightly run (no season given) reads today's rosters, so only
+    # it marks pwhl_players.on_roster; a backfill of another season doesn't.
+    nightly = not season_id
     season_id = season_id or PWHL_SEASON
     season_type = _resolve_season_type(season_id)
     if season_type is None:
@@ -1536,7 +1546,7 @@ def run(season_id: str | None = None) -> None:
     # running right after a correct fetch_roster() write in the same run).
     fetch_skater_stats(sb, season_id, season_type)
     fetch_goalie_stats(sb, season_id, season_type)
-    fetch_roster(sb, season_id)
+    fetch_roster(sb, season_id, mark_on_roster=nightly)
     fetch_team_stats(sb, season_id, season_type)
     fetch_game_log(sb, season_id)
 

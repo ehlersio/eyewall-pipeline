@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from hockeytech_leagues import HOCKEYTECH_BASE, League, ended_in
-from pipeline_common import FetchError, hockeytech_statview_get
+from pipeline_common import FetchError, OnRosterMarker, hockeytech_statview_get
 from season_lookup import get_hockeytech_season, get_hockeytech_seasons
 
 load_dotenv()
@@ -254,8 +254,13 @@ def _one_row_per_player(roster: list, team_id: str) -> list[dict]:
     return list(by_player.values())
 
 
-def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -> None:
+def fetch_roster(
+    lg: League, sb, season_id: str, season_type: str = "regular", mark_on_roster: bool = False
+) -> None:
     """Fetch every team's roster and upsert to {league}_players.
+
+    `mark_on_roster` (the nightly, current-season run only) also keeps
+    {league}_players.on_roster current -- see pipeline_common.OnRosterMarker.
 
     Unlike pwhl_stats.py's fetch_roster(), this is a single flat list per
     team (no Forwards/Defenders/Goalies sections -- position comes off each
@@ -266,6 +271,8 @@ def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -
     there is expected and logged at info, not as a warning.
     """
     log.info("Fetching rosters...")
+    table = f"{lg.key}_players"
+    marker = OnRosterMarker(sb, table, enabled=mark_on_roster)
 
     for team_id, team_code in lg.team_id_map.items():
         try:
@@ -316,7 +323,11 @@ def fetch_roster(lg: League, sb, season_id: str, season_type: str = "regular") -
                 }
             )
 
-        n = upsert_chunk(sb, f"{lg.key}_players", players_to_upsert, "player_id")
+        n = marker.write(
+            int(team_id),
+            players_to_upsert,
+            lambda rows: upsert_chunk(sb, table, rows, "player_id"),
+        )
         log.info(f"  {team_code}: {n} players upserted")
         time.sleep(0.3)
 
@@ -1003,7 +1014,8 @@ def run(lg: League, season_id: str | None = None) -> None:
 
     log.info(f"=== {lg.label} stats run: season_id={season_id} season_type={season_type} ===")
 
-    fetch_roster(lg, sb, season_id, season_type)
+    # Only the nightly run's roster is today's, so only it marks on_roster.
+    fetch_roster(lg, sb, season_id, season_type, mark_on_roster=nightly)
     fetch_skater_stats(lg, sb, season_id, season_type)
     fetch_goalie_stats(lg, sb, season_id, season_type)
     fetch_team_stats(lg, sb, season_id, season_type)

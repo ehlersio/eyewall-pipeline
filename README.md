@@ -649,7 +649,7 @@ All PWHL modules use HockeyTech API (no authentication required) and write to `p
 Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 regular, `9` for 2025-26 playoffs).
 
 **What it does:**
-- `fetch_roster()` — upserts to `pwhl_players`
+- `fetch_roster()` — upserts to `pwhl_players`; the nightly run (no season given) also sets `on_roster` (see the `pwhl_players` row under Database Schema)
 - `fetch_skater_stats()` — upserts to `pwhl_player_seasons`
 - `fetch_goalie_stats()` — upserts to `pwhl_goalie_seasons`
 - `fetch_team_stats()` — two HockeyTech calls (`special=false` + `special=true`): standings + PP%/PK%/special teams raw counts → `pwhl_team_seasons`
@@ -1120,7 +1120,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 ### PWHL Tables
 | Table | Description |
 |-------|-------------|
-| `pwhl_players` | Player master (player_id, first_name, last_name, position, team_id). **No season dimension** — `on_conflict="player_id"`, one row per player reflecting their current team assignment, not versioned historically. |
+| `pwhl_players` | Player master (player_id, first_name, last_name, position, team_id). **No season dimension** — `on_conflict="player_id"`, one row per player reflecting their current team assignment, not versioned historically. `on_roster` (2026-10, `docs/2026-10-06_on_roster.sql`): true for players on their team's roster feed in the last nightly run, false for the team's other rows (released, sent down, traded), null if never marked; the Worker's Roster tab and call-up watch hide false. Shared by `ahl_players`/`echl_players` and written by `pipeline_common.OnRosterMarker`. An explicit-season backfill doesn't touch it. Until the column exists the ingest logs once per run and writes rosters without it. |
 | `pwhl_player_seasons` | Per-player per-season stats (GP, G, A, PTS, shots, PP/SH/GW goals, +/-, PIM, shot_pct) |
 | `pwhl_goalie_seasons` | Per-goalie per-season stats (GP, W, L, OTL, GAA, SV%, SO, saves, GA) |
 | `pwhl_team_seasons` | Per-team per-season stats + PP%/PK%/special teams + Corsi/Fenwick + reg_wins/non_reg_wins |
@@ -1144,7 +1144,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 ### AHL Tables
 | Table | Description |
 |-------|-------------|
-| `ahl_players` | Player master. Unlike `pwhl_players`, carries a real `weight_lbs` (AHL's roster feed has real weight data; PWHL's is always `"0"` and never ingested there) |
+| `ahl_players` | Player master. `on_roster` as in `pwhl_players` (set by `hockeytech_stats.fetch_roster()` on the nightly run). Unlike `pwhl_players`, carries a real `weight_lbs` (AHL's roster feed has real weight data; PWHL's is always `"0"` and never ingested there) |
 | `ahl_player_seasons` | Per-player per-season stats (GP, G, A, PTS, +/-, PIM, shots, PP/SH goals). No `shot_pct`/`pp_assists`/`sh_assists` columns — confirmed absent from AHL's `players` view entirely, not just occasionally null |
 | `ahl_goalie_seasons` | Per-goalie per-season stats (GP, W/L/OTL, SV%, GAA, shutouts, TOI as HockeyTech's `MM:SS` text) |
 | `ahl_team_seasons` | Per-team per-season stats + PP%/PK%/special-teams counts. `wins` is already the season total (no `regulation_wins`/`non_reg_wins` split needed, unlike PWHL); `ot_losses`/`shootout_losses` are separate columns, unlike PWHL's combined `non_reg_losses` |
