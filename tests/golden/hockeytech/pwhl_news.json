@@ -1,0 +1,117 @@
+{
+  "posts": [
+    {
+      "articles": [
+        {
+          "bg": "#222222",
+          "excerpt": "The VICTOIRE won in Laval.",
+          "id": "athletic-pwhl-cb8d18f15f044adc",
+          "imageUrl": null,
+          "publishedAt": "2026-01-15T01:00:00+00:00",
+          "source": "athletic-pwhl",
+          "sourceName": "The Athletic",
+          "title": "Game recap",
+          "url": "https://www.nytimes.com/athletic/rss/womens-hockey/recap"
+        },
+        {
+          "bg": "#d4a017",
+          "excerpt": "The VICTOIRE won in Laval.",
+          "id": "sportsnet-pwhl-0ed785faa67a6942",
+          "imageUrl": null,
+          "publishedAt": "2026-01-15T01:00:00+00:00",
+          "source": "sportsnet-pwhl",
+          "sourceName": "Sportsnet",
+          "title": "Game recap",
+          "url": "https://www.sportsnet.ca/feed/recap"
+        },
+        {
+          "bg": "#c8102e",
+          "excerpt": "The VICTOIRE won in Laval.",
+          "id": "hockeynews-pwhl-63969e1d3c6555fb",
+          "imageUrl": null,
+          "publishedAt": "2026-01-15T01:00:00+00:00",
+          "source": "hockeynews-pwhl",
+          "sourceName": "Hockey Writers",
+          "title": "Game recap",
+          "url": "https://thehockeywriters.com/feed/recap"
+        },
+        {
+          "bg": "#6a0dad",
+          "excerpt": "The VICTOIRE won in Laval.",
+          "id": "whl-pwhl-82c4ef2cf84f39af",
+          "imageUrl": null,
+          "publishedAt": "2026-01-15T01:00:00+00:00",
+          "source": "whl-pwhl",
+          "sourceName": "Women's Hockey Life",
+          "title": "Game recap",
+          "url": "https://womenshockeylife.com/feed/recap"
+        },
+        {
+          "bg": "#222222",
+          "excerpt": "",
+          "id": "athletic-pwhl-4896b9757ba1d27f",
+          "imageUrl": null,
+          "publishedAt": "2026-01-13T09:30:00+00:00",
+          "source": "athletic-pwhl",
+          "sourceName": "The Athletic",
+          "title": "PWHL announces schedule",
+          "url": "https://www.nytimes.com/athletic/rss/womens-hockey/pwhl"
+        },
+        {
+          "bg": "#d4a017",
+          "excerpt": "",
+          "id": "sportsnet-pwhl-ba64ea7f1ca31d15",
+          "imageUrl": null,
+          "publishedAt": "2026-01-13T09:30:00+00:00",
+          "source": "sportsnet-pwhl",
+          "sourceName": "Sportsnet",
+          "title": "PWHL announces schedule",
+          "url": "https://www.sportsnet.ca/feed/pwhl"
+        },
+        {
+          "bg": "#c8102e",
+          "excerpt": "",
+          "id": "hockeynews-pwhl-2ec7bb3580408d83",
+          "imageUrl": null,
+          "publishedAt": "2026-01-13T09:30:00+00:00",
+          "source": "hockeynews-pwhl",
+          "sourceName": "Hockey Writers",
+          "title": "PWHL announces schedule",
+          "url": "https://thehockeywriters.com/feed/pwhl"
+        },
+        {
+          "bg": "#6a0dad",
+          "excerpt": "",
+          "id": "whl-pwhl-bbbdaad96755f18e",
+          "imageUrl": null,
+          "publishedAt": "2026-01-13T09:30:00+00:00",
+          "source": "whl-pwhl",
+          "sourceName": "Women's Hockey Life",
+          "title": "PWHL announces schedule",
+          "url": "https://womenshockeylife.com/feed/pwhl"
+        }
+      ],
+      "method": "POST",
+      "url": "https://worker.test/pwhl/news/ingest"
+    }
+  ],
+  "reads": [],
+  "requests": [
+    {
+      "url": "https://www.nytimes.com/athletic/rss/womens-hockey/"
+    },
+    {
+      "url": "https://www.sportsnet.ca/feed/"
+    },
+    {
+      "url": "https://thehockeywriters.com/feed/"
+    },
+    {
+      "url": "https://womenshockeylife.com/feed"
+    },
+    {
+      "url": "https://www.oursportscentral.com/feeds/l277.xml"
+    }
+  ],
+  "writes": []
+}

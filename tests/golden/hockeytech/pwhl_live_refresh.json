@@ -1,0 +1,111 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "modulekit",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "limit": "100",
+        "numberofdaysahead": "1",
+        "numberofdaysback": "1",
+        "site_id": "0",
+        "view": "scorebar"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "game_id",
+      "rows": [
+        {
+          "away_score": 0,
+          "game_id": 1010,
+          "game_state": "7:00PM",
+          "game_status_code": 1,
+          "home_score": 0,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 0,
+          "game_id": 1022,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 1,
+          "ot": true,
+          "shootout": false
+        },
+        {
+          "away_score": 0,
+          "game_id": 1100,
+          "game_state": "7:05 pm",
+          "game_status_code": 1,
+          "home_score": 0,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 0,
+          "game_id": 999,
+          "game_state": "",
+          "game_status_code": null,
+          "home_score": 0,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 1,
+          "game_id": 1011,
+          "game_state": "2nd",
+          "game_status_code": null,
+          "home_score": 1,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 1,
+          "game_id": 1023,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 5,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 2,
+          "game_id": 1001,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 4,
+          "ot": false,
+          "shootout": false
+        },
+        {
+          "away_score": 2,
+          "game_id": 1020,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 3,
+          "ot": true,
+          "shootout": false
+        },
+        {
+          "away_score": 3,
+          "game_id": 1021,
+          "game_state": "Final",
+          "game_status_code": 4,
+          "home_score": 2,
+          "ot": false,
+          "shootout": true
+        }
+      ],
+      "table": "pwhl_game_log"
+    }
+  ]
+}
