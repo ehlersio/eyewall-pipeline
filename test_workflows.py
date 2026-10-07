@@ -63,6 +63,22 @@ def test_failures_notify_the_worker(name):
 
 
 @pytest.mark.parametrize("name", [n for n in ALL if n != "ci.yml"])
+def test_successes_report_ok_to_the_worker(name):
+    """A clean run reports status ok under the same source, so the Worker's
+    health:ops record (and /admin/health) clears instead of showing the last
+    failure until the next one. The Worker never pushes for ok."""
+    for job, body in jobs(name).items():
+        step_map = dict(steps(body))
+        ok = step_map.get("Report success")
+        assert ok, f"{name}:{job} has no Report success step"
+        assert "if: success()" in ok
+        assert '/ops/notify?secret=$POLL_SECRET"' in ok
+        assert f'\\"source\\":\\"{name}\\"' in ok
+        assert '\\"status\\":\\"ok\\"' in ok
+        assert "failed" not in ok.split("run:")[1]
+
+
+@pytest.mark.parametrize("name", [n for n in ALL if n != "ci.yml"])
 def test_writer_workflows_do_not_overlap(name):
     t = text(name)
     assert re.search(r"(?m)^concurrency:\n  group: \S+\n  cancel-in-progress: false$", t), name
@@ -83,7 +99,7 @@ def test_dispatched_workflows_skip_a_scheduled_rerun(name, job):
     assert "GH_TOKEN: ${{ github.token }}" in guard
     assert f"--workflow {name} --status success" in guard
     for step_name, body in st[1:]:
-        if step_name == "Notify on failure":
+        if step_name in ("Notify on failure", "Report success"):
             continue
         assert GUARD_IF in body, f"{name}: step {step_name!r} ignores the guard"
 

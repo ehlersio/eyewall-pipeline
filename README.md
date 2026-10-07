@@ -1207,7 +1207,7 @@ GitHub's cron runs 3–8 hours late for this repo (the 07:00 UTC nightlies start
 
 Every writer workflow has `concurrency: { group: <workflow>, cancel-in-progress: false }`, so a manual dispatch that overlaps a late scheduled run queues instead of double-running the delete-then-insert writers (`line_combinations.py`, `projected_lines.py`, `injuries.py`, `special_teams.py`), and every job has a `timeout-minutes`.
 
-**Failure alerts:** every workflow except `ci.yml` ends with a "Notify on failure" step that POSTs `{source: "<workflow file>", status: "failure", title, body: <run url>, url: <run url>}` to the Worker's `/ops/notify?secret=…` (secrets `WORKER_URL`, falling back to the production Worker URL, and `EYEWALL_POLL_SECRET`). The Worker records it under `health:ops:<workflow>` (shown on `/admin/health`) and sends a push to the devices subscribed to ops alerts, at most one per workflow per 30 minutes. `ci.yml` is left out: a failing PR check is the author's feedback, not an ops event.
+**Failure alerts:** every workflow except `ci.yml` ends with a "Notify on failure" step that POSTs `{source: "<workflow file>", status: "failure", title, body: <run url>, url: <run url>}` to the Worker's `/ops/notify?secret=…` (secrets `WORKER_URL`, falling back to the production Worker URL, and `EYEWALL_POLL_SECRET`). The Worker records it under `health:ops:<workflow>` (shown on `/admin/health`) and sends a push to the devices subscribed to ops alerts, at most one per workflow per 30 minutes. A matching "Report success" step posts `status: "ok"` on a clean run, which clears the record (the Worker never pushes for an ok). `ci.yml` is left out: a failing PR check is the author's feedback, not an ops event.
 
 ---
 
