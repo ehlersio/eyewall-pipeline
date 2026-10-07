@@ -31,16 +31,26 @@ Usage:
     python trivia_questions.py --tier medium              # today, medium only (all 44 teams)
     python trivia_questions.py                             # today, both tiers
     python trivia_questions.py --date 2026-08-10 --dry-run # preview without writing
+    python trivia_questions.py --sport ahl                 # AHL only (ahl-nightly.yml); echl likewise
+
+AHL/ECHL (2026-10): same two tiers from {league}_player_seasons -- easy
+league-wide, medium per team -- with the same guardrail, and the same
+fall-back to last season's real numbers (worded as that season's) while the
+new one has nobody with HOCKEYTECH_MIN_GP games. "both" means NHL + PWHL, as
+it always has; AHL/ECHL are only generated when asked for by name.
 """
 
 import argparse
 import random
 from datetime import UTC, date, datetime
 
+import hockeytech_stats
 from ai_client import generate
 from ai_scouting import LOCALES
 from db import NHL_SEASON, get_client
+from hockeytech_leagues import AHL, ECHL, League
 from pwhl_stats import PWHL_SEASON, TEAM_ID_MAP
+from season_lookup import get_hockeytech_seasons
 
 supabase = get_client()
 
@@ -75,6 +85,17 @@ STAT_CATEGORIES = [
 
 NHL_MIN_GP = 10
 PWHL_MIN_GP = 5
+# AHL/ECHL play 72 games, close to the NHL's 82, so the NHL's floor.
+HOCKEYTECH_MIN_GP = 10
+
+HOCKEYTECH_LEAGUES = {"ahl": AHL, "echl": ECHL}
+
+# (league-wide, per-team) scope labels per locale; never a team or city name
+# (see the module docstring).
+HOCKEYTECH_SCOPES = {
+    "ahl": {"en": "AHL skaters", "fr": "patineurs de la LAH"},
+    "echl": {"en": "ECHL skaters", "fr": "patineurs de l'ECHL"},
+}
 
 
 def pick_category(question_date: date) -> dict:
@@ -175,7 +196,8 @@ def for_season(category: dict, season: int) -> dict:
     The category's labels about a finished season instead of "this season".
     `past_season` also tells build_question_row to word the question itself
     from a template: asked to phrase "points in 2025-26", the model wrote
-    "this season" anyway, which would be false.
+    "this season" anyway, which would be false. `season` is NHL-style
+    (20252026); HockeyTech leagues pass their season's start year that way.
     """
     return {
         **category,
@@ -247,6 +269,96 @@ def get_qualified_pwhl_players(stat: str, team: str | None) -> list[dict]:
             continue
         out.append({"name": name, "value": r[stat] or 0})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Real-value sourcing — AHL / ECHL
+# ---------------------------------------------------------------------------
+
+
+def get_qualified_hockeytech_players(
+    lg: League, stat: str, team: str | None, season_id: int
+) -> list[dict]:
+    """A regular season's skaters with HOCKEYTECH_MIN_GP games, best first.
+    A traded player has a row per team; league-wide (team None) his best
+    single-team line competes -- and two lines for one name can't both be
+    options (build_options compares names)."""
+    q = (
+        supabase.table(f"{lg.key}_player_seasons")
+        .select(f"player_id, team_id, gp, {stat}")
+        .eq("season_id", int(season_id))
+        .eq("season_type", "regular")
+        .gte("gp", HOCKEYTECH_MIN_GP)
+    )
+    if team:
+        team_id = lg.code_to_team_id.get(team)
+        if team_id is None:
+            return []
+        q = q.eq("team_id", int(team_id))
+    rows = q.order(stat, desc=True).limit(60).execute().data or []
+
+    ids = list(dict.fromkeys(r["player_id"] for r in rows))
+    if not ids:
+        return []
+    name_rows = (
+        supabase.table(f"{lg.key}_players")
+        .select("player_id, first_name, last_name")
+        .in_("player_id", ids)
+        .execute()
+        .data
+        or []
+    )
+    names = {
+        r["player_id"]: f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip()
+        for r in name_rows
+    }
+
+    out, seen = [], set()
+    for r in rows:
+        name = names.get(r["player_id"])
+        if not name or r["player_id"] in seen:
+            continue
+        seen.add(r["player_id"])
+        out.append({"name": name, "value": r[stat] or 0})
+    return out
+
+
+def previous_hockeytech_regular_season(lg: League, current_id: int) -> dict | None:
+    """The latest regular season that started before the current one (by
+    the Worker's season list), or None if the Worker can't say."""
+    seasons = get_hockeytech_seasons(lg.key) or []
+    current = next((x for x in seasons if int(x["seasonId"]) == int(current_id)), None)
+    if current is None:
+        return None
+    earlier = [
+        x
+        for x in seasons
+        if x.get("seasonType") == "regular" and int(x["startYear"]) < int(current["startYear"])
+    ]
+    return max(earlier, key=lambda x: int(x["startYear"]), default=None)
+
+
+def hockeytech_question_source(
+    lg: League, category: dict, team: str | None
+) -> tuple[dict, list[dict]]:
+    """This regular season's qualified players, or -- early in a season, or
+    during the playoffs -- the previous regular season's, relabeled "in
+    2025-26" like nhl_question_source()."""
+    current = hockeytech_stats.resolve_current_season(lg)
+    players: list[dict] = []
+    if current["season_type"] == "regular":
+        players = get_qualified_hockeytech_players(lg, category["key"], team, current["season_id"])
+        if build_options(players):
+            return category, players
+    prior = previous_hockeytech_regular_season(lg, current["season_id"])
+    if prior:
+        prior_players = get_qualified_hockeytech_players(
+            lg, category["key"], team, prior["seasonId"]
+        )
+        if build_options(prior_players):
+            start = int(prior["startYear"])
+            return for_season(category, start * 10000 + start + 1), prior_players
+    return category, players
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +498,21 @@ def run_easy(question_date: date, sport: str, dry_run: bool, locale: str = "en")
             )
             fail += 1
 
+    if sport in HOCKEYTECH_LEAGUES:
+        lg = HOCKEYTECH_LEAGUES[sport]
+        ht_category, players = hockeytech_question_source(lg, category, team=None)
+        scope_label = HOCKEYTECH_SCOPES[sport][locale]
+        row = build_question_row(
+            question_date, "easy", sport, "ALL", ht_category, players, scope_label, locale
+        )
+        if row and upsert_question(row, dry_run):
+            ok += 1
+        else:
+            print(
+                f"  [easy/{sport}/{locale}] skipped — insufficient qualified players or generation failed"
+            )
+            fail += 1
+
     return ok, fail
 
 
@@ -430,6 +557,23 @@ def run_medium(
                 print(f"  [medium/pwhl/{abbr}/{locale}] skipped")
                 fail += 1
 
+    if sport in HOCKEYTECH_LEAGUES:
+        lg = HOCKEYTECH_LEAGUES[sport]
+        scope_label = "patineurs de cette équipe" if locale == "fr" else "skaters on this team"
+        # team_id_map also keeps historical franchises (AHL BRI, ECHL IA/
+        # UTA); they have no players this season and are skipped before
+        # any model call.
+        for abbr in lg.team_id_map.values():
+            team_category, players = hockeytech_question_source(lg, category, team=abbr)
+            row = build_question_row(
+                question_date, "medium", sport, abbr, team_category, players, scope_label, locale
+            )
+            if row and upsert_question(row, dry_run):
+                ok += 1
+            else:
+                print(f"  [medium/{sport}/{abbr}/{locale}] skipped")
+                fail += 1
+
     return ok, fail
 
 
@@ -457,11 +601,12 @@ def run(question_date: date, tier: str, sport: str, dry_run: bool, locale: str =
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate daily trivia questions")
     parser.add_argument("--tier", choices=["easy", "medium", "both"], default="both")
-    # nightly.yml passes --sport nhl, pwhl-nightly.yml passes --sport pwhl —
-    # each pipeline generates only its own league's rows. "both" (the
-    # manual/dry-run default) exists so a human running this by hand
-    # doesn't need to remember to invoke it twice.
-    parser.add_argument("--sport", choices=["nhl", "pwhl", "both"], default="both")
+    # nightly.yml passes --sport nhl, pwhl-nightly.yml --sport pwhl,
+    # ahl-/echl-nightly.yml --sport ahl/echl — each pipeline generates only
+    # its own league's rows. "both" (the manual/dry-run default, NHL +
+    # PWHL) exists so a human running this by hand doesn't need to
+    # remember to invoke it twice.
+    parser.add_argument("--sport", choices=["nhl", "pwhl", "ahl", "echl", "both"], default="both")
     parser.add_argument("--date", default=None, help="YYYY-MM-DD, defaults to today (UTC)")
     parser.add_argument("--dry-run", action="store_true", help="Print questions, skip DB writes")
     parser.add_argument(

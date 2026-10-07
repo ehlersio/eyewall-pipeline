@@ -130,3 +130,10 @@ def test_pwhl_nightly_takes_a_season_id():
 def test_sbnation_has_no_push_trigger():
     on = text("sbnation-ingest.yml").split("\njobs:\n")[0]
     assert "push:" not in on
+
+
+@pytest.mark.parametrize("league", ["ahl", "echl"])
+def test_hockeytech_nightlies_run_milestones_and_trivia(league):
+    t = text(f"{league}-nightly.yml")
+    assert f"python hockeytech_milestones.py {league}\n" in t
+    assert f"python trivia_questions.py --sport {league}\n" in t

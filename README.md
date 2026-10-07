@@ -100,6 +100,8 @@ python ahl_shot_events.py --game 1028362   # single game (debug)
 python ahl_penalty_shots.py                # penalty shots (makes + misses)
 python ahl_live_refresh.py                 # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python ahl_news.py                         # AHL news -> Worker
+python hockeytech_milestones.py ahl        # milestones, last 3 ET days (--date/--since/--game)
+python trivia_questions.py --sport ahl     # daily AHL trivia (easy + medium)
 
 # ECHL — run individually (no orchestrator yet)
 python echl_stats.py                       # current season (live-resolved)
@@ -109,6 +111,8 @@ python echl_shot_events.py                 # shot events + goals with coordinate
 python echl_penalty_shots.py               # penalty shots (makes + misses)
 python echl_live_refresh.py                # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python echl_news.py                        # ECHL news -> Worker
+python hockeytech_milestones.py echl       # milestones, last 3 ET days
+python trivia_questions.py --sport echl    # daily ECHL trivia (easy + medium)
 ```
 
 ---
@@ -614,8 +618,11 @@ Fixed by removing team names from the prompt entirely for medium tier — the fr
 ```bash
 python trivia_questions.py --sport nhl    # what nightly.yml calls — NHL only
 python trivia_questions.py --sport pwhl   # what pwhl-nightly.yml calls — PWHL only, first-ever AI step in that workflow
-python trivia_questions.py --dry-run      # preview without writing, both sports
+python trivia_questions.py --sport ahl    # what ahl-nightly.yml calls (echl likewise, 2026-10)
+python trivia_questions.py --dry-run      # preview without writing, NHL + PWHL
 ```
+
+**AHL/ECHL (2026-10):** the same tiers from `{league}_player_seasons` (medium for every team in the league config), with the same guardrail and the same fallback to last regular season's real numbers (worded "in 2025–26") while the current season has nobody with 10 GP, or during the playoffs. Only generated when asked for by name; `--sport both` still means NHL + PWHL. About 130 more model calls a night per league (1 easy + ~32 medium, × 2 locales).
 
 Writes to `trivia_questions` (public-read, no owner — same RLS posture as `player_narratives`) via `on_conflict=question_date,tier,sport,team`. Schema + RLS: `docs/session92_trivia_tables.sql`.
 
@@ -816,6 +823,8 @@ python pwhl_news.py    # Fetch and POST to Worker
 **Worker endpoint:** `POST /pwhl/news/ingest` — merges new articles with existing cached articles, deduplicates by ID, keeps top 60, stores in `pwhl:news` KV with a 25hr TTL (fixed from 30min during the news-ingestion investigation — the short TTL meant `pwhl:news` sat empty most of the day between this script's own infrequent runs).
 
 ### `pwhl_milestones.py`
+A thin wrapper over `hockeytech_milestones.py` since 2026-10, which serves AHL/ECHL too (see the AHL section); PWHL output unchanged, pinned by `test_milestones_characterization.py`.
+
 Mirrors `milestones.py` (NHL) in structure — see that module's entry above for the shared detection categories. Same shared `milestones` table, `is_pwhl=true`. Key differences from the NHL version:
 - Thresholds are tuned to real PWHL scoring volume (30 GP/season, not NHL's 82) rather than scaled proportionally — season goals 15/20, season points 20/30, career points 50/100, career wins 25/50. All verified against real data (career wins confirmed 2026-08-14: leader is Ann-Renée Desbiens at 42, 25 already fired for the top 3 goalies, 50 is a real future target).
 - Same 3-day ET catch-up window and as-of-date threshold totals as `milestones.py` (2026-10).
@@ -1001,6 +1010,20 @@ python ahl_news.py
 ```
 
 **Sources — all 3 AHL-scoped by construction, unlike PWHL's, so no keyword filter (`AHL_KEYWORDS`) is needed anywhere in this file:** `theahl.com/feed` (the official league site — no PWHL equivalent exists, since pwhl.com has no news RSS at all), `thehockeywriters.com/category/ahl/feed/` (a dedicated AHL category feed), and `oursportscentral.com/feeds/l17.xml` (AHL press releases, league id 17 on that site — mirrors PWHL's `osc-pwhl` pattern on the same site).
+
+### `hockeytech_milestones.py` (2026-10)
+`pwhl_milestones.py` generalised over `League`, so AHL and ECHL get milestones (audit 2026-10-06 §8). Same shared `milestones` table and `milestone_type`/`event_key` values. AHL/ECHL rows have `is_pwhl = false`, `sport = 'ahl'|'echl'` and `season` = the HockeyTech season_id; NHL/PWHL rows are untouched. eyewall-poller filters AHL/ECHL on `sport` + `season`. The `sport` column comes from `docs/2026-10-07_milestones_sport.sql`; until that's run, the AHL/ECHL upsert logs once and moves on. Differences from PWHL, all from the data:
+- **Thresholds** are from real 2025-26 scoring (72 games; via the Worker's `/{league}/league-players`): season goals 20/30 (AHL 79/9 players reached them, ECHL 71/12) and season points 50/70 (AHL 63/2, ECHL 56/6).
+- **No career milestones.** `{league}_player_seasons` only holds the seasons this pipeline has ingested, so summing it isn't a career total. A player's earlier seasons aren't there, so those totals would be wrong.
+- **Shutouts** come from `{league}_goalie_game_box`, because goal rows don't name the goalie. The goalie must be his team's only one with ice time, and the opponent must have no goal rows at all, empty-net goals included.
+- **Shootout attempts** (period 7) aren't counted as goals. A traded player's season total sums his team rows, and the milestone names the team he played for that night.
+
+Nightly in `ahl-/echl-nightly.yml` after the Elo step, followed by `trivia_questions.py --sport ahl|echl`.
+
+```bash
+python hockeytech_milestones.py ahl --since 2026-10-02   # backfill the season so far
+python hockeytech_milestones.py echl --game 24296        # single game (debug)
+```
 
 ---
 

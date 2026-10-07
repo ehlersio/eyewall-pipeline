@@ -1,0 +1,120 @@
+[
+  {
+    "description": "First11 Last11 reaches 20 goals this season",
+    "detail": {
+      "season_goals": 21
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "season_goals_20",
+    "opponent": null,
+    "player_id": 11,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  },
+  {
+    "description": "First11 Last11 reaches 50 points this season",
+    "detail": {
+      "season_points": 50
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "season_points_50",
+    "opponent": null,
+    "player_id": 11,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  },
+  {
+    "description": "First12 Last12 reaches 30 goals this season",
+    "detail": {
+      "season_goals": 30
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "season_goals_30",
+    "opponent": null,
+    "player_id": 12,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  },
+  {
+    "description": "Natural hat trick — First11 Last11 (TOR)",
+    "detail": {
+      "assists": [
+        [
+          12,
+          null
+        ],
+        [
+          13,
+          null
+        ],
+        [
+          null,
+          null
+        ]
+      ],
+      "goal_periods": [
+        1,
+        1,
+        2
+      ],
+      "goal_time_seconds": [
+        100,
+        200,
+        300
+      ]
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "natural_hat_trick",
+    "opponent": "ROC",
+    "player_id": 11,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  },
+  {
+    "description": "Shorthanded goal — First12 Last12 (TOR)",
+    "detail": {
+      "period_id": 3,
+      "time_seconds": 400
+    },
+    "event_key": "3_400",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "sh_goal",
+    "opponent": "ROC",
+    "player_id": 12,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  },
+  {
+    "description": "Shutout — First901 Last901 (TOR)",
+    "detail": {},
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 1001,
+    "is_pwhl": false,
+    "milestone_type": "shutout",
+    "opponent": "ROC",
+    "player_id": 901,
+    "season": 90,
+    "sport": "ahl",
+    "team": "TOR"
+  }
+]

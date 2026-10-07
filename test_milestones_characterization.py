@@ -161,3 +161,140 @@ def test_pwhl_run_for_game():
     sb = FakeClient(pwhl_tables())
     pwhl_milestones.run_for_game(sb, 270)
     assert_golden("pwhl_run_for_game", upserts(sb))
+
+
+# ── AHL/ECHL ─────────────────────────────────────────────────────────
+
+from datetime import date  # noqa: E402
+
+import pytest  # noqa: E402
+
+import hockeytech_milestones  # noqa: E402
+from hockeytech_leagues import AHL, ECHL  # noqa: E402
+
+TOR, ROC = 335, 323  # AHL ids; ECHL fixtures reuse them (codes resolve to None)
+
+
+def ahl_tables(lg):
+    k = lg.key
+    games = [
+        {"game_id": 1001, "season_id": 90, "game_date": DAY, "home_team_id": TOR,
+         "away_team_id": ROC, "home_score": 4, "away_score": 0, "game_state": "Final"},
+        {"game_id": 1002, "season_id": 90, "game_date": DAY, "home_team_id": ROC,
+         "away_team_id": TOR, "home_score": 1, "away_score": 2, "game_state": "Final"},
+        {"game_id": 1003, "season_id": 90, "game_date": LATER, "home_team_id": TOR,
+         "away_team_id": ROC, "home_score": 1, "away_score": 0, "game_state": "Final"},
+    ]  # fmt: skip
+    events = [
+        # 1001: natural hat trick for 11, SH goal by 12; shootout row ignored.
+        g(1001, 1, 100, TOR, 11, a1=12),
+        g(1001, 1, 200, TOR, 11, a1=13),
+        g(1001, 2, 300, TOR, 11),
+        g(1001, 3, 400, TOR, 12, a1=11, sh=True),
+        g(1001, 7, 0, ROC, 21),  # shootout attempt: not a goal against
+        s(1001, ROC, 901),
+        # 1002: ROC's only goal is into an empty net, so TOR's goalie 901
+        # doesn't get a shutout even with 0 goals against in the box score.
+        g(1002, 1, 50, TOR, 13),
+        g(1002, 2, 60, TOR, 13),
+        g(1002, 3, 1190, ROC, 21),
+        # 1003 (later): 11 scores again.
+        g(1003, 1, 10, TOR, 11),
+    ]
+    box = [
+        {"game_id": 1001, "player_id": 901, "team_id": TOR, "toi_seconds": 3600},
+        {"game_id": 1001, "player_id": 951, "team_id": ROC, "toi_seconds": 2400},
+        {"game_id": 1001, "player_id": 952, "team_id": ROC, "toi_seconds": 1200},
+        {"game_id": 1001, "player_id": 999, "team_id": TOR, "toi_seconds": 0},  # backup
+        {"game_id": 1002, "player_id": 901, "team_id": TOR, "toi_seconds": 3540},
+        {"game_id": 1002, "player_id": 951, "team_id": ROC, "toi_seconds": 3600},
+    ]
+    seasons = [
+        # 11 was traded: 12 goals for ROC earlier, 9 for TOR -> 21 total, so
+        # the hat trick tonight (+1 later) crosses 20 on this date.
+        {"player_id": 11, "team_id": ROC, "season_id": 90, "season_type": "regular",
+         "goals": 12, "points": 30},
+        {"player_id": 11, "team_id": TOR, "season_id": 90, "season_type": "regular",
+         "goals": 10, "points": 21},
+        {"player_id": 12, "team_id": TOR, "season_id": 90, "season_type": "regular",
+         "goals": 30, "points": 49},
+        # Earlier seasons don't make a career: no career milestones here.
+        {"player_id": 12, "team_id": TOR, "season_id": 86, "season_type": "regular",
+         "goals": 40, "points": 400},
+    ]  # fmt: skip
+    goalie_seasons = [{"player_id": 901, "team_id": TOR, "season_type": "regular", "wins": 300}]
+    players = [
+        {"player_id": pid, "first_name": f"First{pid}", "last_name": f"Last{pid}"}
+        for pid in (11, 12, 901)
+    ]
+    return {
+        f"{k}_game_log": games,
+        f"{k}_shot_events": events,
+        f"{k}_goalie_game_box": box,
+        f"{k}_player_seasons": seasons,
+        f"{k}_goalie_seasons": goalie_seasons,
+        f"{k}_players": players,
+    }
+
+
+@pytest.fixture(autouse=False)
+def regular(monkeypatch):
+    monkeypatch.setattr(
+        hockeytech_milestones.hockeytech_stats, "resolve_season_type", lambda lg, sid: "regular"
+    )
+
+
+@pytest.mark.parametrize("lg", [AHL, ECHL], ids=["ahl", "echl"])
+def test_league_run_for_date(lg, regular):
+    sb = FakeClient(ahl_tables(lg))
+    hockeytech_milestones.run_for_date(lg, sb, DAY)
+    rows = upserts(sb)
+    assert_golden(f"{lg.key}_run_for_date", rows)
+
+    got = sorted((r["game_id"], r["milestone_type"], r["player_id"]) for r in rows)
+    assert got == [
+        (1001, "natural_hat_trick", 11),
+        (1001, "season_goals_20", 11),
+        (1001, "season_goals_30", 12),
+        (1001, "season_points_50", 11),
+        (1001, "sh_goal", 12),
+        (1001, "shutout", 901),
+    ]
+    for r in rows:
+        assert r["is_pwhl"] is False and r["sport"] == lg.key and r["season"] == 90
+    # Traded player's season total sums both team rows; tonight's team named.
+    goals20 = next(r for r in rows if r["milestone_type"] == "season_goals_20")
+    assert goals20["detail"] == {"season_goals": 21}  # 22 minus the later goal
+    if lg is AHL:
+        assert goals20["team"] == "TOR"
+
+
+def test_league_upsert_failure_is_logged_once(regular, caplog):
+    sb = FakeClient(ahl_tables(AHL))
+    calls = []
+
+    class Failing:
+        def upsert(self, row, **_):
+            calls.append(row)
+            return self
+
+        def execute(self):
+            raise RuntimeError("column milestones.sport does not exist")
+
+    real = sb.table
+    sb.table = lambda name: Failing() if name == "milestones" else real(name)
+    hockeytech_milestones.run_for_date(AHL, sb, DAY)
+    assert len(calls) == 1
+    assert any("2026-10-07_milestones_sport.sql" in r.message for r in caplog.records)
+
+
+def test_league_cli_scans_three_dates(monkeypatch):
+    seen = []
+    monkeypatch.setattr(hockeytech_milestones, "get_client", lambda: None)
+    monkeypatch.setattr(hockeytech_milestones, "today_et", lambda: date(2026, 10, 6))
+    monkeypatch.setattr(
+        hockeytech_milestones, "run_for_date", lambda lg, _sb, d: seen.append((lg.key, d))
+    )
+    monkeypatch.setattr("sys.argv", ["x", "echl"])
+    hockeytech_milestones.main()
+    assert seen == [("echl", "2026-10-03"), ("echl", "2026-10-04"), ("echl", "2026-10-05")]

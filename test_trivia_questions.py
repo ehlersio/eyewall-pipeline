@@ -88,3 +88,75 @@ def test_past_season_question_is_templated_not_model_worded():
         fr["question_text"]
         == "Lequel de ces quatre patineurs de la LNH a mené pour les points en 2025-2026?"
     )
+
+
+# ---------------------------------------------------------------------------
+# AHL / ECHL (2026-10)
+# ---------------------------------------------------------------------------
+
+AHL_SEASONS = [
+    {"seasonId": 90, "seasonType": "regular", "startYear": 2025},
+    {"seasonId": 92, "seasonType": "playoffs", "startYear": 2026},
+    {"seasonId": 94, "seasonType": "regular", "startYear": 2026},
+]
+
+
+def _ht_source(current, by_season, team=None, sport="ahl"):
+    lg = tq.HOCKEYTECH_LEAGUES[sport]
+
+    def fake(lg, stat, team, season_id):
+        return by_season.get(int(season_id), [])
+
+    with (
+        patch.object(tq.hockeytech_stats, "resolve_current_season", return_value=current),
+        patch.object(tq, "get_hockeytech_seasons", return_value=AHL_SEASONS),
+        patch.object(tq, "get_qualified_hockeytech_players", side_effect=fake),
+    ):
+        return tq.hockeytech_question_source(lg, POINTS, team)
+
+
+def test_hockeytech_uses_this_regular_season():
+    category, players = _ht_source({"season_id": 94, "season_type": "regular"}, {94: LEADERS})
+    assert category is POINTS and players == LEADERS
+
+
+def test_hockeytech_falls_back_to_last_regular_season_early_on():
+    category, players = _ht_source({"season_id": 94, "season_type": "regular"}, {90: LEADERS})
+    assert players == LEADERS
+    assert category["label"] == f"points in 2025{EN_DASH}26"
+
+
+def test_hockeytech_playoffs_ask_about_the_regular_season_just_played():
+    category, players = _ht_source({"season_id": 92, "season_type": "playoffs"}, {90: LEADERS})
+    assert players == LEADERS
+    assert category["label"] == f"points in 2025{EN_DASH}26"
+
+
+def test_hockeytech_unknown_season_list_skips():
+    category, players = _ht_source({"season_id": 99, "season_type": "playoffs"}, {90: LEADERS})
+    assert category is POINTS and players == []
+
+
+def test_hockeytech_easy_and_medium_rows(monkeypatch):
+    written = []
+    monkeypatch.setattr(tq, "upsert_question", lambda row, dry: written.append(row) or True)
+    monkeypatch.setattr(tq, "generate_question_text", lambda *a: "Which of these four leads?")
+    monkeypatch.setattr(tq, "hockeytech_question_source", lambda lg, cat, team: (cat, LEADERS))
+    ok, fail = tq.run_easy(date(2026, 10, 20), "echl", dry_run=False)
+    assert (ok, fail) == (1, 0)
+    assert written[0]["sport"] == "echl" and written[0]["team"] == "ALL"
+    written.clear()
+    ok, fail = tq.run_medium(date(2026, 10, 20), "ahl", dry_run=False, locale="fr")
+    assert ok == len(tq.AHL.team_id_map) and fail == 0
+    assert {r["sport"] for r in written} == {"ahl"}
+    assert {r["team"] for r in written} == set(tq.AHL.team_id_map.values())
+
+
+def test_hockeytech_not_generated_for_both():
+    with (
+        patch.object(tq, "nhl_question_source", return_value=(POINTS, [])),
+        patch.object(tq, "get_qualified_pwhl_players", return_value=[]),
+        patch.object(tq, "hockeytech_question_source") as ht,
+    ):
+        tq.run_easy(date(2026, 10, 20), "both", dry_run=True)
+    ht.assert_not_called()
