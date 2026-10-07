@@ -49,7 +49,7 @@ from supabase import create_client
 import pwhl_common
 from pipeline_common import FetchError
 from pwhl_common import fetch_game_summary
-from season_lookup import get_pwhl_season, get_season_type
+from season_lookup import get_pwhl_season, resolve_pwhl_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -63,30 +63,16 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 # to an empty string (the Session 30 bug).
 PWHL_SEASON = str(get_pwhl_season()["season_id"])
 
-# Same manual-correction-first-then-live-fallback pattern as
-# pwhl_shot_events.py/pwhl_pbp_events.py -- see CLAUDE.md's "Known open
-# items" (season "2") before ever touching this map directly.
-SEASON_TYPE_MAP = {
-    "1": "regular",
-    "2": "showcase",
-    "3": "playoffs",
-    "4": "preseason",
-    "5": "regular",
-    "6": "playoffs",
-    "7": "preseason",
-    "8": "regular",
-    "9": "playoffs",
-}
-
 # Same normalisation used by pwhl_shot_events.py/pwhl_pbp_events.py --
 # kept as a local copy here, both modules parse the same feed independently.
 PERIOD_MAP = {"OT1": 4, "OT2": 5, "OT3": 6, "SO": 7}
 
 PIPELINE = "pwhl_penalty_shots"
 
-
-def _resolve_season_type(season_id: str) -> str | None:
-    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+# PWHL season types: one map and resolver in season_lookup.py since 2026-10
+# (PWHL_SEASON_TYPE_MAP keeps the season-2 "showcase" and season-10
+# corrections; the current season and new ids resolve live).
+_resolve_season_type = resolve_pwhl_season_type
 
 
 def _parse_bool(val) -> bool:

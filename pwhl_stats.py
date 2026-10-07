@@ -89,10 +89,11 @@ from pipeline_common import FetchError, OnRosterMarker, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
 from season_lookup import (
+    PWHL_SEASON_TYPE_MAP,
     get_pwhl_season,
     get_pwhl_season_start_date,
     get_pwhl_upcoming_seasons,
-    get_season_type,
+    resolve_pwhl_season_type,
 )
 
 load_dotenv()
@@ -178,41 +179,10 @@ CITY_TEAM_MAP = {
     "San Jose": "13",
 }
 
-SEASON_TYPE_MAP = {
-    "1": "regular",  # 2024 Regular Season (inaugural, 72 games)
-    "2": "showcase",  # 2024 Showcase (9 games, pre-launch tournament)
-    "3": "playoffs",  # 2024 Playoffs
-    "4": "preseason",  # 2024-25 Preseason
-    "5": "regular",  # 2024-25 Regular Season
-    "6": "playoffs",  # 2025 Playoffs
-    "7": "preseason",  # 2025-26 Preseason
-    "8": "regular",  # 2025-26 Regular Season
-    "9": "playoffs",  # 2025-26 Playoffs
-    # "10": "preseason" is hardcoded rather than left to get_season_type()'s
-    # live fallback -- HockeyTech names this one "2026-27 Pre-Season"
-    # (hyphenated, unlike every prior year's one-word "Preseason"), which
-    # doesn't match eyewall-poller's deriveSeasonType() substring check
-    # (`n.includes('preseason')`) and gets silently mislabeled "regular"
-    # over the live path. Confirmed 2026-09 by calling _resolve_season_type
-    # directly against production. Flagged as its own poller-side follow-up
-    # rather than fixed here -- this hardcode sidesteps it for season 10
-    # specifically, same as season "2"'s existing manual correction above.
-    "10": "preseason",  # 2026-27 Preseason
-}
-# Historical IDs stay hardcoded above (no live lookup exists for past
-# seasons); the current season's type is filled in live instead of
-# needing a manual addition every October — see SEASON_YEAR_MAP's comment
-# for the failure mode this replaces.
-SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
-
-
-def _resolve_season_type(season_id: str) -> str | None:
-    """SEASON_TYPE_MAP first (holds a deliberate manual correction for
-    season "2" — see CLAUDE.md's "Known open items" before ever touching
-    that), then get_season_type() as a live fallback for any season_id
-    this module has no hardcoded entry for. Returns None, not a guessed
-    "regular", if neither source recognizes the id."""
-    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+# PWHL season types: one map and resolver in season_lookup.py since 2026-10
+# (PWHL_SEASON_TYPE_MAP keeps the season-2 "showcase" and season-10
+# corrections; the current season and new ids resolve live).
+_resolve_season_type = resolve_pwhl_season_type
 
 
 # Position group → canonical position code
@@ -1623,8 +1593,8 @@ def run_upcoming_game_logs() -> int:
     failed = []
     for season in seasons:
         season_id = str(season["season_id"])
-        # SEASON_TYPE_MAP first: it holds manual corrections (season "2").
-        season_type = SEASON_TYPE_MAP.get(season_id) or season["season_type"]
+        # The shared map first: it holds manual corrections (season "2").
+        season_type = PWHL_SEASON_TYPE_MAP.get(season_id) or season["season_type"]
         log.info(f"=== PWHL upcoming game log — season {season_id} ({season_type}) ===")
         ensure_season_row(sb, season_id, season_type)  # FK target for pwhl_game_log
         try:

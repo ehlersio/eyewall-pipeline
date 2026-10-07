@@ -290,3 +290,44 @@ def get_season_type(season_id: str | int) -> str | None:
         print(f"  WARNING: {e}")
         return None
     return types.get(str(season_id))
+
+
+# PWHL season_id -> season_type, consulted before anything live. Holds the
+# manual corrections the live data would get wrong:
+#   "2"  -- HockeyTech's bootstrap calls it "2024 Preseason"; it was the
+#           2023 showcase (9 games, 2023-12-04..07, before the inaugural
+#           regular season) -- CLAUDE.md, "PWHL season 2 is the 2023
+#           showcase". Keep "showcase".
+#   "10" -- HockeyTech names it "2026-27 Pre-Season" (hyphenated), which the
+#           Worker's deriveSeasonType() reads as "regular" (checked 2026-09).
+# Every other past id is here too, so a resolve never needs the network for
+# them. Was copied into nine pwhl_* modules (some without "10"); one copy
+# since 2026-10.
+PWHL_SEASON_TYPE_MAP = {
+    "1": "regular",  # 2024 Regular Season (inaugural)
+    "2": "showcase",  # 2023 showcase -- see above
+    "3": "playoffs",  # 2024 Playoffs
+    "4": "preseason",  # 2024-25 Preseason
+    "5": "regular",  # 2024-25 Regular Season
+    "6": "playoffs",  # 2025 Playoffs
+    "7": "preseason",  # 2025-26 Preseason
+    "8": "regular",  # 2025-26 Regular Season
+    "9": "playoffs",  # 2025-26 Playoffs
+    "10": "preseason",  # 2026-27 Preseason -- see above
+}
+
+
+def resolve_pwhl_season_type(season_id: str | int) -> str | None:
+    """season_type for any PWHL season_id: PWHL_SEASON_TYPE_MAP first, then
+    the Worker's current season (get_pwhl_season(), the same answer
+    pwhl_stats.py's SEASON_TYPE_MAP.setdefault used to add), then the full
+    bootstrap list (get_season_type()). None, not a guessed "regular", when
+    nothing knows the id: unattended sweeps log and skip, --game paths
+    raise (CLAUDE.md, "Arbitrary season_id -> season_type lookup")."""
+    sid = str(season_id)
+    if sid in PWHL_SEASON_TYPE_MAP:
+        return PWHL_SEASON_TYPE_MAP[sid]
+    current = get_pwhl_season()
+    if str(current["season_id"]) == sid:
+        return current["season_type"]
+    return get_season_type(sid)
