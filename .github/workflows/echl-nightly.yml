@@ -182,6 +182,23 @@ jobs:
         # are env fallbacks for modules trivia_questions.py imports at load,
         # as in pwhl-nightly.yml's trivia step.
 
+      - name: ECHL power rankings + EyeWall AI narratives (hockeytech_power_rankings.py)
+        if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python hockeytech_power_rankings.py echl --narratives
+        # Ranks every team from echl_team_seasons + echl_game_log (the stats
+        # step) into echl_power_rankings, then writes an en + fr narrative per
+        # team into echl_power_rankings_narratives (read by eyewall-poller's
+        # /echl/power-rankings). Only on nights after games were played, once
+        # every team has 3 GP. Up to 2 OpenRouter calls per team per night:
+        # remove --narratives above to stop them (rankings keep updating).
+        # Tables: docs/2026-10-08_hockeytech_power_rankings.sql (logs one
+        # error and moves on until it's been run).
+
       - name: Notify on failure
         if: failure()
         env:
