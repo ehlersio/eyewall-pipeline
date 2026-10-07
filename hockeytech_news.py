@@ -1,11 +1,13 @@
 """
-hockeytech_news.py -- fetch AHL/ECHL news from RSS feeds and POST it to the
-Worker (/{league}/news/ingest). Shared by ahl_news.py and echl_news.py;
-sources live in hockeytech_leagues.py.
+hockeytech_news.py -- fetch AHL/ECHL/PWHL news from RSS feeds and POST it to
+the Worker (/{league}/news/ingest). Shared by ahl_news.py, echl_news.py and
+pwhl_news.py; sources and keywords live in hockeytech_leagues.py.
 
 Runs from GitHub Actions, where Cloudflare Workers' IPs aren't blocked the
-way they are by some feeds. Mirrors pwhl_news.py, minus the keyword filter:
-every AHL/ECHL source is league-scoped by construction.
+way they are by some feeds. A source marked "filter": True is a
+general-hockey feed: only its items that mention one of the league's
+news_keywords are kept (PWHL's; every AHL/ECHL source is league-scoped by
+construction).
 """
 
 import hashlib
@@ -116,6 +118,11 @@ def parse_rss(xml: str, source: dict) -> list[dict]:
     return items
 
 
+def matches_keywords(lg: League, item: dict) -> bool:
+    text = (item.get("title", "") + " " + item.get("excerpt", "")).lower()
+    return any(kw in text for kw in lg.news_keywords)
+
+
 def post_to_worker(lg: League, articles: list[dict]) -> None:
     payload = json.dumps(articles).encode("utf-8")
     req = urllib.request.Request(
@@ -154,6 +161,9 @@ def main(lg: League) -> None:
             continue
         parsed = parse_rss(xml, source)
         log.info(f"  {source['id']}: {len(parsed)} items")
+        if source["filter"]:
+            parsed = [a for a in parsed if matches_keywords(lg, a)]
+            log.info(f"  {source['id']}: {len(parsed)} {lg.label} items after filter")
         all_articles.extend(parsed)
 
     seen: set[str] = set()

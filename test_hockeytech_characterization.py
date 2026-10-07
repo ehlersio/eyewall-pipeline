@@ -575,11 +575,6 @@ class Harness:
             monkeypatch.setattr(mod, "datetime", FixedDatetime)
         # Both come from .env locally but not in CI -- pin them.
         monkeypatch.setattr(hockeytech_news, "WORKER_URL", "https://worker.test")
-        # PRE-REFACTOR ONLY: the PWHL modules' own I/O, before they were wrappers.
-        monkeypatch.setattr(
-            pwhl_live_refresh, "create_client", lambda _url, _key: FakeSupabase(self)
-        )
-        monkeypatch.setattr(pwhl_news, "WORKER_URL", "https://worker.test")
         # The current season comes from the Worker's /config/seasons, cached
         # per process -- start every case with an empty cache.
         monkeypatch.setattr(season_lookup, "WORKER_BASE", "https://worker.test")

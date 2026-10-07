@@ -1,5 +1,5 @@
 """
-hockeytech_leagues.py -- per-league config for the AHL/ECHL pipeline modules.
+hockeytech_leagues.py -- per-league config for the HockeyTech pipeline modules.
 
 AHL and ECHL sit on the same HockeyTech/LeagueStat feed at the same data
 depth, so one implementation serves both: hockeytech_stats.py,
@@ -7,14 +7,21 @@ hockeytech_game_boxscore.py, hockeytech_shot_events.py,
 hockeytech_penalty_shots.py, hockeytech_live_refresh.py and
 hockeytech_news.py. The ahl_*.py/echl_*.py scripts are thin wrappers that
 pass one of the League configs below -- everything genuinely league-specific
-lives here. PWHL stays in pwhl_*.py: same vendor, but a richer feed and
-modules that have diverged.
+lives here.
+
+PWHL is a third League for the two modules that were pure copies:
+pwhl_live_refresh.py and pwhl_news.py wrap hockeytech_live_refresh.py and
+hockeytech_news.py (2026-10). Its stats and per-game modules stay in
+pwhl_*.py: same vendor, but a richer feed and modules that have diverged.
+pwhl_stats.py takes its team map and code aliases from PWHL below, and
+hockeytech_elo.py its whole config.
 
 test_hockeytech_characterization.py pins every request, Supabase read and
-upsert these modules make, for both leagues.
+upsert these modules make: all of them for AHL and ECHL, live refresh and
+news for PWHL.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 
 HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
@@ -36,10 +43,22 @@ class League:
     # ECHL's `players` (skaters) view carries team_name, not team_code; when
     # set, fetch_skater_stats() resolves team_id by name instead.
     team_id_by_name: dict | None = None
+    # Feed team codes team_id_map isn't keyed on (code -> team_id), for codes
+    # that drift between seasons. Included in code_to_team_id.
+    team_code_aliases: dict = field(default_factory=dict)
+    # hockeytech_news.py keeps an item from a source with "filter": True only
+    # if its title or excerpt contains one of these (lowercase). Only PWHL has
+    # general-hockey sources that need it.
+    news_keywords: tuple = ()
+    # {key}_game_log records a final past regulation as boolean `ot` and
+    # `shootout` columns (PWHL) instead of AHL/ECHL's `ended_in` text column.
+    ot_shootout_columns: bool = False
 
     @cached_property
     def code_to_team_id(self) -> dict:
-        return {code: team_id for team_id, code in self.team_id_map.items()}
+        return {code: team_id for team_id, code in self.team_id_map.items()} | (
+            self.team_code_aliases
+        )
 
     @property
     def headers(self) -> dict:
@@ -138,7 +157,7 @@ AHL = League(
     fallback_season=90,  # 2025-26 Regular Season
     season_examples="90, 92, 94",
     # All three are AHL-only feeds (confirmed live 2026-08-29), so none need a
-    # keyword filter the way pwhl_news.py's sources do.
+    # keyword filter the way PWHL's general-hockey sources do.
     news_sources=(
         {
             # Official league site -- the highest-signal source.
@@ -287,4 +306,145 @@ ECHL = League(
         "Iowa Heartlanders": "98",  # historical (2025-26), see team_id_map
         "Utah Grizzlies": "23",  # historical (2025-26), see team_id_map
     },
+)
+
+
+# ── PWHL ──────────────────────────────────────────────────────────────────────
+
+PWHL = League(
+    key="pwhl",
+    label="PWHL",
+    hockeytech_key="446521baf8c38984",
+    site_id="0",
+    # Empty, as pwhl_live_refresh.py has always sent it on the scorebar view.
+    # hockeytech_elo.py's modulekit reads send "1" (its own replace() of this
+    # config); scorebar answers the same either way (checked 2026-10-07).
+    league_id="",
+    referer="https://www.thepwhl.com/",
+    # HockeyTech team ids, including the 2026-27 expansion teams (DET=10,
+    # HAM=11, LV=12, SJS=13 -- ids confirmed via HockeyTech's signing data and
+    # team-filter dropdown, docs/hockeytech-api-notes.md, 2026-07-04).
+    # pwhl_stats.py's TEAM_ID_MAP is this dict. Codes are the app's, which
+    # the feed doesn't always use -- see team_code_aliases.
+    team_id_map={
+        "1": "BOS",
+        "2": "MIN",
+        "3": "MTL",
+        "4": "NY",
+        "5": "OTT",
+        "6": "TOR",
+        "8": "SEA",
+        "9": "VAN",
+        "10": "DET",
+        "11": "HAM",
+        "12": "LV",
+        "13": "SJS",
+    },
+    # The 2023 showcase (season 2) calls Montréal "MON"; every other season
+    # calls it "MTL". Unmapped, its 21 skaters and 3 goalies resolved to no
+    # team and were stored with team_id NULL -- which never matches the
+    # upsert's conflict key, so each run inserted another copy of them (84
+    # skater + 12 goalie rows by 2026-06). Same failure ECHL's Iowa and Utah
+    # rows hit (2026-09). The 2026-27 expansion teams are the same story: the
+    # feed calls team 12 "VEG" in the 2026-27 preseason (season 10) and "VGS"
+    # in the regular season (season 11), and team 13 "SJ" in both
+    # (teamsbyseason and statviewfeed view=teams, checked 2026-10-05).
+    # Unmapped, every Las Vegas and San Jose row was skipped.
+    team_code_aliases={"MON": "3", "VEG": "12", "VGS": "12", "SJ": "13"},
+    fallback_season=8,  # season_lookup.get_pwhl_season()'s fallback; unused here
+    season_examples="5, 8, 9",
+    news_sources=(
+        {
+            # ESPN has no working hockey/PWHL RSS category at all -- every
+            # candidate path (hockey/news, womenshockey/news, pwhl/news) 503s,
+            # confirmed by directly probing each (Session: news ingestion
+            # investigation). Replaced with The Athletic's dedicated women's
+            # hockey feed, confirmed live with 100 PWHL-dense items.
+            "id": "athletic-pwhl",
+            "name": "The Athletic",
+            "bg": "#222222",
+            "url": "https://www.nytimes.com/athletic/rss/womens-hockey/",
+            "type": "rss",
+            "filter": True,
+        },
+        {
+            "id": "sportsnet-pwhl",
+            "name": "Sportsnet",
+            "bg": "#d4a017",
+            "url": "https://www.sportsnet.ca/feed/",
+            "type": "rss",
+            "filter": True,
+        },
+        {
+            "id": "hockeynews-pwhl",
+            "name": "Hockey Writers",
+            "bg": "#c8102e",
+            "url": "https://thehockeywriters.com/feed/",
+            "type": "rss",
+            "filter": True,
+        },
+        {
+            # Dedicated women's hockey editorial site -- strong PWHL coverage.
+            "id": "whl-pwhl",
+            "name": "Women's Hockey Life",
+            "bg": "#6a0dad",
+            "url": "https://womenshockeylife.com/feed",
+            "type": "rss",
+            "filter": True,
+        },
+        {
+            # PWHL-only press releases: game recaps, signings, roster moves.
+            # No keyword filter needed -- every item is PWHL.
+            "id": "osc-pwhl",
+            "name": "OurSports Central",
+            "bg": "#1a1a2e",
+            "url": "https://www.oursportscentral.com/feeds/l277.xml",
+            "type": "rss",
+            "filter": False,
+        },
+    ),
+    news_keywords=(
+        "pwhl",
+        "women's hockey",
+        "womens hockey",
+        "walter cup",
+        # Team names (official and common)
+        "minnesota frost",
+        "boston fleet",
+        "montreal victoire",
+        "montréal victoire",
+        "new york sirens",
+        "ottawa charge",
+        "toronto sceptres",
+        "seattle torrent",
+        "vancouver goldeneyes",
+        "pwhl detroit",
+        "pwhl hamilton",
+        "pwhl las vegas",
+        "pwhl san jose",
+        # Expansion team shorthand
+        "goldeneyes",
+        "torrent",
+        "sceptres",
+        "victoire",
+        # Key players
+        "kelly pannek",
+        "sarah fillier",
+        "marie-philip poulin",
+        "laura stacey",
+        "aerin frankel",
+        "ann-renée desbiens",
+        "hilary knight",
+        "natalie spooner",
+        "brianne jenner",
+        "jayna hefford",
+        "taylor heise",
+        "abby boreen",
+        # Coverage keywords
+        "women's professional hockey",
+        "professional women's hockey",
+        "female hockey",
+        "women hockey",
+    ),
+    ot_shootout_columns=True,
 )
