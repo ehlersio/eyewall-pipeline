@@ -95,6 +95,7 @@ python pwhl_news.py            # Fetch PWHL news and POST to Worker
 python ahl_stats.py                        # current season (live-resolved)
 python ahl_stats.py 90                     # specific season_id (90 = 2025-26 Regular)
 python ahl_game_boxscore.py                # per-game skater/goalie box scores
+python hockeytech_goal_on_ice.py ahl       # skaters on the ice for each goal -> ahl_goal_on_ice
 python ahl_shot_events.py                  # shot events + goals with coordinates
 python ahl_shot_events.py --game 1028362   # single game (debug)
 python ahl_penalty_shots.py                # penalty shots (makes + misses)
@@ -108,6 +109,7 @@ python ahl_news.py                         # AHL news -> Worker
 python echl_stats.py                       # current season (live-resolved)
 python echl_stats.py 73                    # specific season_id (73 = 2025-26 Regular)
 python echl_game_boxscore.py               # per-game skater/goalie box scores
+python hockeytech_goal_on_ice.py echl      # skaters on the ice for each goal -> echl_goal_on_ice
 python echl_shot_events.py                 # shot events + goals with coordinates
 python echl_penalty_shots.py               # penalty shots (makes + misses)
 python hockeytech_shot_xg.py echl 78       # same three for ECHL (season_id optional)
@@ -770,6 +772,8 @@ python pwhl_penalty_shots.py --game 277 # Single game_id (debug)
 ```
 
 ### `pwhl_goal_on_ice.py` (added Session 42)
+In `pwhl-nightly.yml` since 2026-10 (with `pwhl_penalty_shots.py`; both were manual-only until then), and a thin wrapper over `hockeytech_goal_on_ice.py`, which serves AHL/ECHL too (see the AHL section). Output unchanged, pinned by `test_goal_on_ice_characterization.py`. eyewall-poller's `/pwhl/game-box` builds its `goals` array from these rows.
+
 Ingests `gameSummary`'s `periods[].goals[].plus_players[]`/`minus_players[]` — the full on-ice skater roster (by team) at the moment of each goal — one row per `(game_goal_id, player_id)` in `pwhl_goal_on_ice`. Convention (empirically validated against `pwhl_skater_game_box.plus_minus`, full historical backfill, 10,669/10,669 player-games matched): summing `on_ice_for` (+1)/not (-1) across every goal **except power-play goals** reproduces HockeyTech's own `plusMinus` exactly — short-handed, empty-net, and penalty-shot goals all count toward it, only power-play goals are excluded. Each row carries `is_power_play`/`is_short_handed`/`is_empty_net`/`is_penalty_shot` directly so consumers don't need to join back to `pwhl_shot_events`.
 
 This is goal-scoped, not continuous shift data — it does **not** change the WAR/RAPM October-2026 blocker calculus (see "PWHL Analytics Roadmap" below) and is too coarse a signal (goals are rare relative to total ice time) to substitute for real line-combination detection the way `line_combinations.py` does for NHL.
@@ -959,6 +963,15 @@ python ahl_game_boxscore.py --game 1028992   # single game_id (debug)
 ```
 
 **Confirmed real gap, not a data-entry hole:** every skater's `hits`, `faceoffAttempts`, `faceoffWins`, `blockedShots`, and `toi` field in `gameSummary` reads exactly `0`/`"0:00"` regardless of real ice time (confirmed against a real completed game, 1028992 — a skater with a recorded shot and assist still shows `toi: "0:00"`), consistent with AHL's PBP having no hit/faceoff event types at all. These fields are NOT ingested at all — no columns for them on `ahl_skater_game_box` — rather than stored as a fabricated always-zero value. Goalie fields (`timeOnIce`/`shotsAgainst`/`goalsAgainst`/`saves`) are unaffected and real (confirmed: Levi 59:49 TOI / 32 SA / 5 GA / 27 SV in the same game) and are kept.
+
+### `hockeytech_goal_on_ice.py` (2026-10)
+`pwhl_goal_on_ice.py` generalised over `League`: the skaters on the ice for every goal, one row per `(game_goal_id, player_id)` in `{league}_goal_on_ice`, same shape as `pwhl_goal_on_ice`. AHL/ECHL `gameSummary` goals have the same `plus_players`/`minus_players` and the same `game_goal_id` as their play-by-play goal events (checked live on AHL game 1028992), so one extractor serves all three leagues. eyewall-poller's `/{league}/game-box` reads the rows for its `goals` array. Nightly after the box-score step; the tables come from `docs/2026-10-07_hockeytech_goal_on_ice.sql`, and until that's run the step logs one error and skips.
+
+```bash
+python hockeytech_goal_on_ice.py ahl                 # current season
+python hockeytech_goal_on_ice.py echl 73             # specific season_id (backfill)
+python hockeytech_goal_on_ice.py ahl --game 1028992  # single game_id (debug)
+```
 
 ### `ahl_shot_events.py`
 Fetches play-by-play for completed games and extracts shot attempts + goals with coordinates. Structurally mirrors `pwhl_shot_events.py`, but the underlying PBP schema is simpler for AHL (and ECHL) than for PWHL.
@@ -1186,6 +1199,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `ahl_game_log` | Game results/schedule from `feed=modulekit&view=scorebar` (a different view from PWHL's `schedule`) — `game_status_code` (numeric HockeyTech `GameStatus`) added via `docs/live_score_refresh_ddl.sql` for live-game tracking |
 | `ahl_shot_events` | Shot coordinates (`x_norm`/`y_norm`), `event_type` ('shot'\|'goal'). Goal rows carry `assist1_id`/`assist2_id`/PP/SH/EN/GWG flags directly from the PBP `goal` event — no PWHL-style `gameSummary` merge needed. Natural key includes `x_raw`/`y_raw` (see `ahl_stats.py`'s writeup above — a real production Postgres 21000 crash without it) |
 | `ahl_penalty_shots` | Penalty shots (makes + misses), no coordinates — sourced directly from the PBP `penaltyshot` event (unlike PWHL, which needs `gameSummary`) |
+| `ahl_goal_on_ice` | (2026-10) Skaters on the ice for each goal, one row per `(game_goal_id, player_id)`, same shape as `pwhl_goal_on_ice` — `hockeytech_goal_on_ice.py` |
 | `ahl_skater_game_box` | Per-skater per-game box score: G/A/P, PIM, +/-, shots. No hits/faceoff/blocked-shots/TOI columns — confirmed always 0/`"0:00"` in the source feed |
 | `ahl_goalie_game_box` | Per-goalie per-game box score: G/A/P, PIM, TOI (real data), shots/goals against, saves |
 | `ahl_player_xg` | (2026-10) Shot-location xG proxy per (player, team, season): attempts, goals, `xg_for`, `finishing` — `hockeytech_shot_xg.py` |
@@ -1203,6 +1217,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `echl_game_log` | Game results/schedule, same `scorebar` source as AHL. `game_status_code` was included from day one in the original foundation DDL — no retrofit needed here, unlike AHL |
 | `echl_shot_events` | Same shape as `ahl_shot_events`; natural key already includes `x_raw`/`y_raw` from day one (built after AHL's own fix was known) |
 | `echl_penalty_shots` | Same shape as `ahl_penalty_shots` |
+| `echl_goal_on_ice` | (2026-10) Same shape as `ahl_goal_on_ice` |
 | `echl_skater_game_box` | Same shape as `ahl_skater_game_box`, same confirmed hits/faceoff/TOI-always-zero gap |
 | `echl_goalie_game_box` | Same shape as `ahl_goalie_game_box` |
 | `echl_player_xg` / `echl_player_percentiles` / `echl_goalie_percentiles` | (2026-10) Same shape as the AHL tables |

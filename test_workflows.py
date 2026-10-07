@@ -123,10 +123,22 @@ def test_live_score_refresh_is_manual_only():
 def test_pwhl_nightly_takes_a_season_id():
     t = text("pwhl-nightly.yml")
     assert re.search(r"(?m)^      season_id:$", t)
-    for script in ("pwhl_shot_events.py", "pwhl_pbp_events.py", "pwhl_game_boxscore.py"):
+    for script in (
+        "pwhl_shot_events.py",
+        "pwhl_pbp_events.py",
+        "pwhl_game_boxscore.py",
+        "pwhl_goal_on_ice.py",
+        "pwhl_penalty_shots.py",
+    ):
         assert f'python {script} "$SEASON_ID"' in t
 
 
 def test_sbnation_has_no_push_trigger():
     on = text("sbnation-ingest.yml").split("\njobs:\n")[0]
     assert "push:" not in on
+
+
+@pytest.mark.parametrize("league", ["ahl", "echl"])
+def test_hockeytech_nightlies_ingest_goal_on_ice(league):
+    t = text(f"{league}-nightly.yml")
+    assert f'python hockeytech_goal_on_ice.py {league} "${{{{ inputs.season_id }}}}"' in t

@@ -89,6 +89,18 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python echl_game_boxscore.py "${{ inputs.season_id }}"
 
+      - name: ECHL goal on-ice rosters (hockeytech_goal_on_ice.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_goal_on_ice.py echl "${{ inputs.season_id }}"
+        # echl_goal_on_ice: the skaters on the ice for every goal, from
+        # gameSummary (read by eyewall-poller's /echl/game-box `goals`).
+        # Needs echl_game_log from the stats step. Table:
+        # docs/2026-10-07_hockeytech_goal_on_ice.sql (skips, logged, until
+        # that's been run).
+
       - name: Ingest ECHL shot events (goals + shots with coordinates)
         if: steps.guard.outputs.skip != 'true'
         env:

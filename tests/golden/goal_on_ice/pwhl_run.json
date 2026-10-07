@@ -1,0 +1,231 @@
+{
+  "requests": [
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "statviewfeed",
+        "game_id": "1001",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "statviewfeed",
+        "game_id": "1002",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "statviewfeed",
+        "game_id": "1005",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "statviewfeed",
+        "game_id": "1006",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "view": "gameSummary"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": [
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 12
+        },
+        {
+          "player_id": 13
+        },
+        {
+          "player_id": 21
+        },
+        {
+          "player_id": 22
+        }
+      ],
+      "table": "pwhl_players"
+    },
+    {
+      "on_conflict": "game_goal_id,player_id",
+      "rows": [
+        {
+          "game_goal_id": 501,
+          "game_id": 1001,
+          "is_empty_net": false,
+          "is_penalty_shot": false,
+          "is_power_play": true,
+          "is_short_handed": false,
+          "on_ice_for": true,
+          "player_id": 11,
+          "scoring_team_id": 3,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 3
+        },
+        {
+          "game_goal_id": 501,
+          "game_id": 1001,
+          "is_empty_net": false,
+          "is_penalty_shot": false,
+          "is_power_play": true,
+          "is_short_handed": false,
+          "on_ice_for": true,
+          "player_id": 12,
+          "scoring_team_id": 3,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 3
+        },
+        {
+          "game_goal_id": 501,
+          "game_id": 1001,
+          "is_empty_net": false,
+          "is_penalty_shot": false,
+          "is_power_play": true,
+          "is_short_handed": false,
+          "on_ice_for": false,
+          "player_id": 21,
+          "scoring_team_id": 3,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 12
+        },
+        {
+          "game_goal_id": 501,
+          "game_id": 1001,
+          "is_empty_net": false,
+          "is_penalty_shot": false,
+          "is_power_play": true,
+          "is_short_handed": false,
+          "on_ice_for": false,
+          "player_id": 22,
+          "scoring_team_id": 3,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 12
+        },
+        {
+          "game_goal_id": 502,
+          "game_id": 1001,
+          "is_empty_net": true,
+          "is_penalty_shot": false,
+          "is_power_play": false,
+          "is_short_handed": true,
+          "on_ice_for": true,
+          "player_id": 21,
+          "scoring_team_id": 12,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 12
+        },
+        {
+          "game_goal_id": 502,
+          "game_id": 1001,
+          "is_empty_net": true,
+          "is_penalty_shot": false,
+          "is_power_play": false,
+          "is_short_handed": true,
+          "on_ice_for": false,
+          "player_id": 11,
+          "scoring_team_id": 12,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 3
+        },
+        {
+          "game_goal_id": 502,
+          "game_id": 1001,
+          "is_empty_net": true,
+          "is_penalty_shot": false,
+          "is_power_play": false,
+          "is_short_handed": true,
+          "on_ice_for": false,
+          "player_id": 13,
+          "scoring_team_id": 12,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 3
+        }
+      ],
+      "table": "pwhl_goal_on_ice"
+    },
+    {
+      "on_conflict": "game_id,pipeline",
+      "rows": [
+        {
+          "game_id": 1002,
+          "pipeline": "pwhl_goal_on_ice",
+          "reason": "no_goals"
+        }
+      ],
+      "table": "pwhl_skipped_games"
+    },
+    {
+      "on_conflict": "game_id,pipeline",
+      "rows": [
+        {
+          "game_id": 1005,
+          "pipeline": "pwhl_goal_on_ice",
+          "reason": "no_gamesummary"
+        }
+      ],
+      "table": "pwhl_skipped_games"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "player_id": 1
+        }
+      ],
+      "table": "pwhl_players"
+    },
+    {
+      "on_conflict": "game_goal_id,player_id",
+      "rows": [
+        {
+          "game_goal_id": 9,
+          "game_id": 1006,
+          "is_empty_net": false,
+          "is_penalty_shot": false,
+          "is_power_play": false,
+          "is_short_handed": false,
+          "on_ice_for": true,
+          "player_id": 1,
+          "scoring_team_id": 99,
+          "season_id": 8,
+          "season_type": "regular",
+          "team_id": 99
+        }
+      ],
+      "table": "pwhl_goal_on_ice"
+    }
+  ]
+}
