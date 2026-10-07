@@ -10,6 +10,165 @@
     {
       "params": {
         "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "team": "335",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "5000",
+        "position": "skaters",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "points",
+        "team": "323",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "player_id": "6683",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "player"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "feed": "modulekit",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "season_id": "92",
+        "site_id": "3",
+        "view": "teamsbyseason"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "team": "335",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
+        "context": "overall",
+        "feed": "statviewfeed",
+        "key": "ccb91f29d6744675",
+        "lang": "en",
+        "league_id": "4",
+        "limit": "1000",
+        "position": "goalies",
+        "rookie": "false",
+        "season": "92",
+        "site_id": "3",
+        "sort": "wins",
+        "team": "323",
+        "view": "players"
+      },
+      "referer": "https://theahl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    },
+    {
+      "params": {
+        "client_code": "ahl",
         "feed": "modulekit",
         "key": "ccb91f29d6744675",
         "lang": "en",
@@ -500,165 +659,6 @@
     {
       "params": {
         "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "5000",
-        "position": "skaters",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "points",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "modulekit",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "season_id": "92",
-        "site_id": "3",
-        "view": "teamsbyseason"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "5000",
-        "position": "skaters",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "points",
-        "team": "335",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "5000",
-        "position": "skaters",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "points",
-        "team": "323",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "player_id": "6683",
-        "season_id": "92",
-        "site_id": "3",
-        "view": "player"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "1000",
-        "position": "goalies",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "wins",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "feed": "modulekit",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "season_id": "92",
-        "site_id": "3",
-        "view": "teamsbyseason"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "1000",
-        "position": "goalies",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "wins",
-        "team": "335",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
-        "context": "overall",
-        "feed": "statviewfeed",
-        "key": "ccb91f29d6744675",
-        "lang": "en",
-        "league_id": "4",
-        "limit": "1000",
-        "position": "goalies",
-        "rookie": "false",
-        "season": "92",
-        "site_id": "3",
-        "sort": "wins",
-        "team": "323",
-        "view": "players"
-      },
-      "referer": "https://theahl.com/",
-      "url": "https://lscluster.hockeytech.com/feed/index.php"
-    },
-    {
-      "params": {
-        "client_code": "ahl",
         "conference_id": "-1",
         "context": "overall",
         "division_id": "-1",
@@ -715,40 +715,6 @@
     }
   ],
   "writes": [
-    {
-      "on_conflict": "player_id",
-      "rows": [
-        {
-          "birth_date": "2001-03-04",
-          "birth_place": "Toronto, ON",
-          "first_name": "Alex",
-          "height_inches": 73,
-          "jersey_number": 19,
-          "last_name": "Skater",
-          "player_id": 6681,
-          "position": "C",
-          "shoots": "L",
-          "team_id": 335,
-          "updated_at": "2026-01-15T17:00:00+00:00",
-          "weight_lbs": 190
-        },
-        {
-          "birth_date": null,
-          "birth_place": "Oslo, NO",
-          "first_name": "Gus",
-          "height_inches": null,
-          "jersey_number": null,
-          "last_name": "Keeper",
-          "player_id": 7001,
-          "position": "G",
-          "shoots": "",
-          "team_id": 335,
-          "updated_at": "2026-01-15T17:00:00+00:00",
-          "weight_lbs": null
-        }
-      ],
-      "table": "ahl_players"
-    },
     {
       "on_conflict": "player_id",
       "rows": [
@@ -880,6 +846,40 @@
         }
       ],
       "table": "ahl_goalie_seasons"
+    },
+    {
+      "on_conflict": "player_id",
+      "rows": [
+        {
+          "birth_date": "2001-03-04",
+          "birth_place": "Toronto, ON",
+          "first_name": "Alex",
+          "height_inches": 73,
+          "jersey_number": 19,
+          "last_name": "Skater",
+          "player_id": 6681,
+          "position": "C",
+          "shoots": "L",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": 190
+        },
+        {
+          "birth_date": null,
+          "birth_place": "Oslo, NO",
+          "first_name": "Gus",
+          "height_inches": null,
+          "jersey_number": null,
+          "last_name": "Keeper",
+          "player_id": 7001,
+          "position": "G",
+          "shoots": "",
+          "team_id": 335,
+          "updated_at": "2026-01-15T17:00:00+00:00",
+          "weight_lbs": null
+        }
+      ],
+      "table": "ahl_players"
     },
     {
       "on_conflict": "team_id,season_id,season_type",

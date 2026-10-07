@@ -22,6 +22,14 @@ every goalie shift was stored and reached RAPM's design matrix, line
 combinations and special teams. Rows ingested before the fix still carry
 goalie shifts until the season is re-ingested (delete its shift_events rows,
 then run this again).
+
+Skips (2026-10). A game goes into skipped_games -- never retried -- only when
+the feeds answered and had nothing: no shiftcharts rows and no HTML shift
+report rows. Any error leaves the game pending for the next run instead: a
+fetch that failed (timeout, connection error, 429/5xx after nhl_get's
+retries, or an HTML report answering 429/5xx) or anything else that raised.
+Before, any error marked the game skipped for good with the error text as
+its reason, so one bad night lost those games' shifts for the season.
 """
 
 import re
@@ -31,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db import NHL_SEASON, get_client
-from pipeline_common import FetchError, nhl_get
+from pipeline_common import NHL_RETRY_STATUSES, FetchError, nhl_get
 
 NHL_BASE = "https://api-web.nhle.com/v1"
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
@@ -160,18 +168,11 @@ def get_skipped_games(client, season):
 
 
 def fetch_shift_chart(game_id):
-    """Fetch raw shift chart rows from NHL API for a single game.
-
-    Catches FetchError itself (unlike this module's other helpers) rather
-    than letting it propagate to process_one() -- process_one()'s "empty
-    JSON result -> fall back to HTML shift reports" logic deliberately
-    treats "fetch broke" and "no JSON data for this game" the same way,
-    both should trigger the HTML fallback attempt, not skip it.
+    """Fetch raw shift chart rows from NHL API for a single game. Raises
+    FetchError when the fetch broke; shifts_for_game() still tries the HTML
+    reports then, but won't call the game empty on their word alone.
     """
-    try:
-        data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
-    except FetchError:
-        return []
+    data = nhl_get(f"{STATS_BASE}/shiftcharts", params={"cayenneExp": f"gameId={game_id}"})
     return data.get("data", [])
 
 
@@ -295,6 +296,11 @@ def fetch_shift_chart_html(game_id, season):
     """Fetch shift data from NHL HTML shift reports (visitor + home).
     Fallback for games where the JSON API returns no data.
     Returns list of raw shift dicts in same format as process_shifts output.
+
+    A report that isn't there (404 and the like) just adds no rows. One that
+    couldn't be fetched (timeout, connection error, 429/5xx) raises
+    FetchError, even if the other report came back: half a game's shifts
+    would be stored as the whole game and never fetched again.
     """
     # Derive season string and short game ID from game_id
     # game_id format: 2025020373 -> season 20252026, short 020373
@@ -308,25 +314,35 @@ def fetch_shift_chart_html(game_id, season):
         return []
 
     all_rows = []
+    failed = []
     for report_type in ["TV", "TH"]:  # visitor, home
         url = f"{HTML_REPORTS_BASE}/{season_str}/{report_type}{short_id}.HTM"
         try:
             r = requests.get(url, headers=HEADERS, timeout=30)
-            if r.status_code != 200:
-                continue
-            rows = parse_html_shifts(game_id, season, r.text, roster)
-            all_rows.extend(rows)
-            # add temporarily to shift_data.py fetch_shift_chart_html, after parse_html_shifts calls
-            print(f"  Game {game_id}: {len(all_rows)} shifts from HTML")
-        except Exception as e:
-            print(f"  HTML fetch error {url}: {e}")
+        except requests.RequestException as e:
+            failed.append(f"{url}: {e}")
             continue
+        if r.status_code in NHL_RETRY_STATUSES:
+            failed.append(f"{url}: HTTP {r.status_code}")
+            continue
+        if r.status_code != 200:
+            continue
+        try:
+            rows = parse_html_shifts(game_id, season, r.text, roster)
+        except Exception as e:
+            print(f"  HTML parse error {url}: {e}")
+            continue
+        all_rows.extend(rows)
+        print(f"  Game {game_id}: {len(all_rows)} shifts from HTML")
 
+    if failed:
+        raise FetchError(f"HTML shift reports: {'; '.join(failed)}")
     return all_rows
 
 
 def mark_skipped(client, game_id, season, reason="no_data"):
-    """Mark a game as having no shift data so it won't be retried."""
+    """Mark a game as having no shift data so it won't be retried. Only for
+    a game the feeds answered with nothing -- see the module docstring."""
     try:
         client.table("skipped_games").upsert(
             {
@@ -385,15 +401,26 @@ def process_shifts(game_id, season, raw_shifts, goalies=frozenset()):
 def shifts_for_game(game_id, season):
     """One game's skater shift_events rows: the JSON shiftcharts feed first
     (fast, early-season games), else the HTML shift reports (every game).
-    Either way the game's roster says who the goalies are. Raises when the
-    roster can't be fetched, like the HTML path always has."""
-    raw = fetch_shift_chart(game_id)
+    Either way the game's roster says who the goalies are.
+
+    [] means both feeds answered and had nothing for this game. Raises
+    FetchError when a fetch failed and the game may have shifts we couldn't
+    get: the roster, an HTML report, or the JSON feed when the HTML reports
+    came back empty."""
+    try:
+        raw = fetch_shift_chart(game_id)
+        json_error = None
+    except FetchError as e:
+        raw, json_error = [], e
     if raw:
         roster, _ = fetch_roster(game_id)
         rows = process_shifts(game_id, season, raw, goalie_ids(roster))
         if rows:
             return rows
-    return fetch_shift_chart_html(game_id, season)
+    rows = fetch_shift_chart_html(game_id, season)
+    if not rows and json_error is not None:
+        raise json_error
+    return rows
 
 
 def run(season=NHL_SEASON):
@@ -418,18 +445,18 @@ def run(season=NHL_SEASON):
 
     total_shifts = 0
     errors = 0
+    no_data = 0
     completed = 0
     WORKERS = 5  # reduced from 10 — HTML fallback makes 3 requests/game
 
     def process_one(game):
+        """(game_id, rows, error). Only an error-free empty result is
+        no_data; any error leaves the game for the next run."""
         game_id = game["id"]
         try:
-            rows = shifts_for_game(game_id, season)
-            if not rows:
-                return game_id, [], "no_data"
-            return game_id, rows, None
+            return game_id, shifts_for_game(game_id, season), None
         except Exception as e:
-            return game_id, [], str(e)
+            return game_id, [], f"{type(e).__name__}: {e}"
 
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         futures = {executor.submit(process_one, g): g for g in pending}
@@ -437,10 +464,13 @@ def run(season=NHL_SEASON):
             game_id, rows, error = future.result()
             completed += 1
 
-            if error or not rows:
-                print(f"  SKIP Game {game_id}: {error or 'no_data'}")
-                mark_skipped(client, game_id, season, error or "no_data")
+            if error:
+                print(f"  RETRY NEXT RUN Game {game_id}: {error}")
                 errors += 1
+            elif not rows:
+                print(f"  SKIP Game {game_id}: no_data")
+                mark_skipped(client, game_id, season, "no_data")
+                no_data += 1
             else:
                 try:
                     client.table("shift_events").delete().eq("game_id", game_id).execute()
@@ -456,8 +486,10 @@ def run(season=NHL_SEASON):
 
     print("\nShift data pipeline complete")
     print(f"   Shifts inserted: {total_shifts:,}")
+    if no_data:
+        print(f"   Games skipped (no shift data): {no_data}")
     if errors:
-        print(f"   Games skipped/errored: {errors}")
+        print(f"   Games failed (left for the next run): {errors}")
 
 
 if __name__ == "__main__":
