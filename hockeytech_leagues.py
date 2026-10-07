@@ -28,6 +28,41 @@ HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
 
 
 @dataclass(frozen=True)
+class PlayoffFormat:
+    """Who makes a season's playoffs, as the league itself published it.
+
+    hockeytech_playoff_odds.py only writes a make-playoffs probability for a
+    season that has one of these (League.playoff_formats). A season without
+    one -- the league hasn't published its format yet, or nobody has checked
+    -- gets projected points only, never a guessed format. Add an entry only
+    with a league source in hand, and cite it in `source`.
+    """
+
+    # "division" (AHL/ECHL), "conference" (PWHL from 2026-27) or "league"
+    # (one table, PWHL through 2025-26).
+    group_by: str
+    # Group name -> playoff berths. For AHL/ECHL the names are HockeyTech's
+    # standings group labels (view=teams&groupTeamsBy=division), checked
+    # against the feed every run: a group the feed has and this doesn't (or
+    # the reverse) means the alignment changed, and the run treats the
+    # format as unverified. "league" formats use the single key "League".
+    berths: dict
+    # One line for {league}_playoff_odds.format.
+    description: str
+    # Where the format was verified -- the league's own site.
+    source: str
+    # team_id -> group, for formats whose groups the feed doesn't carry:
+    # HockeyTech still lists all 12 PWHL teams as one "PWHL" group for
+    # 2026-27 (checked 2026-10-07), so the conferences live here.
+    alignment: dict | None = None
+    # Standings ties: points percentage first in all three leagues, then
+    # regulation wins where the league's first tiebreaker is regulation
+    # wins and the feed reports them (AHL, PWHL). Later tiebreakers
+    # (head-to-head, ...) aren't modeled; remaining ties break at random.
+    regulation_wins_tiebreak: bool = False
+
+
+@dataclass(frozen=True)
 class League:
     key: str  # "ahl" -- table prefix ({key}_game_log) and HockeyTech client_code
     label: str  # "AHL" -- log text, and the {label}_SEASON fallback env var
@@ -60,6 +95,12 @@ class League:
     # {key}_player_xg / {key}_player_percentiles / {key}_goalie_percentiles
     # tables -- see hockeytech_percentiles.py.
     toi_rates: bool = False
+    # Standings points for (a regulation win, an OT/shootout win, an
+    # OT/shootout loss); a regulation loss is 0. AHL/ECHL 2-2-1, PWHL 3-2-1.
+    standings_points: tuple = (2, 2, 1)
+    # Regular-season season_id -> PlayoffFormat, for the seasons whose
+    # format has been verified from the league's own published rules.
+    playoff_formats: dict = field(default_factory=dict)
 
     @cached_property
     def code_to_team_id(self) -> dict:
@@ -163,6 +204,25 @@ AHL = League(
     },
     fallback_season=90,  # 2025-26 Regular Season
     season_examples="90, 92, 94",
+    playoff_formats={
+        # 2025-26 (season 90): 23 of 32. Atlantic top 6 of 8, North and
+        # Central top 5 of 7, Pacific top 7 of 10; ranked by points
+        # percentage, regulation wins first tiebreaker (San Diego over Tucson
+        # at 78 points each, 27 regulation wins to 21, in the final feed
+        # standings). Source: theahl.com, 2026-03-31.
+        #
+        # 2026-27 (season 94) is deliberately absent: Hamilton's move made the
+        # Atlantic 7 teams and the North 8, and as of 2026-10-07 the AHL had
+        # not published how many qualify from each (blogs guess the two
+        # divisions swap formats). Add it when theahl.com announces it.
+        90: PlayoffFormat(
+            group_by="division",
+            berths={"Atlantic": 6, "North": 5, "Central": 5, "Pacific": 7},
+            description="23 of 32: Atlantic 6, North 5, Central 5, Pacific 7 (points %)",
+            source="https://theahl.com/news/playoff-races-in-full-swing-as-april-arrives",
+            regulation_wins_tiebreak=True,
+        ),
+    },
     # All three are AHL-only feeds (confirmed live 2026-08-29), so none need a
     # keyword filter the way PWHL's general-hockey sources do.
     news_sources=(
@@ -253,6 +313,25 @@ ECHL = League(
     },
     fallback_season=73,  # 2025-26 Regular Season
     season_examples="73, 76, 78",
+    playoff_formats={
+        # 2025-26 (season 73): the top 4 in each of the four divisions, 16
+        # of 30, ranked by points (every team plays 72, so points and points
+        # percentage order teams the same). The ECHL's standings feed has no
+        # regulation-wins column, so ties past points break at random.
+        # Source: echl.com/about/kelly-cup-playoffs ("The top four teams in
+        # each division ... will qualify for the 2026 Kelly Cup Playoffs").
+        #
+        # 2026-27 (season 78) is absent: that page still describes 2026, and
+        # the 2026-27 schedule and critical-dates releases give the new
+        # alignment (North 8, South 7, Central 7, Mountain 8) and the
+        # playoffs' start date but not the format (checked 2026-10-07).
+        73: PlayoffFormat(
+            group_by="division",
+            berths={"North": 4, "South": 4, "Central": 4, "Mountain": 4},
+            description="16 of 30: top 4 in each division (points %)",
+            source="https://echl.com/about/kelly-cup-playoffs",
+        ),
+    },
     # Only 2 sources: echl.com has no RSS feed at all (/feed and /rss both
     # 404, confirmed live 2026-08-30). Both are ECHL-scoped by construction.
     news_sources=(
@@ -360,6 +439,49 @@ PWHL = League(
     team_code_aliases={"MON": "3", "VEG": "12", "VGS": "12", "SJ": "13"},
     fallback_season=8,  # season_lookup.get_pwhl_season()'s fallback; unused here
     season_examples="5, 8, 9",
+    # Regulation win 3, OT/shootout win 2, OT/shootout loss 1
+    # (thepwhl.com/en/beginners-guide).
+    standings_points=(3, 2, 1),
+    playoff_formats={
+        # 2025-26 (season 8): the top 4 of 8 by points.
+        8: PlayoffFormat(
+            group_by="league",
+            berths={"League": 4},
+            description="Top 4 of 8 (points %)",
+            source="https://www.thepwhl.com/en/2026-complete-guide-to-the-playoffs",
+            regulation_wins_tiebreak=True,
+        ),
+        # 2026-27 (season 11): the top 4 in each six-team conference
+        # (thepwhl.com, 2026-10-02). Points percentage, then regulation
+        # wins: thepwhl.com/en/playoff-tiebreaker-procedure. Same alignment
+        # as eyewall-analytics' pwhlConfig.js.
+        11: PlayoffFormat(
+            group_by="conference",
+            berths={"East": 4, "West": 4},
+            description="8 of 12: top 4 in each conference (points %)",
+            source=(
+                "https://www.thepwhl.com/en/news/2026/october/02/"
+                "pwhl-announces-2026-27-regular-season-schedule"
+            ),
+            alignment={
+                # East: BOS, HAM, MTL, NY, OTT, TOR
+                "1": "East",
+                "11": "East",
+                "3": "East",
+                "4": "East",
+                "5": "East",
+                "6": "East",
+                # West: DET, LV, MIN, SJS, SEA, VAN
+                "10": "West",
+                "12": "West",
+                "2": "West",
+                "13": "West",
+                "8": "West",
+                "9": "West",
+            },
+            regulation_wins_tiebreak=True,
+        ),
+    },
     news_sources=(
         {
             # ESPN has no working hockey/PWHL RSS category at all -- every

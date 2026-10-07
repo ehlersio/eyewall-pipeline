@@ -1,0 +1,1008 @@
+{
+ "ahl_90": [
+  {
+   "sections": [
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "Atlantic"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "y - PRO",
+        "games_played": "72",
+        "points": 110,
+        "regulation_wins": "41"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "309"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - WBS",
+        "games_played": "72",
+        "points": 101,
+        "regulation_wins": "40"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "316"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - CLT",
+        "games_played": "72",
+        "points": 93,
+        "regulation_wins": "35"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "384"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - BRI",
+        "games_played": "72",
+        "points": 76,
+        "regulation_wins": "27"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "317"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - HER",
+        "games_played": "72",
+        "points": 73,
+        "regulation_wins": "25"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "319"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SPR",
+        "games_played": "72",
+        "points": 72,
+        "regulation_wins": "28"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "411"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "LV",
+        "games_played": "72",
+        "points": 68,
+        "regulation_wins": "21"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "313"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "HFD",
+        "games_played": "72",
+        "points": 60,
+        "regulation_wins": "22"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "307"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "North"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "y - LAV",
+        "games_played": "72",
+        "points": 90,
+        "regulation_wins": "29"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "415"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SYR",
+        "games_played": "72",
+        "points": 89,
+        "regulation_wins": "38"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "324"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - CLE",
+        "games_played": "72",
+        "points": 83,
+        "regulation_wins": "24"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "373"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - TOR",
+        "games_played": "72",
+        "points": 82,
+        "regulation_wins": "28"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "335"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - ROC",
+        "games_played": "72",
+        "points": 72,
+        "regulation_wins": "22"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "323"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "UTC",
+        "games_played": "72",
+        "points": 71,
+        "regulation_wins": "26"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "390"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "BEL",
+        "games_played": "72",
+        "points": 65,
+        "regulation_wins": "21"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "413"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "Central"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "y - GR",
+        "games_played": "72",
+        "points": 107,
+        "regulation_wins": "43"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "328"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - CHI",
+        "games_played": "72",
+        "points": 87,
+        "regulation_wins": "27"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "330"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - TEX",
+        "games_played": "72",
+        "points": 80,
+        "regulation_wins": "28"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "380"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - MB",
+        "games_played": "72",
+        "points": 78,
+        "regulation_wins": "29"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "321"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - MIL",
+        "games_played": "72",
+        "points": 71,
+        "regulation_wins": "19"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "327"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "IA",
+        "games_played": "72",
+        "points": 63,
+        "regulation_wins": "20"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "389"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "RFD",
+        "games_played": "72",
+        "points": 61,
+        "regulation_wins": "20"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "372"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "Pacific"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "y - ONT",
+        "games_played": "72",
+        "points": 99,
+        "regulation_wins": "36"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "403"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - COL",
+        "games_played": "72",
+        "points": 93,
+        "regulation_wins": "32"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "419"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - HSK",
+        "games_played": "72",
+        "points": 90,
+        "regulation_wins": "34"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "437"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - CV",
+        "games_played": "72",
+        "points": 88,
+        "regulation_wins": "28"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "445"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - BAK",
+        "games_played": "72",
+        "points": 86,
+        "regulation_wins": "29"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "402"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SJ",
+        "games_played": "72",
+        "points": 84,
+        "regulation_wins": "30"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "405"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SD",
+        "games_played": "72",
+        "points": 78,
+        "regulation_wins": "27"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "404"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "TUC",
+        "games_played": "72",
+        "points": 78,
+        "regulation_wins": "21"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "412"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "ABB",
+        "games_played": "72",
+        "points": 63,
+        "regulation_wins": "20"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "440"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "CGY",
+        "games_played": "72",
+        "points": 61,
+        "regulation_wins": "14"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "444"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "echl_73": [
+  {
+   "sections": [
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "North"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "xy - WHL",
+        "games_played": "72",
+        "points": 98
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "25"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - MNE",
+        "games_played": "72",
+        "points": 93
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "82"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - ADK",
+        "games_played": "72",
+        "points": 85
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "74"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - REA",
+        "games_played": "72",
+        "points": 82
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "17"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "TR",
+        "games_played": "72",
+        "points": 77
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "99"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "WOR",
+        "games_played": "72",
+        "points": 77
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "77"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "NOR",
+        "games_played": "72",
+        "points": 64
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "76"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "GSO",
+        "games_played": "72",
+        "points": 45
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "108"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "South"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "xy - FLA",
+        "games_played": "72",
+        "points": 108
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "8"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SC",
+        "games_played": "72",
+        "points": 94
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "18"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - ATL",
+        "games_played": "72",
+        "points": 93
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "10"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - SAV",
+        "games_played": "72",
+        "points": 74
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "102"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "JAX",
+        "games_played": "72",
+        "points": 69
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "79"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "GVL",
+        "games_played": "72",
+        "points": 64
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "52"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "ORL",
+        "games_played": "72",
+        "points": 63
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "61"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "Central"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "xy - FW",
+        "games_played": "72",
+        "points": 100
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "60"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - TOL",
+        "games_played": "72",
+        "points": 98
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "21"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - BLM",
+        "games_played": "72",
+        "points": 79
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "107"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - IND",
+        "games_played": "72",
+        "points": 79
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "65"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "KAL",
+        "games_played": "72",
+        "points": 78
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "50"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "CIN",
+        "games_played": "72",
+        "points": 75
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "5"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "IA",
+        "games_played": "72",
+        "points": 56
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "98"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "Mountain"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "xyz - KC",
+        "games_played": "72",
+        "points": 115
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "68"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - ALN",
+        "games_played": "72",
+        "points": 92
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "66"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - IDH",
+        "games_played": "72",
+        "points": 91
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "11"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - TAH",
+        "games_played": "72",
+        "points": 77
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "106"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "UTA",
+        "games_played": "72",
+        "points": 70
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "23"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "RC",
+        "games_played": "72",
+        "points": 65
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "70"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "TUL",
+        "games_played": "72",
+        "points": 63
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "71"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "WIC",
+        "games_played": "72",
+        "points": 62
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "72"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "pwhl_8": [
+  {
+   "sections": [
+    {
+     "title": "",
+     "headers": {
+      "team_code": {
+       "properties": {
+        "label": "PWHL"
+       }
+      }
+     },
+     "data": [
+      {
+       "row": {
+        "team_code": "x - MTL",
+        "games_played": "30",
+        "points": 62,
+        "regulation_wins": "16"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "3"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - BOS",
+        "games_played": "30",
+        "points": 62,
+        "regulation_wins": "16"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "1"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - MIN",
+        "games_played": "30",
+        "points": 50,
+        "regulation_wins": "13"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "2"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "x - OTT",
+        "games_played": "30",
+        "points": 44,
+        "regulation_wins": "9"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "5"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "e - TOR",
+        "games_played": "30",
+        "points": 38,
+        "regulation_wins": "10"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "6"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "e - VAN",
+        "games_played": "30",
+        "points": 37,
+        "regulation_wins": "9"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "9"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "e - NY",
+        "games_played": "30",
+        "points": 36,
+        "regulation_wins": "9"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "4"
+        }
+       }
+      },
+      {
+       "row": {
+        "team_code": "e - SEA",
+        "games_played": "30",
+        "points": 31,
+        "regulation_wins": "8"
+       },
+       "prop": {
+        "team_code": {
+         "teamLink": "8"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
