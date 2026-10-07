@@ -21,17 +21,16 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import os
 import time
-from datetime import UTC, datetime
 
-import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError, select_all
+import pwhl_common
+from pipeline_common import FetchError
+from pwhl_common import get_completed_games
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -43,16 +42,6 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 _pwhl_live = get_pwhl_season()  # live-resolved via Worker; falls back to PWHL_SEASON env var
 PWHL_SEASON = str(_pwhl_live["season_id"])
-
-HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
-HOCKEYTECH_KEY = "446521baf8c38984"
-CLIENT_CODE = "pwhl"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Referer": "https://www.thepwhl.com/",
-}
 
 SEASON_TYPE_MAP = {
     "1": "regular",
@@ -99,51 +88,15 @@ SKIP_TYPES = {
 PIPELINE = "pwhl_pbp_events"
 
 
-# ── HockeyTech fetch (mirrors pwhl_shot_events.py exactly) ───────────────────
+# ── HockeyTech fetch (pwhl_common.py) ────────────────────────────────────────
 
 
 def fetch_pbp(game_id: int) -> list | None:
     """Fetch play-by-play events for a single game. Returns None if the API
     responded with an error payload (legitimate "no data", not a fetch
     failure); raises FetchError after exhausting 3 retries (a genuine
-    fetch failure)."""
-    last_err = None
-    for attempt in range(3):
-        try:
-            r = requests.get(
-                HOCKEYTECH_BASE,
-                params={
-                    "feed": "statviewfeed",
-                    "view": "gameCenterPlayByPlay",
-                    "game_id": str(game_id),
-                    "key": HOCKEYTECH_KEY,
-                    "client_code": CLIENT_CODE,
-                    "lang": "en",
-                    "league_id": "",
-                },
-                headers=HEADERS,
-                timeout=20,
-            )
-            if r.status_code != 200:
-                log.warning(f"    PBP {game_id} status {r.status_code}")
-                last_err = f"status {r.status_code}"
-                continue
-            text = r.text.strip()
-            # HockeyTech wraps some responses as JSONP: callback(...)
-            if "(" in text:
-                text = text[text.index("(") + 1 : text.rindex(")")]
-            data = json.loads(text)
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict) and "error" in data:
-                log.warning(f"    PBP {game_id} error: {data['error']}")
-                return None
-        except Exception as e:
-            log.warning(f"    PBP {game_id} attempt {attempt + 1}: {e}")
-            last_err = str(e)
-        if attempt < 2:
-            time.sleep(2**attempt)
-    raise FetchError(f"PBP {game_id}: failed after 3 attempts ({last_err})")
+    fetch failure). Anything but a list counts as a failed attempt."""
+    return pwhl_common.hockeytech_get("gameCenterPlayByPlay", game_id, expect=list)
 
 
 # ── Coord helpers ─────────────────────────────────────────────────────────────
@@ -439,45 +392,16 @@ def parse_pbp(
 # ── Supabase helpers (match pwhl_shot_events.py patterns) ─────────────────────
 
 
-def get_completed_games(sb, season_id: str) -> list:
-    return select_all(
-        lambda: (
-            sb.table("pwhl_game_log")
-            .select("game_id,home_team_id,away_team_id")
-            .eq("season_id", int(season_id))
-            .eq("game_state", "Final")
-        )
-    )
-
-
 def get_skipped_games(sb) -> set:
-    return {
-        r["game_id"]
-        for r in select_all(
-            lambda: sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", PIPELINE)
-        )
-    }
+    return pwhl_common.get_skipped_games(sb, PIPELINE)
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    return {
-        r["game_id"]
-        for r in select_all(
-            lambda: sb.table("pwhl_pbp_events").select("game_id").eq("season_id", int(season_id))
-        )
-    }
+    return pwhl_common.get_processed_games(sb, "pwhl_pbp_events", season_id)
 
 
 def mark_skipped(sb, game_id: int, reason: str) -> None:
-    sb.table("pwhl_skipped_games").upsert(
-        {
-            "game_id": game_id,
-            "pipeline": PIPELINE,
-            "reason": reason,
-            "skipped_at": datetime.now(UTC).isoformat(),
-        },
-        on_conflict="game_id,pipeline",
-    ).execute()
+    pwhl_common.mark_skipped(sb, game_id, PIPELINE, reason)
 
 
 # ── Ingest one game ───────────────────────────────────────────────────────────
@@ -609,7 +533,7 @@ def run(season_id: str | None = None, force: bool = False, single_game: int | No
         try:
             total_rows += ingest_game(sb, gid, home_id, season_id, season_type, away_id)
         except FetchError as e:
-            # fetch_pbp() now raises after exhausting retries instead of
+            # fetch_pbp() raises after exhausting retries instead of
             # swallowing to None -- without this, one bad game's fetch
             # failure would crash the entire sweep instead of being skipped.
             log.warning(f"    Fetch failed for game {gid}, skipping: {e}")

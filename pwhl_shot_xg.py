@@ -8,7 +8,8 @@ not a cross-import. pwhl_shot_events.py's module docstring documents this
 codebase's existing convention of not coupling pipeline modules that each
 parse/consume the same feed independently (see e.g. its PERIOD_MAP comment:
 "kept as a local copy here ... no shared import"; pwhl_game_boxscore.py's
-module docstring says the same about _hockeytech_get). rapm.py's shot_xg()
+module docstring used to say the same about its gameSummary fetch, shared
+in pwhl_common.py since 2026-10). rapm.py's shot_xg()
 is also NHL-specific (its docstring/usage assumes NHL event-type strings),
 so this needed its own PWHL-vocabulary version regardless of import style.
 

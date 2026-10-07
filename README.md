@@ -694,6 +694,15 @@ python pwhl_stats.py 8   # 2025-26 regular
 python pwhl_stats.py 9   # 2025-26 playoffs
 ```
 
+### `pwhl_common.py` (2026-10)
+Shared by the five PWHL per-game modules (`pwhl_shot_events`, `pwhl_pbp_events`, `pwhl_game_boxscore`, `pwhl_penalty_shots`, `pwhl_goal_on_ice`), which used to carry five copies of it:
+- the client config;
+- `hockeytech_get()`: the retrying `statviewfeed` GET keyed on `game_id`. It makes 3 attempts and raises `FetchError` when they run out; an error payload returns `None`, meaning no data;
+- `fetch_game_summary()`;
+- the per-game queue helpers: `get_completed_games` / `get_skipped_games` / `get_processed_games(table)` / `mark_skipped(pipeline)`.
+
+Each module keeps wrappers under its old names and signatures. `pwhl_pbp_events.fetch_pbp` passes `expect=list`, so any other shape is retried, as it always was. `pwhl_shot_events.fetch_pbp` takes any shape and returns `None` for a non-list, as it always did. Covered by `test_pwhl_common.py`.
+
 ### `pwhl_pbp_events.py`
 Ingests PWHL PBP events (faceoffs, hits, penalties, goalie changes) from HockeyTech. Incremental by default — skips already-processed games.
 
