@@ -103,6 +103,34 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python echl_penalty_shots.py "${{ inputs.season_id }}"
 
+      - name: ECHL shot-location xG proxy (hockeytech_shot_xg.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_shot_xg.py echl "${{ inputs.season_id }}"
+        # echl_player_xg from echl_shot_events, so after the shot-events step.
+        # Tables: docs/2026-10-07_hockeytech_percentiles.sql (logs one error
+        # and skips until that's been run).
+
+      - name: ECHL skater percentiles, per game played (hockeytech_percentiles.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_percentiles.py echl "${{ inputs.season_id }}"
+        # Reads echl_player_seasons (stats step), assists from
+        # echl_shot_events and finishing from echl_player_xg (the step above).
+
+      - name: ECHL goalie percentiles, per game played (hockeytech_goalie_percentiles.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_goalie_percentiles.py echl "${{ inputs.season_id }}"
+        # Reads echl_goalie_seasons, echl_shot_events, echl_game_log and
+        # echl_goalie_game_box (credits each goal to the goalie who allowed it).
+
       - name: ECHL Elo ratings + win probabilities (hockeytech_elo.py)
         if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
         env:
