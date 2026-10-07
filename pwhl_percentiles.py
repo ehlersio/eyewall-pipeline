@@ -20,8 +20,9 @@ See pwhl-nightly.yml for the enforced ordering.
 percentile_rank()/build_sorted_pool() are ported from moneypuck.py's
 identical functions rather than imported from there. Reasoning: this
 codebase's established convention (documented in pwhl_shot_events.py's
-PERIOD_MAP comment, pwhl_game_boxscore.py's _hockeytech_get docstring, and
-now pwhl_shot_xg.py's shot_xg()) is that pipeline modules keep independent
+PERIOD_MAP comment and pwhl_shot_xg.py's shot_xg(); the per-game fetch
+itself has been shared in pwhl_common.py since 2026-10) is that pipeline
+modules keep independent
 copies of logic rather than cross-import, specifically for feed-parsing
 code. percentile_rank() itself is pure math, not feed-specific, and in
 principle could live in a shared module -- but no such "generic pipeline

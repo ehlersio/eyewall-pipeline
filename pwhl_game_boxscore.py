@@ -16,10 +16,9 @@ and gw_goals as unavailable -- this table fills that gap at per-game
 granularity instead.
 
 Endpoint: statviewfeed / gameSummary on feed/index.php, param game_id
-(same endpoint pwhl_shot_events.py already uses for its goal merge --
-kept as an independent fetch here rather than a cross-import, matching
-this codebase's existing convention of not coupling pipeline modules that
-each parse the same feed independently).
+(same endpoint pwhl_shot_events.py already uses for its goal merge; the
+fetch is pwhl_common.fetch_game_summary(), shared by all five PWHL
+per-game modules).
 
 Position taxonomy:
   gameSummary's skaters[].info.position uses granular HockeyTech codes
@@ -40,17 +39,17 @@ Run modes:
 """
 
 import argparse
-import json
 import logging
 import os
 import time
 from datetime import UTC, datetime
 
-import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
-from pipeline_common import FetchError, select_all
+import pwhl_common
+from pipeline_common import FetchError
+from pwhl_common import fetch_game_summary, get_skipped_games
 from season_lookup import get_pwhl_season, get_season_type
 
 load_dotenv()
@@ -66,16 +65,6 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 PWHL_SEASON = str(get_pwhl_season()["season_id"])
 
 # Same base/auth pattern pwhl_shot_events.py uses for gameSummary.
-HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
-HOCKEYTECH_KEY = "446521baf8c38984"
-CLIENT_CODE = "pwhl"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Referer": "https://www.thepwhl.com/",
-}
-
 SEASON_TYPE_MAP = {
     "1": "regular",
     "2": "showcase",
@@ -114,55 +103,6 @@ POSITION_GROUP_MAP = {
 }
 
 PIPELINE = "pwhl_game_boxscore"
-
-
-def _hockeytech_get(view: str, game_id: int):
-    """Shared fetch for any statviewfeed view keyed on game_id. Mirrors
-    pwhl_shot_events.py's _hockeytech_get exactly (independent copy, not a
-    cross-import -- see module docstring). Returns None if the API
-    responded with an error payload (legitimate "no data", not a fetch
-    failure); raises FetchError after exhausting 3 retries (a genuine
-    fetch failure)."""
-    last_err = None
-    for attempt in range(3):
-        try:
-            r = requests.get(
-                HOCKEYTECH_BASE,
-                params={
-                    "feed": "statviewfeed",
-                    "view": view,
-                    "game_id": str(game_id),
-                    "key": HOCKEYTECH_KEY,
-                    "client_code": CLIENT_CODE,
-                    "lang": "en",
-                    "league_id": "",
-                },
-                headers=HEADERS,
-                timeout=20,
-            )
-            if r.status_code != 200:
-                log.warning(f"    {view} {game_id} status {r.status_code}")
-                last_err = f"status {r.status_code}"
-                continue
-            text = r.text.strip()
-            if "(" in text:
-                text = text[text.index("(") + 1 : text.rindex(")")]
-            data = json.loads(text)
-            if isinstance(data, dict) and "error" in data:
-                log.warning(f"    {view} {game_id} error: {data['error']}")
-                return None
-            return data
-        except Exception as e:
-            log.warning(f"    {view} {game_id} attempt {attempt + 1}: {e}")
-            last_err = str(e)
-        if attempt < 2:
-            time.sleep(2**attempt)
-    raise FetchError(f"{view} {game_id}: failed after 3 attempts ({last_err})")
-
-
-def fetch_game_summary(game_id: int) -> dict | None:
-    data = _hockeytech_get("gameSummary", game_id)
-    return data if isinstance(data, dict) else None
 
 
 def _to_int(val, default=0) -> int:
@@ -317,29 +257,13 @@ def ingest_game(sb, gid: int, season_id: str, season_type: str) -> tuple[int, in
     gs = fetch_game_summary(gid)
     if gs is None:
         log.warning("    No gameSummary -- skipping")
-        sb.table("pwhl_skipped_games").upsert(
-            {
-                "game_id": gid,
-                "pipeline": PIPELINE,
-                "reason": "no_gamesummary",
-                "skipped_at": datetime.now(UTC).isoformat(),
-            },
-            on_conflict="game_id,pipeline",
-        ).execute()
+        pwhl_common.mark_skipped(sb, gid, PIPELINE, "no_gamesummary")
         return 0, 0
 
     skater_rows, goalie_rows = extract_boxscore(gs, gid, season_id, season_type)
     if not skater_rows and not goalie_rows:
         log.info("    No skater/goalie rows found")
-        sb.table("pwhl_skipped_games").upsert(
-            {
-                "game_id": gid,
-                "pipeline": PIPELINE,
-                "reason": "no_boxscore_rows",
-                "skipped_at": datetime.now(UTC).isoformat(),
-            },
-            on_conflict="game_id,pipeline",
-        ).execute()
+        pwhl_common.mark_skipped(sb, gid, PIPELINE, "no_boxscore_rows")
         return 0, 0
 
     player_ids = {r["player_id"] for r in skater_rows} | {r["player_id"] for r in goalie_rows}
@@ -359,34 +283,11 @@ def ingest_game(sb, gid: int, season_id: str, season_type: str) -> tuple[int, in
 
 
 def get_completed_games(sb, season_id: str) -> list:
-    return select_all(
-        lambda: (
-            sb.table("pwhl_game_log")
-            .select("game_id")
-            .eq("season_id", int(season_id))
-            .eq("game_state", "Final")
-        )
-    )
-
-
-def get_skipped_games(sb, pipeline: str) -> set:
-    return {
-        r["game_id"]
-        for r in select_all(
-            lambda: sb.table("pwhl_skipped_games").select("game_id").eq("pipeline", pipeline)
-        )
-    }
+    return pwhl_common.get_completed_games(sb, season_id, columns="game_id")
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    return {
-        r["game_id"]
-        for r in select_all(
-            lambda: (
-                sb.table("pwhl_skater_game_box").select("game_id").eq("season_id", int(season_id))
-            )
-        )
-    }
+    return pwhl_common.get_processed_games(sb, "pwhl_skater_game_box", season_id)
 
 
 def run(season_id: str | None = None) -> None:
@@ -417,7 +318,7 @@ def run(season_id: str | None = None) -> None:
         try:
             ingest_game(sb, gid, season_id, season_type)
         except FetchError as e:
-            # _hockeytech_get() now raises after exhausting retries instead
+            # pwhl_common.hockeytech_get() raises after exhausting retries instead
             # of swallowing to None -- without this, one bad game's fetch
             # failure would crash the entire sweep instead of being skipped.
             log.warning(f"    Fetch failed for game {gid}, skipping: {e}")
