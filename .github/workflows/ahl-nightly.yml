@@ -128,6 +128,34 @@ jobs:
         # above (own PBP fetch, own skip-tracking pipeline name) -- order
         # relative to it doesn't matter, placed last for readability.
 
+      - name: AHL shot-location xG proxy (hockeytech_shot_xg.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_shot_xg.py ahl "${{ inputs.season_id }}"
+        # ahl_player_xg from ahl_shot_events, so after the shot-events step.
+        # Tables: docs/2026-10-07_hockeytech_percentiles.sql (logs one error
+        # and skips until that's been run).
+
+      - name: AHL skater percentiles, per game played (hockeytech_percentiles.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_percentiles.py ahl "${{ inputs.season_id }}"
+        # Reads ahl_player_seasons (stats step), assists from
+        # ahl_shot_events and finishing from ahl_player_xg (the step above).
+
+      - name: AHL goalie percentiles, per game played (hockeytech_goalie_percentiles.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_goalie_percentiles.py ahl "${{ inputs.season_id }}"
+        # Reads ahl_goalie_seasons, ahl_shot_events, ahl_game_log and
+        # ahl_goalie_game_box (credits each goal to the goalie who allowed it).
+
       - name: AHL Elo ratings + win probabilities (hockeytech_elo.py)
         if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
         env:

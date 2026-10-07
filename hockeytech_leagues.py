@@ -53,6 +53,13 @@ class League:
     # {key}_game_log records a final past regulation as boolean `ot` and
     # `shootout` columns (PWHL) instead of AHL/ECHL's `ended_in` text column.
     ot_shootout_columns: bool = False
+    # Skater box scores carry real TOI (PWHL), so the xG/percentile modules
+    # rate per 60 minutes and write onto {key}_player_seasons /
+    # {key}_goalie_seasons, as they always have. AHL/ECHL box scores have no
+    # skater TOI, so those leagues rate per game played and write their own
+    # {key}_player_xg / {key}_player_percentiles / {key}_goalie_percentiles
+    # tables -- see hockeytech_percentiles.py.
+    toi_rates: bool = False
 
     @cached_property
     def code_to_team_id(self) -> dict:
@@ -447,4 +454,5 @@ PWHL = League(
         "women hockey",
     ),
     ot_shootout_columns=True,
+    toi_rates=True,
 )

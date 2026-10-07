@@ -98,6 +98,9 @@ python ahl_game_boxscore.py                # per-game skater/goalie box scores
 python ahl_shot_events.py                  # shot events + goals with coordinates
 python ahl_shot_events.py --game 1028362   # single game (debug)
 python ahl_penalty_shots.py                # penalty shots (makes + misses)
+python hockeytech_shot_xg.py ahl           # xG proxy per shooter -> ahl_player_xg
+python hockeytech_percentiles.py ahl       # skater percentiles, per GP -> ahl_player_percentiles
+python hockeytech_goalie_percentiles.py ahl  # goalie GSAx/percentiles, per GP -> ahl_goalie_percentiles
 python ahl_live_refresh.py                 # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python ahl_news.py                         # AHL news -> Worker
 
@@ -107,6 +110,9 @@ python echl_stats.py 73                    # specific season_id (73 = 2025-26 Re
 python echl_game_boxscore.py               # per-game skater/goalie box scores
 python echl_shot_events.py                 # shot events + goals with coordinates
 python echl_penalty_shots.py               # penalty shots (makes + misses)
+python hockeytech_shot_xg.py echl 78       # same three for ECHL (season_id optional)
+python hockeytech_percentiles.py echl
+python hockeytech_goalie_percentiles.py echl
 python echl_live_refresh.py                # narrow live game_state/score refresh (manual backfill; the Worker writes finals)
 python echl_news.py                        # ECHL news -> Worker
 ```
@@ -831,6 +837,8 @@ python pwhl_milestones.py --game 261          # single game_id (debugging/spot-c
 ```
 
 ### `pwhl_goalie_percentiles.py` (added 2026-08)
+A thin wrapper over `hockeytech_goalie_percentiles.py` since 2026-10 (as `pwhl_percentiles.py`/`pwhl_shot_xg.py` over theirs — see the AHL section); PWHL output unchanged.
+
 Goalie-side analogue of `pwhl_percentiles.py` (skaters) — a category NHL's own `moneypuck.py`/`goalie_seasons` already had (GSAX, GSAX/60, 5v5/HD/MD/PK SV%) but PWHL never built, since `pwhl_percentiles.py` explicitly excludes goalies. Computes:
 - **GSAX-proxy**: same 3-bucket danger-zone xG proxy `pwhl_shot_xg.py` uses for shooters (independent copy, this codebase's usual convention for feed-derived math), applied to shots *against* a goalie. `gsax = xg_against - actual_goals_against`.
 - **GSAX/60**: rate-adjusted using `pwhl_goalie_seasons.toi` (an `"MM:SS"` string from HockeyTech, reliably populated).
@@ -977,6 +985,18 @@ python ahl_penalty_shots.py --game 1028362   # single game_id (debug)
 ```
 
 No coordinate data exists for penalty shots (make or miss) — same as PWHL, `ahl_penalty_shots` has no x/y columns and these events are never written to `ahl_shot_events`.
+
+### `hockeytech_shot_xg.py` / `hockeytech_percentiles.py` / `hockeytech_goalie_percentiles.py` (2026-10)
+The PWHL xG proxy and percentile modules, generalised over `League` so AHL and ECHL get the player-popup percentile radar (audit 2026-10-06 §8). `pwhl_shot_xg.py`, `pwhl_percentiles.py` and `pwhl_goalie_percentiles.py` are now thin wrappers; their output is unchanged, pinned by `test_pwhl_percentiles_characterization.py` (golden master of every upsert, recorded before the move).
+
+AHL/ECHL differ where their data does (`League.toi_rates`):
+- **Rates are per game played.** Their box scores have no skater TOI, so every rate (goals, primary assists, -PIM, finishing; goalie GSAx) is divided by GP instead of per 60. Rows carry `rate_basis_per_gp = true`; `gsax_per60`/`pct_gsax60` keep PWHL's names but hold GSAx per GP.
+- **Own tables**, not columns on the season tables: `{league}_player_xg`, `{league}_player_percentiles`, `{league}_goalie_percentiles`, with the columns the PWHL routes read (`docs/2026-10-07_hockeytech_percentiles.sql`). Until that's run, each step logs one error and skips.
+- **xG buckets from the season's own data.** Same three distance buckets as PWHL, but each bucket's value is that season's goals / attempts over every located goal and shot (no blocked or missed shots exist in these feeds), so league xG equals league goals and nothing is borrowed from PWHL's calibration. Shootout attempts and penalty shots are left out.
+- **Per team.** A traded player's xG, primary assists and finishing split by the team he had them for (shot rows' `team_id` is the shooter's own team here, unlike PWHL's blocked shots).
+- **Goalies.** Goal rows carry no goalie, so each goal is credited to the defending team's only goalie in `{league}_goalie_game_box` who allowed a goal that game, or with two (a mid-game change) to the goalie the scoring team's nearest shot in that period faced. Empty-net goals aren't shots faced. 5v5 and PK SV% stay NULL: shot rows have no strength state, and the PBP's penalties aren't ingested yet.
+
+Nightly in `ahl-nightly.yml`/`echl-nightly.yml` after the penalty-shots step: xG, then skater, then goalie percentiles. Backfill a past season with `python hockeytech_shot_xg.py ahl 90 && python hockeytech_percentiles.py ahl 90 && python hockeytech_goalie_percentiles.py ahl 90` (ECHL: `echl 73`).
 
 ### `ahl_live_refresh.py`
 Lightweight, frequent refresh of just `ahl_game_log`'s live-volatile fields (`game_state`, `game_status_code`, `home_score`, `away_score`, `ended_in`) for games in a ±1-day window around today.
@@ -1168,6 +1188,9 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `ahl_penalty_shots` | Penalty shots (makes + misses), no coordinates — sourced directly from the PBP `penaltyshot` event (unlike PWHL, which needs `gameSummary`) |
 | `ahl_skater_game_box` | Per-skater per-game box score: G/A/P, PIM, +/-, shots. No hits/faceoff/blocked-shots/TOI columns — confirmed always 0/`"0:00"` in the source feed |
 | `ahl_goalie_game_box` | Per-goalie per-game box score: G/A/P, PIM, TOI (real data), shots/goals against, saves |
+| `ahl_player_xg` | (2026-10) Shot-location xG proxy per (player, team, season): attempts, goals, `xg_for`, `finishing` — `hockeytech_shot_xg.py` |
+| `ahl_player_percentiles` | (2026-10) Skater percentiles per game played (`pct_goals`/`pct_a1`/`pct_penalties`/`pct_finishing`, `rate_basis_per_gp`) — `hockeytech_percentiles.py` |
+| `ahl_goalie_percentiles` | (2026-10) Goalie GSAx, HD/MD SV% and percentiles per game played — `hockeytech_goalie_percentiles.py` |
 | `ahl_skipped_games` | Games skipped per AHL pipeline module (mirrors `pwhl_skipped_games`) |
 
 ### ECHL Tables
@@ -1182,6 +1205,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `echl_penalty_shots` | Same shape as `ahl_penalty_shots` |
 | `echl_skater_game_box` | Same shape as `ahl_skater_game_box`, same confirmed hits/faceoff/TOI-always-zero gap |
 | `echl_goalie_game_box` | Same shape as `ahl_goalie_game_box` |
+| `echl_player_xg` / `echl_player_percentiles` / `echl_goalie_percentiles` | (2026-10) Same shape as the AHL tables |
 | `echl_skipped_games` | Games skipped per ECHL pipeline module |
 
 ### Shared Tables (both leagues, one table)
