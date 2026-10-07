@@ -27,7 +27,9 @@ class FakeResponse:
 
 
 def jsonp(data):
-    return FakeResponse(text=f"angular.callbacks._0({json.dumps(data)})")
+    """The real feed's wrapper: the JSON in bare parentheses (checked live,
+    PWHL game 261's gameSummary and gameCenterPlayByPlay, 2026-10-07)."""
+    return FakeResponse(text=f"({json.dumps(data)})")
 
 
 @pytest.fixture
@@ -74,6 +76,24 @@ def test_unwraps_jsonp_and_plain_json(http):
     assert pwhl_common.hockeytech_get("gameSummary", 1) == {"a": 1}
 
 
+def test_plain_json_with_a_paren_in_a_value_is_not_sliced(http):
+    """The loose unwrap PWHL used until 2026-10 cut from the first "(" to
+    the last ")" of any body: plain JSON with a "(" in a value came back
+    corrupted (the AHL roster bug). strip_jsonp only strips a real wrapper."""
+    body = {"details": {"venue": "Arena (Main Rink)"}, "x": [1]}
+    http.responses = [FakeResponse(text=json.dumps(body))]
+    assert pwhl_common.hockeytech_get("gameSummary", 1) == body
+    assert len(http.calls) == 1
+
+
+def test_client_config_is_the_pwhl_league():
+    from hockeytech_leagues import PWHL
+
+    assert PWHL.hockeytech_key == pwhl_common.HOCKEYTECH_KEY
+    assert pwhl_common.CLIENT_CODE == "pwhl"
+    assert PWHL.headers == pwhl_common.HEADERS
+
+
 def test_error_payload_is_no_data_not_a_failure(http):
     http.responses = [jsonp({"error": "No game"})]
     assert pwhl_common.hockeytech_get("gameSummary", 1) is None
@@ -110,6 +130,22 @@ def test_expect_still_treats_an_error_payload_as_no_data(http):
 def test_without_expect_any_shape_comes_back(http):
     http.responses = [jsonp({"details": {}})]
     assert pwhl_common.hockeytech_get("gameCenterPlayByPlay", 7) == {"details": {}}
+
+
+@pytest.mark.parametrize("module", ["pwhl_shot_events", "pwhl_pbp_events"])
+def test_both_pbp_fetches_retry_an_odd_response_and_never_skip(http, module):
+    """The two PBP fetches are one (pwhl_common.fetch_pbp). pwhl_shot_events'
+    copy used to return None for a non-list response, and None marks the
+    game skipped for good; now it retries and raises, so the sweep logs it
+    and tries again next run."""
+    mod = importlib.import_module(module)
+    http.responses = [jsonp({"details": {}}), jsonp({"details": {}}), jsonp([{"event": "shot"}])]
+    assert mod.fetch_pbp(5) == [{"event": "shot"}]
+    http.responses = [jsonp({"details": {}})] * 3
+    with pytest.raises(FetchError):
+        mod.fetch_pbp(6)
+    http.responses = [jsonp({"error": "No game"})]
+    assert mod.fetch_pbp(7) is None
 
 
 def test_fetch_game_summary_only_returns_a_dict(http):

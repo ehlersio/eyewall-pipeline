@@ -50,7 +50,7 @@ from supabase import create_client
 import pwhl_common
 from pipeline_common import FetchError
 from pwhl_common import fetch_game_summary, get_skipped_games
-from season_lookup import get_pwhl_season, get_season_type
+from season_lookup import get_pwhl_season, resolve_pwhl_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -64,26 +64,10 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 # to an empty string (the Session 30 bug).
 PWHL_SEASON = str(get_pwhl_season()["season_id"])
 
-# Same base/auth pattern pwhl_shot_events.py uses for gameSummary.
-SEASON_TYPE_MAP = {
-    "1": "regular",
-    "2": "showcase",
-    "3": "playoffs",
-    "4": "preseason",
-    "5": "regular",
-    "6": "playoffs",
-    "7": "preseason",
-    "8": "regular",
-    "9": "playoffs",
-}
-
-
-def _resolve_season_type(season_id: str) -> str | None:
-    """SEASON_TYPE_MAP first (holds a deliberate manual correction for
-    season "2" — see CLAUDE.md's "Known open items"), then get_season_type()
-    as a live fallback. Returns None, not a guessed "regular", if neither
-    source recognizes the id."""
-    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+# PWHL season types: one map and resolver in season_lookup.py since 2026-10
+# (PWHL_SEASON_TYPE_MAP keeps the season-2 "showcase" and season-10
+# corrections; the current season and new ids resolve live).
+_resolve_season_type = resolve_pwhl_season_type
 
 
 # Granular HockeyTech position code -> broad F/D/G group.

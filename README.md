@@ -687,7 +687,7 @@ Main PWHL stats pipeline. Accepts `season_id` argument (e.g. `8` for 2025-26 reg
 
 **Special teams note:** HockeyTech `view=teams&special=true` returns PP%/PK% as strings like `"23.0%"`. `_parse_pct()` converts to float (0.23).
 
-**Game date note:** HockeyTech returns `"Fri, Apr 30"` not a full ISO date. `_parse_game_date()` places it on the first such date on or after the season's floor: its real HockeyTech `start_date` minus 60 days when the Worker's `/config/seasons` describes the season (current, next, and their preseasons, so a brand-new season_id needs no map entry), otherwise Sep 1 of its `SEASON_YEAR_MAP` start year (months Sep-Dec use start year, Jan-Aug use start year + 1). Since 2026-10 the result is checked against the weekday HockeyTech prints. A mismatch means the year is wrong, so it raises `GameDateError` and nothing is written. A season neither source knows also raises, where it used to fall back to 2025 silently. Checked on every live schedule date of seasons 1–3 and 5–11 (season 4, 2024-25 preseason, has no map entry and now raises instead of being dated 2025). `SEASON_YEAR_MAP`/`SEASON_TYPE_MAP` are hardcoded per historical season_id, but the *current* season's entry is filled in live via `season_lookup.get_pwhl_season()` (`.setdefault()`, so it never overwrites a real historical entry) — no more manual map edit needed each October for the current season specifically. Historical IDs still need a manual entry if HockeyTech ever renumbers past seasons, which hasn't happened.
+**Game date note:** HockeyTech returns `"Fri, Apr 30"` not a full ISO date. `_parse_game_date()` places it on the first such date on or after the season's floor: its real HockeyTech `start_date` minus 60 days when the Worker's `/config/seasons` describes the season (current, next, and their preseasons, so a brand-new season_id needs no map entry), otherwise Sep 1 of its `SEASON_YEAR_MAP` start year (months Sep-Dec use start year, Jan-Aug use start year + 1). Since 2026-10 the result is checked against the weekday HockeyTech prints. A mismatch means the year is wrong, so it raises `GameDateError` and nothing is written. A season neither source knows also raises, where it used to fall back to 2025 silently. Checked on every live schedule date of seasons 1–3 and 5–11 (season 4, 2024-25 preseason, has no map entry and now raises instead of being dated 2025). `SEASON_YEAR_MAP` is hardcoded per historical season_id (season types: `season_lookup.PWHL_SEASON_TYPE_MAP` / `resolve_pwhl_season_type()` since 2026-10), but the *current* season's entry is filled in live via `season_lookup.get_pwhl_season()` (`.setdefault()`, so it never overwrites a real historical entry) — no more manual map edit needed each October for the current season specifically. Historical IDs still need a manual entry if HockeyTech ever renumbers past seasons, which hasn't happened.
 
 **Expansion team IDs (added 2026-07):** `TEAM_ID_MAP` and `CITY_TEAM_MAP` include DET=10, HAM=11, LV=12, SJS=13, confirmed via HockeyTech's real signing data + team-filter dropdown. `find_hat_trick_candidates.py`, `get_candidate_game_info.py`, and `pwhl_milestones.py` all `import TEAM_ID_MAP` from here rather than keeping their own copy, so they picked up the new entries automatically. `pwhl_salaries.py` has its own separate `TEAM_NAME_MAP` (PWHLPA city names, not HockeyTech IDs) — updated independently, see below.
 
@@ -713,12 +713,16 @@ python pwhl_stats.py 9   # 2025-26 playoffs
 
 ### `pwhl_common.py` (2026-10)
 Shared by the five PWHL per-game modules (`pwhl_shot_events`, `pwhl_pbp_events`, `pwhl_game_boxscore`, `pwhl_penalty_shots`, `pwhl_goal_on_ice`), which used to carry five copies of it:
-- the client config;
+- the client config, which is `hockeytech_leagues.PWHL`'s since 2026-10;
 - `hockeytech_get()`: the retrying `statviewfeed` GET keyed on `game_id`. It makes 3 attempts and raises `FetchError` when they run out; an error payload returns `None`, meaning no data;
 - `fetch_game_summary()`;
 - the per-game queue helpers: `get_completed_games` / `get_skipped_games` / `get_processed_games(table)` / `mark_skipped(pipeline)`.
 
-Each module keeps wrappers under its old names and signatures. `pwhl_pbp_events.fetch_pbp` passes `expect=list`, so any other shape is retried, as it always was. `pwhl_shot_events.fetch_pbp` takes any shape and returns `None` for a non-list, as it always did. Covered by `test_pwhl_common.py`.
+Each module keeps wrappers under its old names and signatures. Covered by `test_pwhl_common.py`.
+
+Since 2026-10:
+- The JSONP unwrap is `hockeytech_leagues.strip_jsonp`, as AHL/ECHL use. It strips the `(...)` wrapper only when one is there. The old unwrap sliced from the first `(` to the last `)` of any body, which corrupted plain JSON with a `(` in a value.
+- The two play-by-play fetches are one: `pwhl_common.fetch_pbp()`. A list comes back, an error payload is `None` (the game is marked skipped), and anything else is retried and then raises `FetchError`, so the game is retried next run. `pwhl_shot_events.fetch_pbp` used to turn an odd-shaped response into `None` at once, which marked the game skipped for good.
 
 ### `pwhl_pbp_events.py`
 Ingests PWHL PBP events (faceoffs, hits, penalties, goalie changes) from HockeyTech. Incremental by default — skips already-processed games.
@@ -887,7 +891,7 @@ python pwhl_goalie_percentiles.py 8           # specific season_id
 
 IDs 2, 4, 7 are real preseason entries in HockeyTech's own `bootstrap` response (confirmed 2026-07 — they're not missing/gapped as this table previously assumed), just hidden from standings and with little-to-no game data.
 
-**Discrepancy, now resolved (2026-09):** `pwhl_stats.py`'s `SEASON_TYPE_MAP` labels ID `2` as `"showcase"` (comment: "2024 Showcase, 9 games, pre-launch tournament"), while the `bootstrap` response (confirmed 2026-07-05) names it `"2024 Preseason"`. `SEASON_TYPE_MAP` is right, per the season's own game data: `pwhl_game_log` has exactly 9 games for season 2, all played across four days, 2023-12-04 to 2023-12-07 — three and a half weeks before the inaugural regular season (ID 1) opened on 2024-01-01 — with all six teams playing 3 apiece. That's the pre-launch showcase slate, not a preseason warm-up to it. Left labeled `"showcase"`.
+**Discrepancy, now resolved (2026-09):** the PWHL season-type map (`pwhl_stats.py`'s `SEASON_TYPE_MAP` then; `season_lookup.PWHL_SEASON_TYPE_MAP` since 2026-10) labels ID `2` as `"showcase"` (comment: "2024 Showcase, 9 games, pre-launch tournament"), while the `bootstrap` response (confirmed 2026-07-05) names it `"2024 Preseason"`. `SEASON_TYPE_MAP` is right, per the season's own game data: `pwhl_game_log` has exactly 9 games for season 2, all played across four days, 2023-12-04 to 2023-12-07 — three and a half weeks before the inaugural regular season (ID 1) opened on 2024-01-01 — with all six teams playing 3 apiece. That's the pre-launch showcase slate, not a preseason warm-up to it. Left labeled `"showcase"`.
 
 **Season 2 is also the one PWHL season whose feed calls Montréal `MON` instead of `MTL`** (every other season, and season 2's own game log, use `MTL`/`Montréal`). `TEAM_CODE_ALIASES` maps it (`pwhl_stats.py` takes it from `hockeytech_leagues.PWHL.team_code_aliases`). Before that (fixed 2026-09), its 21 skaters and 3 goalies were written with `team_id` NULL, which never matches the `player_id,team_id,season_id,season_type` conflict key — so every run inserted another copy of them. `team_id_for()` is now the single lookup for all three of `fetch_skater_stats` / `fetch_goalie_stats` / `fetch_team_stats`, and a code it can't place is skipped with a `Skipped N ... rows with no known team: CODE (n)` warning rather than stored team-less. Same failure and same fix as the ECHL's Iowa/Utah rows — see `hockeytech_leagues.py`.
 
@@ -1295,7 +1299,7 @@ Every writer workflow has `concurrency: { group: <workflow>, cancel-in-progress:
 
 ### PWHL
 1. ~~Update `PWHL_SEASON` GH Actions secret~~ — automatic now (fallback only)
-2. ~~Update `SEASON_YEAR_MAP`/`SEASON_TYPE_MAP` in `pwhl_stats.py`~~ — current season's entry fills in live now; only needed if a *historical* season_id ever needs correcting
+2. ~~Update `SEASON_YEAR_MAP` in `pwhl_stats.py` / `PWHL_SEASON_TYPE_MAP` in `season_lookup.py`~~ — current season's entry fills in live now; only needed if a *historical* season_id ever needs correcting
 3. ~~Update `PWHL_CURRENT_SEASON` in frontend `pwhlConfig.js`~~ — automatic now, fetched from the Worker at app boot
 4. ~~Add expansion team IDs to `pwhlConfig.js`~~ — done 2026-07 (DET=10, HAM=11, LV=12, SJS=13)
 5. Run `python pwhl_salaries.py` when PWHLPA publishes the new salary guide — still manual

@@ -163,7 +163,7 @@ class TestPBPSeasonHandling:
         confirms the module-level wiring to season_lookup.get_pwhl_season()
         works — no live mismatch."""
         assert pbp_module.PWHL_SEASON == "8"
-        assert pbp_module.SEASON_TYPE_MAP["8"] == "regular"
+        assert pbp_module._resolve_season_type("8") == "regular"
 
     def test_pbp_ingestion_during_active_preseason(self, pbp_module, monkeypatch):
         """THE REAL TEST. Single-game mode for a game that belongs to
@@ -217,17 +217,18 @@ class TestPBPSeasonHandling:
     ):
         """Was: 'documents the gap' (SEASON_TYPE_MAP.get(id, "regular")
         silently guessing "regular" for an id it doesn't have). Now:
-        asserts the fix. season_id "10" has no hardcoded SEASON_TYPE_MAP
-        entry, but the (mocked) live bootstrap data via
+        asserts the fix. season_id "12" has no hardcoded
+        season_lookup.PWHL_SEASON_TYPE_MAP entry (the one shared map since
+        2026-10), but the (mocked) live bootstrap data via
         get_season_type() knows it's a real preseason season —
         _resolve_season_type() must return that, not "regular"."""
         monkeypatch.setattr(
             season_lookup.requests,
             "get",
-            _make_requests_get(season_types={**DEFAULT_SEASON_TYPES, "10": "preseason"}),
+            _make_requests_get(season_types={**DEFAULT_SEASON_TYPES, "12": "preseason"}),
         )
-        assert "10" not in pbp_module.SEASON_TYPE_MAP
-        assert pbp_module._resolve_season_type("10") == "preseason"
+        assert "12" not in season_lookup.PWHL_SEASON_TYPE_MAP
+        assert pbp_module._resolve_season_type("12") == "preseason"
         # Existing hardcoded entries are untouched by the live fallback.
         assert pbp_module._resolve_season_type("8") == "regular"
 

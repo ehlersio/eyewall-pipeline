@@ -31,7 +31,7 @@ from supabase import create_client
 import pwhl_common
 from pipeline_common import FetchError
 from pwhl_common import get_completed_games
-from season_lookup import get_pwhl_season, get_season_type
+from season_lookup import get_pwhl_season, resolve_pwhl_season_type
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -43,33 +43,10 @@ SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 _pwhl_live = get_pwhl_season()  # live-resolved via Worker; falls back to PWHL_SEASON env var
 PWHL_SEASON = str(_pwhl_live["season_id"])
 
-SEASON_TYPE_MAP = {
-    "1": "regular",
-    "2": "showcase",
-    "3": "playoffs",
-    "4": "preseason",
-    "5": "regular",
-    "6": "playoffs",
-    "7": "preseason",
-    "8": "regular",
-    "9": "playoffs",
-}
-# Historical IDs stay hardcoded above; current season's type filled in
-# live so it doesn't need a manual addition every October — mirrors
-# pwhl_stats.py's SEASON_TYPE_MAP.setdefault pattern.
-SEASON_TYPE_MAP.setdefault(PWHL_SEASON, _pwhl_live["season_type"])
-
-
-def _resolve_season_type(season_id: str) -> str | None:
-    """SEASON_TYPE_MAP first — it holds deliberate manual corrections
-    (e.g. season "2" is hardcoded "showcase" even though HockeyTech's own
-    bootstrap calls it "2024 Preseason"; see CLAUDE.md's "Known open
-    items" before ever changing that) — then get_season_type() as a live
-    fallback for any id (new preseason/playoff seasons, etc.) this module
-    doesn't have a hardcoded entry for. Returns None, not a guessed
-    "regular", if neither source recognizes the id — callers must decide
-    what to do with that (see run()'s two call sites)."""
-    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
+# PWHL season types: one map and resolver in season_lookup.py since 2026-10
+# (PWHL_SEASON_TYPE_MAP keeps the season-2 "showcase" and season-10
+# corrections; the current season and new ids resolve live).
+_resolve_season_type = resolve_pwhl_season_type
 
 
 # Event types we own — shots/goals handled by pwhl_shot_events.py
@@ -92,11 +69,11 @@ PIPELINE = "pwhl_pbp_events"
 
 
 def fetch_pbp(game_id: int) -> list | None:
-    """Fetch play-by-play events for a single game. Returns None if the API
-    responded with an error payload (legitimate "no data", not a fetch
-    failure); raises FetchError after exhausting 3 retries (a genuine
-    fetch failure). Anything but a list counts as a failed attempt."""
-    return pwhl_common.hockeytech_get("gameCenterPlayByPlay", game_id, expect=list)
+    """Play-by-play events for one game -- pwhl_common.fetch_pbp(), shared
+    with pwhl_shot_events.py/pwhl_pbp_events.py (2026-10): None only for an
+    error payload; any other odd response retries, then raises FetchError
+    (game retried next run, never marked skipped)."""
+    return pwhl_common.fetch_pbp(game_id)
 
 
 # ── Coord helpers ─────────────────────────────────────────────────────────────

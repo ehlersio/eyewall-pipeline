@@ -462,3 +462,37 @@ class TestGetPWHLSeasonStartDate:
         season_lookup._cache = None
         monkeypatch.setattr(season_lookup.requests, "get", _raise_network_error)
         assert season_lookup.get_pwhl_season_start_date(8) is None
+
+
+class TestResolvePwhlSeasonType:
+    """resolve_pwhl_season_type(): the one PWHL season-type resolver
+    (2026-10), replacing the SEASON_TYPE_MAP copies in nine pwhl_* modules."""
+
+    def test_manual_corrections_beat_live_data(self, monkeypatch):
+        monkeypatch.setattr(season_lookup, "get_season_type", lambda sid: "regular")
+        monkeypatch.setattr(
+            season_lookup, "get_pwhl_season", lambda: {"season_id": 10, "season_type": "regular"}
+        )
+        assert season_lookup.resolve_pwhl_season_type("2") == "showcase"
+        assert season_lookup.resolve_pwhl_season_type(10) == "preseason"
+
+    def test_current_season_then_live_list(self, monkeypatch):
+        monkeypatch.setattr(
+            season_lookup, "get_pwhl_season", lambda: {"season_id": 11, "season_type": "regular"}
+        )
+        monkeypatch.setattr(season_lookup, "get_season_type", {"12": "playoffs"}.get)
+        assert season_lookup.resolve_pwhl_season_type("11") == "regular"
+        assert season_lookup.resolve_pwhl_season_type("12") == "playoffs"
+        assert season_lookup.resolve_pwhl_season_type("404") is None
+
+    def test_modules_share_it(self):
+        import pwhl_game_boxscore
+        import pwhl_pbp_events
+        import pwhl_penalty_shots
+        import pwhl_shot_events
+        import pwhl_stats
+
+        for mod in (pwhl_stats, pwhl_pbp_events, pwhl_shot_events, pwhl_game_boxscore,
+                    pwhl_penalty_shots):  # fmt: skip
+            assert mod._resolve_season_type is season_lookup.resolve_pwhl_season_type
+            assert not hasattr(mod, "SEASON_TYPE_MAP")

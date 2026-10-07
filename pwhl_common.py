@@ -11,6 +11,12 @@ copies were identical apart from the table each one counts as "processed",
 which is now a parameter. Each module keeps its own thin wrappers under the
 old names and signatures, so callers and tests are unchanged.
 
+The client config is hockeytech_leagues.PWHL's (key, client code, headers)
+and the JSONP unwrap is hockeytech_leagues.strip_jsonp, as the AHL/ECHL
+modules use (2026-10). fetch_pbp() is the one play-by-play fetch for
+pwhl_shot_events.py and pwhl_pbp_events.py, which had two copies that
+disagreed about an odd-shaped response.
+
 Per-game queue, for every module:
     todo = completed games (pwhl_game_log, game_state "Final")
            - games already in the module's own table ("processed")
@@ -24,20 +30,16 @@ from datetime import UTC, datetime
 
 import requests
 
+from hockeytech_leagues import HOCKEYTECH_BASE, PWHL, strip_jsonp
 from pipeline_common import FetchError, select_all
 
 log = logging.getLogger(__name__)
 
-# feed/index.php, not feed/ -- required for gameCenterPlayByPlay.
-HOCKEYTECH_BASE = "https://lscluster.hockeytech.com/feed/index.php"
-HOCKEYTECH_KEY = "446521baf8c38984"
-CLIENT_CODE = "pwhl"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Referer": "https://www.thepwhl.com/",
-}
+# HOCKEYTECH_BASE is feed/index.php, not feed/ -- required for
+# gameCenterPlayByPlay.
+HOCKEYTECH_KEY = PWHL.hockeytech_key
+CLIENT_CODE = PWHL.key
+HEADERS = PWHL.headers
 
 ATTEMPTS = 3
 
@@ -56,9 +58,11 @@ def hockeytech_get(view: str, game_id: int, expect: type | None = None):
     always behaved this way (list or retry); the other modules take any
     shape and check it themselves, so they leave it unset.
 
-    The JSONP unwrap slices from the first "(" to the last ")" whatever the
-    body looks like, as every PWHL copy always did (the AHL copies were
-    fixed to strip only a real wrapper -- hockeytech_leagues.strip_jsonp).
+    The body is unwrapped only if it really is JSONP-wrapped
+    (hockeytech_leagues.strip_jsonp: the feed answers "(...)"). Until
+    2026-10 the PWHL copies sliced from the first "(" to the last ")"
+    whatever the body was, which corrupts plain JSON with a "(" in a value
+    -- the bug that once broke AHL rosters.
     """
     last_err = None
     for attempt in range(ATTEMPTS):
@@ -81,11 +85,7 @@ def hockeytech_get(view: str, game_id: int, expect: type | None = None):
                 log.warning(f"    {view} {game_id} status {r.status_code}")
                 last_err = f"status {r.status_code}"
                 continue
-            text = r.text.strip()
-            # HockeyTech wraps some responses as JSONP: callback(...)
-            if "(" in text:
-                text = text[text.index("(") + 1 : text.rindex(")")]
-            data = json.loads(text)
+            data = json.loads(strip_jsonp(r.text.strip()))
             if expect is not None and isinstance(data, expect):
                 return data
             if isinstance(data, dict) and "error" in data:
@@ -100,6 +100,16 @@ def hockeytech_get(view: str, game_id: int, expect: type | None = None):
         if attempt < ATTEMPTS - 1:
             time.sleep(2**attempt)
     raise FetchError(f"{view} {game_id}: failed after {ATTEMPTS} attempts ({last_err})")
+
+
+def fetch_pbp(game_id: int) -> list | None:
+    """Play-by-play events for one game: a list, or None when HockeyTech
+    answers with an error payload (no data for this game -- the caller marks
+    it skipped). Anything else is a failed attempt: retried, then FetchError,
+    so the game is retried next run rather than marked skipped.
+    pwhl_shot_events.py's copy used to turn an odd-shaped response into None
+    straight away, which marked the game skipped for good."""
+    return hockeytech_get("gameCenterPlayByPlay", game_id, expect=list)
 
 
 def fetch_game_summary(game_id: int) -> dict | None:
