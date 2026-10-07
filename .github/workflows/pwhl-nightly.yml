@@ -311,6 +311,23 @@ jobs:
         # resolution has an env-var fallback path that needs this set if
         # the live Worker call is ever unreachable during this job.
 
+      - name: PWHL power rankings + EyeWall AI narratives (hockeytech_power_rankings.py)
+        if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python hockeytech_power_rankings.py pwhl --narratives
+        # Ranks every team from pwhl_team_seasons + pwhl_game_log (the stats
+        # step) into pwhl_power_rankings, then writes an en + fr narrative per
+        # team into pwhl_power_rankings_narratives (read by eyewall-poller's
+        # /pwhl/power-rankings). Only on nights after games were played, once
+        # every team has 3 GP. Up to 2 OpenRouter calls per team per night:
+        # remove --narratives above to stop them (rankings keep updating).
+        # Tables: docs/2026-10-08_hockeytech_power_rankings.sql (logs one
+        # error and moves on until it's been run).
+
       - name: PWHL Elo ratings + win probabilities (hockeytech_elo.py)
         if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
         env:

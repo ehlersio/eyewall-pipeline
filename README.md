@@ -553,6 +553,29 @@ Requires `docs/session_social_posts.sql` to be run in Supabase first (the `socia
 
 The EyeWall AI prompt's top players are also drawn from the current roster. Until the team's players have 20 GP, they're shown with last season's stats, labeled with that season and the team they played for (plus this season's line so far), and the prompt tells the model not to present those numbers as this season's. Until this change, last season's rows filed under the team were shown unlabeled, including players who had left (TOR: Maccelli, now NYI; Robertson, now PIT).
 
+### `hockeytech_power_rankings.py` (2026-10)
+AHL/ECHL/PWHL nightly power rankings → `{league}_power_rankings` (`season_id, run_date, team_id, rank, prior_rank, score, components`), and with `--narratives` an EyeWall AI narrative per team per locale (en, fr) → `{league}_power_rankings_narratives` (`season_id, run_date, team_id, locale, narrative`). Read by eyewall-poller's `/{league}/power-rankings`. Runs in `ahl-/echl-/pwhl-nightly.yml` with `--narratives`; delete the flag from the step's `run:` line to stop the AI calls.
+
+**Formula** (fixed; each component min-max normalised across the league, a missing number sits at the neutral 0.5):
+
+| Component | PWHL | AHL/ECHL | Source |
+|-----------|------|----------|--------|
+| Points % | 35% | 41.2% | `{league}_team_seasons` (points / (GP × win points)) |
+| Last-10 points % | 20% | 23.5% | last 10 finals in `{league}_game_log` (AHL/ECHL 2-2-1 points, PWHL 3-2-1) |
+| Goal diff/GP | 20% | 23.5% | `{league}_team_seasons` |
+| Corsi for % | 15% | — | `pwhl_team_seasons.corsi_for_pct` (AHL/ECHL have no shot attempts) |
+| Special teams (PP% + PK%)/2 | 10% | 11.8% | `{league}_team_seasons` |
+
+The PWHL weights are the ones its League › Power Rankings tab already used client-side; AHL/ECHL drop Corsi and scale the rest proportionally (35/20/20/10 of 85). No xG or WAR term. Writes only once every team has 3 GP and only on a night after games were played (a final in the last 2 days), so breaks and the off-season don't repeat the same table and narratives; `prior_rank` is the rank on the previous run. Narratives: the persona + French addendum from `ai_persona.get_system_prompt()`, `ai_client.generate()`'s retries, 1 s between calls, (team, locale) pairs already written for the night are skipped; the prompt carries only the team's components and the league table, forbids player names (no player data is given) and betting language. Up to teams × 2 calls per league per game night: 148 when all three leagues play (32 + 30 + 12 teams).
+
+```
+python hockeytech_power_rankings.py ahl                          # rankings only
+python hockeytech_power_rankings.py ahl --narratives --dry-run   # print the first prompt, write nothing
+python hockeytech_power_rankings.py echl --season 78 --date 2026-11-02
+```
+
+Requires `docs/2026-10-08_hockeytech_power_rankings.sql` (six tables + RLS). Until it's run, the step logs one error and moves on.
+
 ### `special_teams.py`
 PP/PK unit inference from shift + shot events → `special_teams_units` table.
 
