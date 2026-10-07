@@ -1,0 +1,79 @@
+[
+  {
+    "game_goal_id": 501,
+    "is_empty_net": false,
+    "is_penalty_shot": false,
+    "is_power_play": true,
+    "is_short_handed": false,
+    "on_ice_for": true,
+    "player_id": 11,
+    "scoring_team_id": 3,
+    "team_id": 3
+  },
+  {
+    "game_goal_id": 501,
+    "is_empty_net": false,
+    "is_penalty_shot": false,
+    "is_power_play": true,
+    "is_short_handed": false,
+    "on_ice_for": true,
+    "player_id": 12,
+    "scoring_team_id": 3,
+    "team_id": 3
+  },
+  {
+    "game_goal_id": 501,
+    "is_empty_net": false,
+    "is_penalty_shot": false,
+    "is_power_play": true,
+    "is_short_handed": false,
+    "on_ice_for": false,
+    "player_id": 21,
+    "scoring_team_id": 3,
+    "team_id": 12
+  },
+  {
+    "game_goal_id": 501,
+    "is_empty_net": false,
+    "is_penalty_shot": false,
+    "is_power_play": true,
+    "is_short_handed": false,
+    "on_ice_for": false,
+    "player_id": 22,
+    "scoring_team_id": 3,
+    "team_id": 12
+  },
+  {
+    "game_goal_id": 502,
+    "is_empty_net": true,
+    "is_penalty_shot": false,
+    "is_power_play": false,
+    "is_short_handed": true,
+    "on_ice_for": true,
+    "player_id": 21,
+    "scoring_team_id": 12,
+    "team_id": 12
+  },
+  {
+    "game_goal_id": 502,
+    "is_empty_net": true,
+    "is_penalty_shot": false,
+    "is_power_play": false,
+    "is_short_handed": true,
+    "on_ice_for": false,
+    "player_id": 11,
+    "scoring_team_id": 12,
+    "team_id": 3
+  },
+  {
+    "game_goal_id": 502,
+    "is_empty_net": true,
+    "is_penalty_shot": false,
+    "is_power_play": false,
+    "is_short_handed": true,
+    "on_ice_for": false,
+    "player_id": 13,
+    "scoring_team_id": 12,
+    "team_id": 3
+  }
+]
