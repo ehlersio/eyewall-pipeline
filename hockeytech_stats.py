@@ -1014,10 +1014,16 @@ def run(lg: League, season_id: str | None = None) -> None:
 
     log.info(f"=== {lg.label} stats run: season_id={season_id} season_type={season_type} ===")
 
-    # Only the nightly run's roster is today's, so only it marks on_roster.
-    fetch_roster(lg, sb, season_id, season_type, mark_on_roster=nightly)
+    # Rosters after the stats sweep, as pwhl_stats.py does: the skater and
+    # goalie views stub-upsert {league}_players.team_id from the stats row,
+    # which files a traded player under whichever team the league-wide view
+    # names (often still his old one until he plays for the new team).
+    # Written first, the roster's team_id was overwritten by that a moment
+    # later; written last, the roster -- who is on each team today -- wins.
     fetch_skater_stats(lg, sb, season_id, season_type)
     fetch_goalie_stats(lg, sb, season_id, season_type)
+    # Only the nightly run's roster is today's, so only it marks on_roster.
+    fetch_roster(lg, sb, season_id, season_type, mark_on_roster=nightly)
     fetch_team_stats(lg, sb, season_id, season_type)
     fetch_game_log(lg, sb, season_id)
     if nightly:
