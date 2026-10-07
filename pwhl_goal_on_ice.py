@@ -1,33 +1,23 @@
 """
-pwhl_goal_on_ice.py — PWHL goal-level on-ice roster pipeline module (Session 42)
+pwhl_goal_on_ice.py — PWHL goal-level on-ice rosters (pwhl_goal_on_ice).
 
-Fetches gameSummary's periods[].goals[].plus_players[]/minus_players[] for
-each completed PWHL game and writes one row per (game_goal_id, player_id) to
-pwhl_goal_on_ice — the full on-ice skater roster (by team) at the moment of
-each goal. Independent of the shift-derivation approach the rest of the
-pipeline relies on elsewhere, and independent of the WAR/RAPM blocker
-(HockeyTech's PBP still exposes no player_change shift events) — this data
-is goal-scoped, not continuous shift tracking, so it does NOT change that
-blocker's calculus. It's a much coarser signal (only captures on-ice
-composition at goal instants, which are rare relative to total ice time)
-and should not be treated as a substitute for real shift data if a future
-session is tempted to use it that way for line combinations or on-ice
-shot-rate stats.
+Thin wrapper over hockeytech_goal_on_ice.py (2026-10), which serves AHL and
+ECHL too; output unchanged, pinned by test_goal_on_ice_characterization.py.
+One row per (game_goal_id, player_id) from gameSummary's
+periods[].goals[].plus_players[]/minus_players[]: plus_players are the
+scoring team's skaters on the ice, minus_players the conceding team's.
 
-Data shape confirmed live (Session 42, game 277 and others): plus_players[]
-= on-ice skaters for the team that SCORED; minus_players[] = on-ice skaters
-for the team that CONCEDED. Not the traditional individual plus-minus
-convention by name, but empirically validated (below) to reproduce it
-exactly once the right goals are excluded.
+Convention validated against gameSummary's skaters[].stats.plusMinus
+(Session 42, 416/416 player-games; later the full backfill, 10,669/10,669):
+summing on_ice_for (+1) / not (-1) over every goal EXCEPT power-play goals
+reproduces HockeyTech's plusMinus. Short-handed, empty-net and penalty-shot
+goals all count. Each row carries the four flags so consumers can filter
+without a join.
 
-Convention validated against gameSummary's own skaters[].stats.plusMinus
-(Session 42, 11 games / 416 player-game rows, matched 416/416): summing
-on_ice_for (+1) / not on_ice_for (-1) across all goals EXCEPT power-play
-goals reproduces HockeyTech's own plusMinus field exactly. Short-handed,
-empty-net, AND penalty-shot goals all count -- only power-play goals are
-excluded. This module stores is_power_play/is_short_handed/is_empty_net/
-is_penalty_shot on every row so any consumer can apply that filter (or a
-different one) without joining back to pwhl_shot_events.
+Goal-scoped, not shift data: it doesn't change the WAR/RAPM blocker and
+shouldn't stand in for shifts in line combinations or on-ice rates.
+
+In pwhl-nightly.yml since 2026-10 (it was manual-only from Session 42).
 
 Run modes:
   python pwhl_goal_on_ice.py                  # ingest current season
@@ -37,201 +27,33 @@ Run modes:
 
 import argparse
 import logging
-import os
-import time
-from datetime import UTC, datetime
 
-from dotenv import load_dotenv
 from supabase import create_client
 
-import pwhl_common
-from pipeline_common import FetchError
-from pwhl_common import fetch_game_summary, get_completed_games
-from season_lookup import get_pwhl_season, get_season_type
+import hockeytech_goal_on_ice as _impl
+from hockeytech_goal_on_ice import extract_goal_on_ice  # noqa: F401  (re-exported)
+from hockeytech_leagues import PWHL
+from pwhl_stats import PWHL_SEASON, SUPABASE_SERVICE_KEY, SUPABASE_URL, _resolve_season_type
 
-load_dotenv()
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s - %(message)s")
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-# Live-resolved via Worker; falls back to PWHL_SEASON env var (or "8") — see
-# season_lookup.get_pwhl_season(). Not os.environ.get("PWHL_SEASON", "8"):
-# that only applies its default when the key is absent, not when it's set
-# to an empty string (the Session 30 bug).
-PWHL_SEASON = str(get_pwhl_season()["season_id"])
-
-SEASON_TYPE_MAP = {
-    "1": "regular",
-    "2": "showcase",
-    "3": "playoffs",
-    "4": "preseason",
-    "5": "regular",
-    "6": "playoffs",
-    "7": "preseason",
-    "8": "regular",
-    "9": "playoffs",
-}
-
-PIPELINE = "pwhl_goal_on_ice"
-
-
-def _resolve_season_type(season_id: str) -> str | None:
-    return SEASON_TYPE_MAP.get(season_id) or get_season_type(season_id)
-
-
-def _parse_bool(val) -> bool:
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, str):
-        return val.strip().lower() in ("true", "1", "yes")
-    return bool(val)
-
-
-def extract_goal_on_ice(game_summary: dict, home_team_id: int, away_team_id: int) -> list[dict]:
-    """Flatten periods[].goals[].plus_players[]/minus_players[] into
-    insert-ready dicts (missing game_id/season_id/season_type, filled in by
-    the caller). plus_players -> on_ice_for=True, team_id=scoring team;
-    minus_players -> on_ice_for=False, team_id=the OTHER team (derived from
-    home/away, since minus_players itself carries no team field)."""
-    out = []
-    for period in game_summary.get("periods") or []:
-        for goal in period.get("goals") or []:
-            team = goal.get("team") or {}
-            try:
-                scoring_team_id = int(team.get("id"))
-            except (TypeError, ValueError):
-                continue
-
-            try:
-                game_goal_id = int(goal.get("game_goal_id"))
-            except (TypeError, ValueError):
-                log.warning(f"    goal missing game_goal_id, skipping: {goal.get('team')}")
-                continue
-
-            if scoring_team_id == home_team_id:
-                opposing_team_id = away_team_id
-            elif scoring_team_id == away_team_id:
-                opposing_team_id = home_team_id
-            else:
-                opposing_team_id = None
-                log.warning(
-                    f"    goal {game_goal_id}: scoring team {scoring_team_id} matches neither "
-                    f"home {home_team_id} nor away {away_team_id}"
-                )
-
-            props = goal.get("properties") or {}
-            flags = {
-                "is_power_play": _parse_bool(props.get("isPowerPlay", False)),
-                "is_short_handed": _parse_bool(props.get("isShortHanded", False)),
-                "is_empty_net": _parse_bool(props.get("isEmptyNet", False)),
-                "is_penalty_shot": _parse_bool(props.get("isPenaltyShot", False)),
-            }
-
-            for pl in goal.get("plus_players") or []:
-                try:
-                    pid = int(pl.get("id"))
-                except (TypeError, ValueError):
-                    continue
-                out.append(
-                    {
-                        "game_goal_id": game_goal_id,
-                        "scoring_team_id": scoring_team_id,
-                        "player_id": pid,
-                        "team_id": scoring_team_id,
-                        "on_ice_for": True,
-                        **flags,
-                    }
-                )
-
-            if opposing_team_id is None:
-                minus = goal.get("minus_players") or []
-                if minus:
-                    log.warning(
-                        f"    goal {game_goal_id}: skipping {len(minus)} minus_players -- "
-                        "couldn't resolve opposing team_id"
-                    )
-                continue
-
-            for pl in goal.get("minus_players") or []:
-                try:
-                    pid = int(pl.get("id"))
-                except (TypeError, ValueError):
-                    continue
-                out.append(
-                    {
-                        "game_goal_id": game_goal_id,
-                        "scoring_team_id": scoring_team_id,
-                        "player_id": pid,
-                        "team_id": opposing_team_id,
-                        "on_ice_for": False,
-                        **flags,
-                    }
-                )
-    return out
+PIPELINE = _impl.pipeline_name(PWHL)
 
 
 def get_skipped_games(sb) -> set:
-    return pwhl_common.get_skipped_games(sb, PIPELINE)
+    return _impl.get_skipped_games(PWHL, sb)
 
 
 def get_processed_games(sb, season_id: str) -> set:
-    return pwhl_common.get_processed_games(sb, "pwhl_goal_on_ice", season_id)
+    return _impl.get_processed_games(PWHL, sb, season_id)
 
 
 def mark_skipped(sb, game_id: int, reason: str) -> None:
-    pwhl_common.mark_skipped(sb, game_id, PIPELINE, reason)
+    _impl.mark_skipped(PWHL, sb, game_id, reason)
 
 
 def ingest_game(sb, gid: int, home_id: int, away_id: int, season_id: str, season_type: str) -> int:
-    gs = fetch_game_summary(gid)
-    if gs is None:
-        log.warning("    gameSummary fetch failed -- skipping")
-        mark_skipped(sb, gid, "no_gamesummary")
-        return 0
-
-    entries = extract_goal_on_ice(gs, home_id, away_id)
-    if not entries:
-        mark_skipped(sb, gid, "no_goals")
-        return 0
-
-    player_ids = {e["player_id"] for e in entries}
-    if player_ids:
-        existing = (
-            sb.table("pwhl_players")
-            .select("player_id")
-            .in_("player_id", list(player_ids))
-            .execute()
-        )
-        existing_ids = {r["player_id"] for r in (existing.data or [])}
-        missing = player_ids - existing_ids
-        if missing:
-            stubs = [
-                {"player_id": pid, "updated_at": datetime.now(UTC).isoformat()} for pid in missing
-            ]
-            sb.table("pwhl_players").upsert(stubs, on_conflict="player_id").execute()
-            log.info(f"    Inserted {len(missing)} unknown player stubs: {missing}")
-
-    rows = [
-        {
-            "game_id": gid,
-            "season_id": int(season_id),
-            "season_type": season_type,
-            **e,
-        }
-        for e in entries
-    ]
-
-    for j in range(0, len(rows), 200):
-        sb.table("pwhl_goal_on_ice").upsert(
-            rows[j : j + 200],
-            on_conflict="game_goal_id,player_id",
-        ).execute()
-
-    log.info(
-        f"    {len(rows)} on-ice row(s) upserted across {len({r['game_goal_id'] for r in rows})} goal(s)"
-    )
-    return len(rows)
+    return _impl.ingest_game(PWHL, sb, gid, home_id, away_id, season_id, season_type)
 
 
 def run(season_id: str | None = None) -> None:
@@ -242,57 +64,17 @@ def run(season_id: str | None = None) -> None:
             f"Unknown season_id {season_id} — not found in HockeyTech bootstrap data, skipping run"
         )
         return
-
-    log.info(f"=== PWHL Goal On-Ice -- season {season_id} ({season_type}) ===")
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-    completed = get_completed_games(sb, season_id)
-    skipped = get_skipped_games(sb)
-    processed = get_processed_games(sb, season_id)
-    todo = [g for g in completed if g["game_id"] not in skipped and g["game_id"] not in processed]
-
-    log.info(
-        f"  {len(completed)} completed, {len(processed)} processed, "
-        f"{len(skipped)} skipped, {len(todo)} to process"
-    )
-
-    total = 0
-    for i, game in enumerate(todo):
-        gid = game["game_id"]
-        home_id = game["home_team_id"] or 0
-        away_id = game["away_team_id"] or 0
-        log.info(f"  [{i + 1}/{len(todo)}] game {gid}")
-        try:
-            total += ingest_game(sb, gid, home_id, away_id, season_id, season_type)
-        except FetchError as e:
-            # pwhl_common.hockeytech_get() raises after exhausting retries instead
-            # of swallowing to None -- without this, one bad game's fetch
-            # failure would crash the entire sweep instead of being skipped.
-            log.warning(f"    Fetch failed for game {gid}, skipping: {e}")
-        except Exception:
-            log.exception(f"    CRASHED on game {gid}, skipping")
-        time.sleep(0.5)
-
-    log.info(f"=== PWHL Goal On-Ice complete -- {total} row(s) upserted ===")
+    _impl.run_season(PWHL, sb, season_id, season_type)
 
 
 def run_single_game(game_id: int) -> None:
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-    result = (
-        sb.table("pwhl_game_log")
-        .select("game_id,home_team_id,away_team_id,season_id")
-        .eq("game_id", game_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
+    row = _impl.game_row(PWHL, sb, game_id)
+    if row is None:
         log.error(f"game_id {game_id} not found in pwhl_game_log")
         return
 
-    row = result.data[0]
-    home_id = row["home_team_id"] or 0
-    away_id = row["away_team_id"] or 0
     season_id = str(row["season_id"])
     season_type = _resolve_season_type(season_id)
     if season_type is None:
@@ -301,7 +83,9 @@ def run_single_game(game_id: int) -> None:
         )
 
     log.info(f"=== PWHL Goal On-Ice -- single game {game_id} (season {season_id}) ===")
-    ingest_game(sb, game_id, home_id, away_id, season_id, season_type)
+    ingest_game(
+        sb, game_id, row["home_team_id"] or 0, row["away_team_id"] or 0, season_id, season_type
+    )
     log.info("=== Done ===")
 
 

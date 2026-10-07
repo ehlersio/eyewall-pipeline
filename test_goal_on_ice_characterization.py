@@ -16,9 +16,12 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import requests
 
+import hockeytech_goal_on_ice
 import pwhl_goal_on_ice
+from hockeytech_leagues import AHL, ECHL
 
 GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "goal_on_ice"
 
@@ -177,13 +180,13 @@ def strip_skip_times(writes):
 
 
 def test_pwhl_run(monkeypatch):
-    h = Harness(monkeypatch, "pwhl", [pwhl_goal_on_ice])
+    h = Harness(monkeypatch, "pwhl", [pwhl_goal_on_ice, hockeytech_goal_on_ice])
     pwhl_goal_on_ice.run("8")
     assert_golden("pwhl_run", {"requests": h.requests, "writes": strip_skip_times(h.writes)})
 
 
 def test_pwhl_single_game(monkeypatch):
-    h = Harness(monkeypatch, "pwhl", [pwhl_goal_on_ice])
+    h = Harness(monkeypatch, "pwhl", [pwhl_goal_on_ice, hockeytech_goal_on_ice])
     pwhl_goal_on_ice.run_single_game(RICH)
     assert_golden(
         "pwhl_single_game", {"requests": h.requests, "writes": strip_skip_times(h.writes)}
@@ -193,3 +196,50 @@ def test_pwhl_single_game(monkeypatch):
 def test_pwhl_extract_is_unchanged():
     rows = pwhl_goal_on_ice.extract_goal_on_ice(summary(RICH), HOME, AWAY)
     assert_golden("pwhl_extract", rows)
+
+
+# ── AHL/ECHL ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("lg", [AHL, ECHL], ids=["ahl", "echl"])
+def test_league_run(monkeypatch, lg):
+    h = Harness(monkeypatch, lg.key, [hockeytech_goal_on_ice])
+    monkeypatch.setattr(
+        hockeytech_goal_on_ice.hockeytech_stats,
+        "resolve_season_type",
+        lambda lg, sid: "regular",
+    )
+    hockeytech_goal_on_ice.run(lg, "90")
+    record = {"requests": h.requests, "writes": strip_skip_times(h.writes)}
+    assert_golden(f"{lg.key}_run", record)
+    tables = {w["table"] for w in h.writes}
+    assert tables == {f"{lg.key}_goal_on_ice", f"{lg.key}_players", f"{lg.key}_skipped_games"}
+    on_ice = [r for w in h.writes if w["table"] == f"{lg.key}_goal_on_ice" for r in w["rows"]]
+    # A goal whose team is neither side keeps its plus_players (team known).
+    assert {r["game_id"] for r in on_ice} == {RICH, UNKNOWN_TEAM}
+    assert all(r["season_id"] == 90 and r["season_type"] == "regular" for r in on_ice)
+    skipped = {
+        r["game_id"]: r["reason"]
+        for w in h.writes
+        if w["table"] == f"{lg.key}_skipped_games"
+        for r in w["rows"]
+    }
+    assert skipped == {NO_GOALS: "no_goals", ERROR: "no_gamesummary"}
+    assert {r["pipeline"] for w in h.writes if w["table"].endswith("_skipped_games")
+            for r in w["rows"]} == {f"{lg.key}_goal_on_ice"}  # fmt: skip
+    assert all(r["params"]["client_code"] == lg.key for r in h.requests)
+
+
+def test_missing_table_skips_the_step(monkeypatch):
+    h = Harness(monkeypatch, "ahl", [hockeytech_goal_on_ice])
+    real = h.select
+
+    def select(table, eq):
+        if table == "ahl_goal_on_ice":
+            raise RuntimeError('relation "ahl_goal_on_ice" does not exist')
+        return real(table, eq)
+
+    monkeypatch.setattr(h, "select", select)
+    sb = SimpleNamespace(table=h.table)
+    assert hockeytech_goal_on_ice.run_season(AHL, sb, "90", "regular") == 0
+    assert h.requests == [] and h.writes == []

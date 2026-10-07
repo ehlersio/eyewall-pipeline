@@ -25,6 +25,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 os.environ.setdefault("EYEWALL_POLL_SECRET", "test-secret")
 
+import hockeytech_goal_on_ice
 import pwhl_goal_on_ice
 import run
 import season_lookup
@@ -173,28 +174,31 @@ class TestPwhlPerGameFetchIsolation:
     its own try/except or one bad game crashes the entire sweep."""
 
     def test_one_game_fetch_failure_does_not_abort_the_sweep(self, monkeypatch):
+        # pwhl_goal_on_ice.run() sweeps through hockeytech_goal_on_ice.run_season()
+        # since 2026-10; the per-game isolation lives there.
         attempted = []
 
-        def fake_ingest_game(sb, gid, home_id, away_id, season_id, season_type):
+        def fake_ingest_game(lg, sb, gid, home_id, away_id, season_id, season_type):
             attempted.append(gid)
             if gid == 111:
                 raise FetchError("gameSummary 111: failed after 3 attempts (status 500)")
             return 2
 
+        impl = hockeytech_goal_on_ice
         monkeypatch.setattr(pwhl_goal_on_ice, "create_client", lambda *a, **k: MagicMock())
         monkeypatch.setattr(pwhl_goal_on_ice, "_resolve_season_type", lambda season_id: "regular")
         monkeypatch.setattr(
-            pwhl_goal_on_ice,
+            impl,
             "get_completed_games",
-            lambda sb, season_id: [
+            lambda lg, sb, season_id: [
                 {"game_id": 111, "home_team_id": 1, "away_team_id": 2},
                 {"game_id": 222, "home_team_id": 3, "away_team_id": 4},
             ],
         )
-        monkeypatch.setattr(pwhl_goal_on_ice, "get_skipped_games", lambda sb: set())
-        monkeypatch.setattr(pwhl_goal_on_ice, "get_processed_games", lambda sb, season_id: set())
-        monkeypatch.setattr(pwhl_goal_on_ice, "ingest_game", fake_ingest_game)
-        monkeypatch.setattr(pwhl_goal_on_ice.time, "sleep", lambda *_a, **_k: None)
+        monkeypatch.setattr(impl, "get_skipped_games", lambda lg, sb: set())
+        monkeypatch.setattr(impl, "get_processed_games", lambda lg, sb, season_id: set())
+        monkeypatch.setattr(impl, "ingest_game", fake_ingest_game)
+        monkeypatch.setattr(impl.time, "sleep", lambda *_a, **_k: None)
 
         pwhl_goal_on_ice.run(season_id="8")
 

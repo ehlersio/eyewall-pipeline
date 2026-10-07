@@ -102,6 +102,18 @@ jobs:
         # ahl_stats.py step above. Skips games already in
         # ahl_skater_game_box or ahl_skipped_games (idempotent by default).
 
+      - name: AHL goal on-ice rosters (hockeytech_goal_on_ice.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python hockeytech_goal_on_ice.py ahl "${{ inputs.season_id }}"
+        # ahl_goal_on_ice: the skaters on the ice for every goal, from
+        # gameSummary (read by eyewall-poller's /ahl/game-box `goals`).
+        # Needs ahl_game_log from the stats step. Table:
+        # docs/2026-10-07_hockeytech_goal_on_ice.sql (skips, logged, until
+        # that's been run).
+
       - name: Ingest AHL shot events (goals + shots with coordinates)
         if: steps.guard.outputs.skip != 'true'
         env:

@@ -170,8 +170,9 @@ jobs:
         run: python pwhl_game_boxscore.py "$SEASON_ID"
         # Skips games already in pwhl_skater_game_box (idempotent by default,
         # see get_processed_games()). Was previously manual-only (Session 41
-        # built it but never wired it in) -- same gap pwhl_goal_on_ice.py and
-        # pwhl_penalty_shots.py (Session 42) still have.
+        # built it but never wired it in). pwhl_goal_on_ice.py and
+        # pwhl_penalty_shots.py (Session 42) had the same gap until 2026-10
+        # (the two steps below).
         #
         # Same caveat as pwhl_stats.py/pwhl_shot_events.py/pwhl_pbp_events.py
         # above: this defaults to PWHL_SEASON, which resolve_pwhl_season()
@@ -182,6 +183,32 @@ jobs:
         # Run a manual `python pwhl_game_boxscore.py <playoff_season_id>`
         # backfill after each playoff round, same as this file's existing
         # PBP backfill pattern.
+
+      - name: Ingest PWHL goal on-ice rosters
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_goal_on_ice.py "$SEASON_ID"
+        # pwhl_goal_on_ice: the skaters on the ice for every goal, from
+        # gameSummary. eyewall-poller's /pwhl/game-box `goals` array joins
+        # them in. Skips games already in the table or skipped. Manual-only
+        # from Session 42 until 2026-10.
+
+      - name: Ingest PWHL penalty shots
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python pwhl_penalty_shots.py "$SEASON_ID"
+        # pwhl_penalty_shots (makes and misses, gameSummary.penaltyShots),
+        # read by /pwhl/game-box's `penaltyShots`. AHL/ECHL have scheduled
+        # theirs all along; this was manual-only from Session 42 until
+        # 2026-10. Games with none are marked skipped once.
 
       - name: Compute PWHL TOI/game rollup (percentile parity piece 1)
         if: steps.guard.outputs.skip != 'true'
