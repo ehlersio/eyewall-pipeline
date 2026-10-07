@@ -1,0 +1,45 @@
+[
+  {
+    "description": "First102 Last102 reaches 30 points this season",
+    "detail": {
+      "season_points": 30
+    },
+    "event_key": "",
+    "game_date": "2026-01-25",
+    "game_id": 270,
+    "is_pwhl": true,
+    "milestone_type": "season_points_30",
+    "opponent": null,
+    "player_id": 102,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "First102 Last102 reaches 50 career points",
+    "detail": {
+      "career_points": 50
+    },
+    "event_key": "",
+    "game_date": "2026-01-25",
+    "game_id": 270,
+    "is_pwhl": true,
+    "milestone_type": "career_points_50",
+    "opponent": null,
+    "player_id": 102,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "Shutout — First701 Last701 (TOR)",
+    "detail": {},
+    "event_key": "",
+    "game_date": "2026-01-25",
+    "game_id": 270,
+    "is_pwhl": true,
+    "milestone_type": "shutout",
+    "opponent": "BOS",
+    "player_id": 701,
+    "season": 8,
+    "team": "TOR"
+  }
+]
