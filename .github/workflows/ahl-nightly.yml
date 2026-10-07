@@ -180,6 +180,33 @@ jobs:
         # /ahl/prediction) and ahl_game_win_probs for today's/tomorrow's
         # games. Tables: docs/hockeytech_elo_ddl.sql.
 
+      - name: AHL milestones (hockeytech_milestones.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+        run: python hockeytech_milestones.py ahl
+        # Hat tricks, SH goals, shutouts, season goal/point thresholds for
+        # the last 3 ET days, into the shared milestones table (sport =
+        # 'ahl'). Reads ahl_game_log/ahl_player_seasons (stats step),
+        # ahl_shot_events and ahl_goalie_game_box. Needs
+        # docs/2026-10-07_milestones_sport.sql (logs once and moves on until
+        # then). NHL_SEASON: db.py resolves it at import.
+
+      - name: Generate daily AHL trivia (easy + medium)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python trivia_questions.py --sport ahl
+        # Reads ahl_player_seasons (stats step). NHL_SEASON/PWHL_SEASON
+        # are env fallbacks for modules trivia_questions.py imports at load,
+        # as in pwhl-nightly.yml's trivia step.
+
       - name: Notify on failure
         if: failure()
         env:

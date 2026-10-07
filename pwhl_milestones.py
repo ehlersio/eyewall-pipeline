@@ -1,6 +1,10 @@
 """
 pwhl_milestones.py — EyeWall Analytics milestone detection pipeline (PWHL, v1)
 
+Thin wrapper over hockeytech_milestones.py since 2026-10 (which serves AHL
+and ECHL too); output unchanged, pinned by
+test_milestones_characterization.py. The notes below are PWHL's history.
+
 Mirrors milestones.py (NHL) in structure and writes into the SAME shared
 `milestones` table (is_pwhl=True). Deliberately narrower in scope than the
 NHL version — see "Known v1 gaps" below for exactly why, all confirmed
@@ -97,939 +101,114 @@ unintentional outlier.
 """
 
 import argparse
-import sys
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
+import hockeytech_milestones as _impl
 from db import get_client
-from pipeline_common import get_logger, select_all
-from pwhl_stats import TEAM_ID_MAP
-from pwhl_stats import _resolve_season_type as resolve_season_type
-from pwhl_strength_state import elapsed_seconds as _elapsed_seconds
-from pwhl_strength_state import get_penalties_for_game
-from pwhl_strength_state import penalty_window as _penalty_window
+from hockeytech_leagues import PWHL
+from hockeytech_milestones import (  # noqa: F401  (re-exported)
+    CATCH_UP_DAYS,
+    REGULAR_SEASON_TYPE,
+    build_description,
+    catch_up_dates,
+    get_tonight_points,
+    today_et,
+)
+from pipeline_common import get_logger
+from pwhl_strength_state import get_penalties_for_game  # noqa: F401
+from pwhl_strength_state import penalty_window as _penalty_window  # noqa: F401
 
 log = get_logger(__name__)
 
-# Backed by real 2025-26 season data (30 GP/team, single-season record
-# 33 pts / 16 goals — see module docstring).
-SEASON_GOAL_THRESHOLDS = [15, 20]
-
-# Verified against real pwhl_player_seasons data (query run 2026-07,
-# season_id=8 regular season): leader is 33 points (Pannek), with players
-# clustered from 20-30. Both thresholds fire against real data.
-SEASON_POINTS_THRESHOLDS = [20, 30]
-
-# Verified against real pwhl_player_seasons data (query run 2026-07,
-# summed across season_type='regular' rows): career leader is currently 69
-# points (4 seasons). Rescaled from an earlier unverified guess of
-# [75, 125], which would never have fired -- nobody has reached 75 yet.
-# 50 fires immediately for most current top players; 100 is a real future
-# milestone as careers accumulate more seasons. Revisit periodically as
-# the league's history grows.
-CAREER_POINTS_THRESHOLDS = [50, 100]
-
-# Verified against real pwhl_goalie_seasons data (query run 2026-08-14,
-# summed across season_type='regular' rows, same method as
-# get_career_wins()): career leader is Ann-Renée Desbiens at 42 wins,
-# followed by Aerin Frankel (40) and Kristen Campbell (31). 25 has already
-# fired for those three, with Gwyneth Philips one win away at 24 --
-# comparable to how the lower CAREER_POINTS_THRESHOLDS tier already fires
-# for several players. 50 is a real future milestone nobody's reached yet
-# (leader is 8 wins away), not an impossible target -- a full-season
-# workhorse goalie can add 15-20 wins in a single 30-game season. No change
-# from the original estimate; this replaces the "flagged for review,
-# unverified" note with an actual confirmation. Revisit if the league's
-# win distribution shifts meaningfully as more seasons accumulate.
-CAREER_WIN_THRESHOLDS = [25, 50]
-
-# season_type value pwhl_stats.py uses for real regular-season rows.
-REGULAR_SEASON_TYPE = "regular"
-
-ET = ZoneInfo("America/New_York")
-
-# Dates the nightly default re-scans, ending yesterday (ET).
-CATCH_UP_DAYS = 3
-
-# game_ids per .in_() filter -- keeps the PostgREST URL short.
-IN_CHUNK = 150
+_rules = _impl.RULES["pwhl"]
+SEASON_GOAL_THRESHOLDS = list(_rules.season_goals)
+SEASON_POINTS_THRESHOLDS = list(_rules.season_points)
+CAREER_POINTS_THRESHOLDS = list(_rules.career_points)
+CAREER_WIN_THRESHOLDS = list(_rules.career_wins)
 
 
-def today_et() -> date:
-    return datetime.now(ET).date()
-
-
-def catch_up_dates(today: date | None = None) -> list[str]:
-    """The last CATCH_UP_DAYS ET dates, oldest first, ending yesterday."""
-    today = today or today_et()
-    return [(today - timedelta(days=n)).isoformat() for n in range(CATCH_UP_DAYS, 0, -1)]
-
-
-def _chrono_key(row: dict) -> tuple[int, int]:
-    """Sort key for chronological order within a game. time_seconds is
-    ELAPSED time within the period (confirmed against official recap —
-    see module docstring), so ascending order is chronological."""
-    return (row.get("period_id") or 0, row.get("time_seconds") or 0)
-
-
-def _team_abbr(team_id: int | None) -> str | None:
-    return TEAM_ID_MAP.get(str(team_id)) if team_id is not None else None
-
-
-# ---------------------------------------------------------------------------
-# Shorthanded goal detection (v1 — NOT yet wired into any milestone output)
-#
-# Cross-references pwhl_shot_events goals against pwhl_pbp_events' real
-# is_power_play/penalty_minutes penalty data, since pwhl_shot_events'
-# situation_code is hardcoded "5v5" (see module docstring) and can't be
-# used for this at all.
-#
-# The penalty-window construction itself (_elapsed_seconds, _penalty_window,
-# get_penalties_for_game) now lives in pwhl_strength_state.py, imported
-# above — see that module's docstring for the full scope note (OT excluded,
-# no early-PP-goal-cancellation modeling, coincidental penalties handled via
-# HockeyTech's own is_power_play flag, double minors as one window, no
-# cross-period carryover). It's shared with pwhl_stats.py's 5v5-filtered
-# Corsi aggregation (run_team_shot_totals_5v5), not reimplemented there.
-# ---------------------------------------------------------------------------
+class LaterGames(_impl.LaterGames):
+    def __init__(self, sb, target_date: str):
+        super().__init__(PWHL, sb, target_date)
 
 
 def detect_shorthanded_goals(sb, game: dict, ordered_goals: list[dict]) -> dict[tuple, bool]:
-    """Returns {(period_id, time_seconds, shooter_id): is_shorthanded} for
-    every goal in ordered_goals.
-
-    Session 34: for any goal row where pwhl_shot_events.is_short_handed is
-    non-NULL (i.e. merged with gameSummary — see pwhl_shot_events.py), that
-    ground-truth flag is used directly. Only goals where is_short_handed is
-    still NULL (not yet merged — e.g. historical rows before Session 34
-    that haven't had `--backfill-goals` run against them) fall back to the
-    penalty-window heuristic below. See module-level scope note above
-    before trusting the heuristic path for anything beyond spot-checking.
-    """
-    needs_heuristic = [g for g in ordered_goals if g.get("is_short_handed") is None]
-
-    penalty_windows = []
-    if needs_heuristic:
-        penalties = get_penalties_for_game(sb, game["game_id"])
-        for p in penalties:
-            w = _penalty_window(p)
-            if w is None:
-                continue
-            period_id, start, end = w
-            penalty_windows.append((p["team_id"], period_id, start, end))
-
-    sh_flags = {}
-    for goal in ordered_goals:
-        key = (goal.get("period_id"), goal.get("time_seconds"), goal.get("shooter_id"))
-
-        if goal.get("is_short_handed") is not None:
-            sh_flags[key] = bool(goal["is_short_handed"])
-            continue
-
-        elapsed = _elapsed_seconds(goal.get("period_id"), goal.get("time_seconds") or 0)
-        if elapsed is None:
-            sh_flags[key] = False
-            continue
-        team_id = goal.get("team_id")
-        sh_flags[key] = any(
-            pid == team_id and pperiod == goal.get("period_id") and start <= elapsed < end
-            for pid, pperiod, start, end in penalty_windows
-        )
-    return sh_flags
+    return _impl.detect_shorthanded_goals(PWHL, sb, game, ordered_goals)
 
 
 def build_shorthanded_goal_milestones(sb, game: dict, ordered_goals: list[dict]) -> list[dict]:
-    """Wraps detect_shorthanded_goals into milestone rows. One row per SH
-    goal (a player could in principle score more than one SH goal in a
-    game — each gets its own row, same pattern as season_goals thresholds
-    firing per-crossing rather than once per game)."""
-    sh_flags = detect_shorthanded_goals(sb, game, ordered_goals)
-    home_id, away_id = game["home_team_id"], game["away_team_id"]
-
-    def opponent_of(team_id):
-        return away_id if team_id == home_id else home_id
-
-    milestones = []
-    for goal in ordered_goals:
-        key = (goal.get("period_id"), goal.get("time_seconds"), goal.get("shooter_id"))
-        if not sh_flags.get(key):
-            continue
-        sid = goal.get("shooter_id")
-        if sid is None:
-            continue
-        team_id = goal.get("team_id")
-        milestones.append(
-            {
-                "game_id": game["game_id"],
-                "season": game["season_id"],
-                "game_date": game["game_date"],
-                "player_id": sid,
-                "team": _team_abbr(team_id),
-                "opponent": _team_abbr(opponent_of(team_id)),
-                "milestone_type": "sh_goal",
-                "description": f"Shorthanded goal — player #{sid} ({_team_abbr(team_id)})",
-                "detail": {
-                    "period_id": goal.get("period_id"),
-                    "time_seconds": goal.get("time_seconds"),
-                },
-                "is_pwhl": True,
-                # Real disambiguator, not "" — a player scoring TWO SH
-                # goals in one game must not collide onto one row.
-                "event_key": f"{goal.get('period_id')}_{goal.get('time_seconds')}",
-            }
-        )
-    return milestones
-
-
-# ---------------------------------------------------------------------------
-# Game discovery
-# ---------------------------------------------------------------------------
+    return _impl.build_shorthanded_goal_milestones(PWHL, sb, game, ordered_goals)
 
 
 def get_games_for_date(sb, target_date: str) -> list[dict]:
-    """Completed PWHL games from pwhl_game_log for a specific date.
-    Unlike NHL's game_log, pwhl_game_log has exactly one row per game_id
-    already (home_team_id/away_team_id/home_score/away_score) — no dedup
-    needed."""
-    r = (
-        sb.table("pwhl_game_log")
-        .select(
-            "game_id, season_id, game_date, home_team_id, away_team_id, "
-            "home_score, away_score, game_state"
-        )
-        .eq("game_date", target_date)
-        .eq("game_state", "Final")
-        .execute()
-    )
-    games = []
-    for row in r.data or []:
-        season_id = row["season_id"]
-        season_type = resolve_season_type(str(season_id))
-        if season_type is None:
-            # Runs unattended (nightly, over a whole day's games) — log
-            # and drop just this one game rather than crash the whole
-            # date's detection run or silently guess "regular" (which
-            # would compare this game's stats against the wrong season's
-            # totals downstream in run_for_games).
-            log.error(
-                f"Unknown season_id {season_id} for game {row['game_id']} — "
-                "not found in HockeyTech bootstrap data, skipping this game"
-            )
-            continue
-        row["season_type"] = season_type
-        games.append(row)
-    return games
+    return _impl.get_games_for_date(PWHL, sb, target_date)
 
 
 def get_game_by_id(sb, game_id: int) -> dict | None:
-    """Single game lookup by game_id, for --game (debugging/spot-checks —
-    doesn't require the game to be 'Final', unlike get_games_for_date,
-    since you may want to re-run detection on a specific game regardless
-    of state while testing)."""
-    r = (
-        sb.table("pwhl_game_log")
-        .select(
-            "game_id, season_id, game_date, home_team_id, away_team_id, "
-            "home_score, away_score, game_state"
-        )
-        .eq("game_id", game_id)
-        .limit(1)
-        .execute()
-    )
-    rows = r.data or []
-    if not rows:
-        return None
-    row = rows[0]
-    season_type = resolve_season_type(str(row["season_id"]))
-    if season_type is None:
-        # --game is a debug/spot-check tool run by a human watching the
-        # output directly — loud failure is correct here, unlike the
-        # unattended per-date loop in get_games_for_date().
-        raise ValueError(
-            f"Unknown season_id {row['season_id']} for game {game_id} — "
-            "not found in HockeyTech bootstrap data"
-        )
-    row["season_type"] = season_type
-    return row
-
-
-class LaterGames:
-    """What players did in this season's Final games played AFTER the date
-    being scanned -- see milestones.LaterGames. Later games share the
-    scanned game's season_id, so they share its season_type too. Each
-    lookup is cached and only made for a player at or past a threshold.
-    """
-
-    def __init__(self, sb, target_date: str):
-        self.sb = sb
-        self.target_date = target_date
-        self._games: dict[int, list[dict]] = {}
-        self._scoring: dict[tuple, tuple[int, int]] = {}
-        self._wins: dict[tuple, int] = {}
-
-    def games(self, season_id: int) -> list[dict]:
-        if season_id not in self._games:
-            self._games[season_id] = select_all(
-                lambda: (
-                    self.sb.table("pwhl_game_log")
-                    .select(
-                        "game_id, season_id, game_date, home_team_id, away_team_id, "
-                        "home_score, away_score, game_state"
-                    )
-                    .eq("season_id", season_id)
-                    .eq("game_state", "Final")
-                    .gt("game_date", self.target_date)
-                )
-            )
-        return self._games[season_id]
-
-    def scoring(self, player_id: int, season_id: int) -> tuple[int, int]:
-        """(goals, points) the player had in later games of this season."""
-        key = (player_id, season_id)
-        if key not in self._scoring:
-            goals = points = 0
-            ids = sorted({g["game_id"] for g in self.games(season_id)})
-            for i in range(0, len(ids), IN_CHUNK):
-                r = (
-                    self.sb.table("pwhl_shot_events")
-                    .select("shooter_id, assist1_id, assist2_id")
-                    .in_("game_id", ids[i : i + IN_CHUNK])
-                    .eq("event_type", "goal")
-                    .or_(
-                        f"shooter_id.eq.{player_id},assist1_id.eq.{player_id},"
-                        f"assist2_id.eq.{player_id}"
-                    )
-                    .execute()
-                )
-                for row in r.data or []:
-                    if row.get("shooter_id") == player_id:
-                        goals += 1
-                        points += 1
-                    elif player_id in (row.get("assist1_id"), row.get("assist2_id")):
-                        points += 1
-            self._scoring[key] = (goals, points)
-        return self._scoring[key]
-
-    def goalie_wins(self, goalie_id: int, team_id: int, season_id: int) -> int:
-        """Wins credited to this goalie in later games (same full-game rule
-        as detect_goalie_win_milestones)."""
-        key = (goalie_id, team_id, season_id)
-        if key not in self._wins:
-            wins = 0
-            for g in self.games(season_id):
-                home, away = g.get("home_score") or 0, g.get("away_score") or 0
-                won = (g["home_team_id"] == team_id and home > away) or (
-                    g["away_team_id"] == team_id and away > home
-                )
-                if not won:
-                    continue
-                a = get_goalie_appearances(self.sb, g).get(goalie_id)
-                if a and a["full_game"] and a["team_id"] == team_id:
-                    wins += 1
-            self._wins[key] = wins
-        return self._wins[key]
-
-
-# ---------------------------------------------------------------------------
-# Hat tricks
-# ---------------------------------------------------------------------------
+    return _impl.get_game_by_id(PWHL, sb, game_id)
 
 
 def get_goal_rows(sb, game_id: int) -> list[dict]:
-    r = (
-        sb.table("pwhl_shot_events")
-        .select(
-            "game_id, team_id, shooter_id, goalie_id, period_id, time_seconds, is_home, "
-            "assist1_id, assist2_id, is_short_handed"
-        )
-        .eq("game_id", game_id)
-        .eq("event_type", "goal")
-        .execute()
-    )
-    rows = r.data or []
-    return sorted(rows, key=_chrono_key)
+    return _impl.get_goal_rows(PWHL, sb, game_id)
 
 
 def detect_hat_tricks(game: dict, ordered_goals: list[dict]) -> list[dict]:
-    """ordered_goals: pwhl_shot_events rows for this game, event_type='goal',
-    already sorted chronologically by _chrono_key."""
-    milestones = []
-    home_id, away_id = game["home_team_id"], game["away_team_id"]
-
-    def opponent_of(team_id):
-        return away_id if team_id == home_id else home_id
-
-    goal_counts: dict[int, list[dict]] = {}
-    for row in ordered_goals:
-        sid = row.get("shooter_id")
-        if sid is None:
-            continue
-        goal_counts.setdefault(sid, []).append(row)
-
-    hat_trick_scorers = {sid: rows for sid, rows in goal_counts.items() if len(rows) >= 3}
-
-    # Natural hat trick: 3 consecutive goals by one player, no other
-    # scorer (either team) in between.
-    for i in range(len(ordered_goals) - 2):
-        a, b, c = ordered_goals[i], ordered_goals[i + 1], ordered_goals[i + 2]
-        sid = a.get("shooter_id")
-        if sid is None:
-            continue
-        if b.get("shooter_id") == sid and c.get("shooter_id") == sid:
-            milestones.append(
-                {
-                    "game_id": game["game_id"],
-                    "season": game["season_id"],
-                    "game_date": game["game_date"],
-                    "player_id": sid,
-                    "team": _team_abbr(a["team_id"]),
-                    "opponent": _team_abbr(opponent_of(a["team_id"])),
-                    "milestone_type": "natural_hat_trick",
-                    "description": f"Natural hat trick — player #{sid} ({_team_abbr(a['team_id'])})",
-                    "detail": {
-                        "goal_periods": [a["period_id"], b["period_id"], c["period_id"]],
-                        "goal_time_seconds": [
-                            a.get("time_seconds"),
-                            b.get("time_seconds"),
-                            c.get("time_seconds"),
-                        ],
-                        # [assist1_id, assist2_id] per goal, in the same
-                        # order as goal_periods/goal_time_seconds. NULL
-                        # entries mean unassisted OR not yet merged with
-                        # gameSummary (see pwhl_shot_events.py).
-                        "assists": [
-                            [a.get("assist1_id"), a.get("assist2_id")],
-                            [b.get("assist1_id"), b.get("assist2_id")],
-                            [c.get("assist1_id"), c.get("assist2_id")],
-                        ],
-                    },
-                    "is_pwhl": True,
-                    "event_key": "",
-                }
-            )
-            hat_trick_scorers.pop(sid, None)
-
-    for sid, rows in hat_trick_scorers.items():
-        team_id = rows[0]["team_id"]
-        milestones.append(
-            {
-                "game_id": game["game_id"],
-                "season": game["season_id"],
-                "game_date": game["game_date"],
-                "player_id": sid,
-                "team": _team_abbr(team_id),
-                "opponent": _team_abbr(opponent_of(team_id)),
-                "milestone_type": "hat_trick",
-                "description": f"Hat trick — player #{sid} ({_team_abbr(team_id)})",
-                "detail": {
-                    "goal_count": len(rows),
-                    # Per-goal [assist1_id, assist2_id], one entry per goal
-                    # in `rows`, same NULL convention as natural_hat_trick above.
-                    "assists": [[r.get("assist1_id"), r.get("assist2_id")] for r in rows],
-                },
-                "is_pwhl": True,
-                "event_key": "",
-            }
-        )
-
-    return milestones
-
-
-# ---------------------------------------------------------------------------
-# Shutouts
-# ---------------------------------------------------------------------------
+    return _impl.detect_hat_tricks(PWHL, game, ordered_goals)
 
 
 def get_goalie_appearances(sb, game: dict) -> dict:
-    """Same logic as NHL's version: from pwhl_shot_events, team_id = the
-    shooting team, so goals AGAINST a goalie are rows where team_id is
-    their opponent and goalie_id matches. full_game=True means this
-    goalie was the only one to face shots for their team all game."""
-    r = (
-        sb.table("pwhl_shot_events")
-        .select("team_id, goalie_id, event_type")
-        .eq("game_id", game["game_id"])
-        .execute()
-    )
-    rows = r.data or []
-
-    by_goalie: dict[int, dict] = {}
-    for row in rows:
-        gid = row.get("goalie_id")
-        if gid is None:
-            continue
-        entry = by_goalie.setdefault(gid, {"shooting_teams": set(), "goals_against": 0})
-        entry["shooting_teams"].add(row["team_id"])
-        if row["event_type"] == "goal":
-            entry["goals_against"] += 1
-
-    goalies_by_shooting_team: dict[int, list[int]] = {}
-    for gid, entry in by_goalie.items():
-        if len(entry["shooting_teams"]) != 1:
-            continue
-        shooting_team = next(iter(entry["shooting_teams"]))
-        goalies_by_shooting_team.setdefault(shooting_team, []).append(gid)
-
-    home_id, away_id = game["home_team_id"], game["away_team_id"]
-    appearances = {}
-    for gid, entry in by_goalie.items():
-        if len(entry["shooting_teams"]) != 1:
-            continue
-        shooting_team = next(iter(entry["shooting_teams"]))
-        goalie_team = away_id if shooting_team == home_id else home_id
-        full_game = len(goalies_by_shooting_team.get(shooting_team, [])) == 1
-        appearances[gid] = {
-            "team_id": goalie_team,
-            "opponent_id": shooting_team,
-            "goals_against": entry["goals_against"],
-            "full_game": full_game,
-        }
-    return appearances
+    return _impl.get_goalie_appearances(PWHL, sb, game)
 
 
 def detect_shutouts(appearances: dict, game: dict) -> list[dict]:
-    milestones = []
-    for goalie_id, a in appearances.items():
-        if a["goals_against"] != 0 or not a["full_game"]:
-            continue
-        milestones.append(
-            {
-                "game_id": game["game_id"],
-                "season": game["season_id"],
-                "game_date": game["game_date"],
-                "player_id": goalie_id,
-                "team": _team_abbr(a["team_id"]),
-                "opponent": _team_abbr(a["opponent_id"]),
-                "milestone_type": "shutout",
-                "description": f"Shutout — goalie #{goalie_id} ({_team_abbr(a['team_id'])})",
-                "detail": {},
-                "is_pwhl": True,
-                "event_key": "",
-            }
-        )
-    return milestones
-
-
-# ---------------------------------------------------------------------------
-# Career win milestones (goalies) — no external API needed, see docstring
-# ---------------------------------------------------------------------------
+    return _impl.detect_shutouts(PWHL, appearances, game)
 
 
 def get_career_wins(sb, goalie_id: int) -> int:
-    r = (
-        sb.table("pwhl_goalie_seasons")
-        .select("wins")
-        .eq("player_id", goalie_id)
-        .eq("season_type", REGULAR_SEASON_TYPE)
-        .execute()
-    )
-    return sum(row.get("wins") or 0 for row in (r.data or []))
+    return _impl.get_career_wins(PWHL, sb, goalie_id)
 
 
-def detect_goalie_win_milestones(
-    sb, appearances: dict, game: dict, later: LaterGames | None = None
-) -> list[dict]:
-    """`later` (a re-scanned older date) takes off wins from games since;
-    career wins are regular season only, so only for a regular-season game."""
-    milestones = []
-    home_id = game["home_team_id"]
-    for goalie_id, a in appearances.items():
-        if not a["full_game"]:
-            continue
-
-        team_id = a["team_id"]
-        if team_id == home_id:
-            team_won = (game.get("home_score") or 0) > (game.get("away_score") or 0)
-        else:
-            team_won = (game.get("away_score") or 0) > (game.get("home_score") or 0)
-        if not team_won:
-            continue
-
-        career_wins = get_career_wins(sb, goalie_id)
-        if not career_wins:
-            continue
-        if (
-            later is not None
-            and game["season_type"] == REGULAR_SEASON_TYPE
-            and career_wins >= min(CAREER_WIN_THRESHOLDS)
-        ):
-            career_wins -= later.goalie_wins(goalie_id, team_id, game["season_id"])
-        pre_game_wins = career_wins - 1  # this win is already included above
-
-        for threshold in CAREER_WIN_THRESHOLDS:
-            if pre_game_wins < threshold <= career_wins:
-                milestones.append(
-                    {
-                        "game_id": game["game_id"],
-                        "season": game["season_id"],
-                        "game_date": game["game_date"],
-                        "player_id": goalie_id,
-                        "team": _team_abbr(team_id),
-                        "opponent": _team_abbr(a["opponent_id"]),
-                        "milestone_type": f"career_wins_{threshold}",
-                        "description": f"Goalie #{goalie_id} reaches {threshold} career wins",
-                        "detail": {"career_wins": career_wins},
-                        "is_pwhl": True,
-                        "event_key": "",
-                    }
-                )
-    return milestones
+def detect_goalie_win_milestones(sb, appearances, game, later=None) -> list[dict]:
+    return _impl.detect_goalie_win_milestones(PWHL, sb, appearances, game, later)
 
 
-# ---------------------------------------------------------------------------
-# Season goal milestones — the only "tonight's contribution" we can
-# compute precisely without assist data (see module docstring)
-# ---------------------------------------------------------------------------
+def detect_season_goal_milestones(sb, game, ordered_goals, later=None) -> list[dict]:
+    return _impl.detect_season_goal_milestones(PWHL, sb, game, ordered_goals, later)
 
 
-def detect_season_goal_milestones(
-    sb, game: dict, ordered_goals: list[dict], later: LaterGames | None = None
-) -> list[dict]:
-    milestones = []
-
-    tonight_goals: dict[int, int] = {}
-    for row in ordered_goals:
-        sid = row.get("shooter_id")
-        if sid is None:
-            continue
-        tonight_goals[sid] = tonight_goals.get(sid, 0) + 1
-
-    if not tonight_goals:
-        return milestones
-
-    r = (
-        sb.table("pwhl_player_seasons")
-        .select("player_id, team_id, goals")
-        .in_("player_id", list(tonight_goals))
-        .eq("season_id", game["season_id"])
-        .eq("season_type", game["season_type"])
-        .execute()
-    )
-    season_rows = {row["player_id"]: row for row in r.data or []}
-
-    for pid, tonight in tonight_goals.items():
-        season_row = season_rows.get(pid)
-        if not season_row:
-            continue
-        team_id = season_row["team_id"]
-        season_goals = season_row.get("goals") or 0
-        if later is not None and season_goals >= min(SEASON_GOAL_THRESHOLDS):
-            season_goals -= later.scoring(pid, game["season_id"])[0]
-        pre_game_goals = season_goals - tonight
-
-        for threshold in SEASON_GOAL_THRESHOLDS:
-            if pre_game_goals < threshold <= season_goals:
-                milestones.append(
-                    {
-                        "game_id": game["game_id"],
-                        "season": game["season_id"],
-                        "game_date": game["game_date"],
-                        "player_id": pid,
-                        "team": _team_abbr(team_id),
-                        "opponent": None,
-                        "milestone_type": f"season_goals_{threshold}",
-                        "description": f"Player #{pid} reaches {threshold} goals this season",
-                        "detail": {"season_goals": season_goals},
-                        "is_pwhl": True,
-                        "event_key": "",
-                    }
-                )
-
-    return milestones
-
-
-# ---------------------------------------------------------------------------
-# Season/career points milestones (Session 34 — depends on assist1_id/
-# assist2_id being merged from gameSummary; see pwhl_shot_events.py)
-# ---------------------------------------------------------------------------
-
-
-def get_tonight_points(ordered_goals: list[dict]) -> dict[int, int]:
-    """Tally each player's point contributions (goals + assists) from this
-    game's goal rows. Requires assist1_id/assist2_id to be populated
-    (gameSummary-merged) -- goals on un-merged rows still count as 1 point
-    each via shooter_id, but assists on those rows are silently absent
-    (assist1_id/assist2_id NULL), same underweighting risk the module
-    docstring previously flagged for the pre-Session-34 gap. Not fixable
-    here; run pwhl_shot_events.py --backfill-goals for old games before
-    trusting these for historical dates."""
-    tonight: dict[int, int] = {}
-    for g in ordered_goals:
-        sid = g.get("shooter_id")
-        if sid is not None:
-            tonight[sid] = tonight.get(sid, 0) + 1
-        for assist_fld in ("assist1_id", "assist2_id"):
-            aid = g.get(assist_fld)
-            if aid is not None:
-                tonight[aid] = tonight.get(aid, 0) + 1
-    return tonight
-
-
-def detect_season_points_milestones(
-    sb, game: dict, ordered_goals: list[dict], later: LaterGames | None = None
-) -> list[dict]:
-    milestones = []
-    tonight_points = get_tonight_points(ordered_goals)
-    if not tonight_points:
-        return milestones
-
-    r = (
-        sb.table("pwhl_player_seasons")
-        .select("player_id, team_id, points")
-        .in_("player_id", list(tonight_points))
-        .eq("season_id", game["season_id"])
-        .eq("season_type", game["season_type"])
-        .execute()
-    )
-    season_rows = {row["player_id"]: row for row in r.data or []}
-
-    for pid, tonight in tonight_points.items():
-        season_row = season_rows.get(pid)
-        if not season_row:
-            continue
-        team_id = season_row["team_id"]
-        season_points = season_row.get("points") or 0
-        if later is not None and season_points >= min(SEASON_POINTS_THRESHOLDS):
-            season_points -= later.scoring(pid, game["season_id"])[1]
-        pre_game_points = season_points - tonight
-
-        for threshold in SEASON_POINTS_THRESHOLDS:
-            if pre_game_points < threshold <= season_points:
-                milestones.append(
-                    {
-                        "game_id": game["game_id"],
-                        "season": game["season_id"],
-                        "game_date": game["game_date"],
-                        "player_id": pid,
-                        "team": _team_abbr(team_id),
-                        "opponent": None,
-                        "milestone_type": f"season_points_{threshold}",
-                        "description": f"Player #{pid} reaches {threshold} points this season",
-                        "detail": {"season_points": season_points},
-                        "is_pwhl": True,
-                        "event_key": "",
-                    }
-                )
-
-    return milestones
+def detect_season_points_milestones(sb, game, ordered_goals, later=None) -> list[dict]:
+    return _impl.detect_season_points_milestones(PWHL, sb, game, ordered_goals, later)
 
 
 def get_career_points(sb, player_id: int) -> int:
-    """Same pattern as get_career_wins: PWHL launched Jan 2024, so summing
-    every historical season_type='regular' row for this player IS true
-    career points -- no external API needed (see module docstring)."""
-    r = (
-        sb.table("pwhl_player_seasons")
-        .select("points")
-        .eq("player_id", player_id)
-        .eq("season_type", REGULAR_SEASON_TYPE)
-        .execute()
-    )
-    return sum(row.get("points") or 0 for row in (r.data or []))
+    return _impl.get_career_points(PWHL, sb, player_id)
 
 
-def detect_career_points_milestones(
-    sb, game: dict, ordered_goals: list[dict], later: LaterGames | None = None
-) -> list[dict]:
-    milestones = []
-    tonight_points = get_tonight_points(ordered_goals)
-    if not tonight_points:
-        return milestones
-
-    r = (
-        sb.table("pwhl_player_seasons")
-        .select("player_id, team_id")
-        .in_("player_id", list(tonight_points))
-        .eq("season_id", game["season_id"])
-        .eq("season_type", game["season_type"])
-        .execute()
-    )
-    team_by_player = {row["player_id"]: row["team_id"] for row in r.data or []}
-
-    for pid, tonight in tonight_points.items():
-        career_points = get_career_points(sb, pid)
-        if not career_points:
-            continue
-        if (
-            later is not None
-            and game["season_type"] == REGULAR_SEASON_TYPE
-            and career_points >= min(CAREER_POINTS_THRESHOLDS)
-        ):
-            career_points -= later.scoring(pid, game["season_id"])[1]
-        pre_game_points = career_points - tonight
-        team_id = team_by_player.get(pid)
-
-        for threshold in CAREER_POINTS_THRESHOLDS:
-            if pre_game_points < threshold <= career_points:
-                milestones.append(
-                    {
-                        "game_id": game["game_id"],
-                        "season": game["season_id"],
-                        "game_date": game["game_date"],
-                        "player_id": pid,
-                        "team": _team_abbr(team_id) if team_id else None,
-                        "opponent": None,
-                        "milestone_type": f"career_points_{threshold}",
-                        "description": f"Player #{pid} reaches {threshold} career points",
-                        "detail": {"career_points": career_points},
-                        "is_pwhl": True,
-                        "event_key": "",
-                    }
-                )
-
-    return milestones
-
-
-# ---------------------------------------------------------------------------
-# Main run
-# ---------------------------------------------------------------------------
-
-
-def build_description(milestone_type: str, name: str, team: str | None) -> str:
-    team_str = f" ({team})" if team else ""
-    if milestone_type == "hat_trick":
-        return f"Hat trick — {name}{team_str}"
-    if milestone_type == "natural_hat_trick":
-        return f"Natural hat trick — {name}{team_str}"
-    if milestone_type == "shutout":
-        return f"Shutout — {name}{team_str}"
-    if milestone_type == "sh_goal":
-        return f"Shorthanded goal — {name}{team_str}"
-    if milestone_type.startswith("season_goals_"):
-        n = milestone_type.rsplit("_", 1)[-1]
-        return f"{name} reaches {n} goals this season"
-    if milestone_type.startswith("season_points_"):
-        n = milestone_type.rsplit("_", 1)[-1]
-        return f"{name} reaches {n} points this season"
-    if milestone_type.startswith("career_points_"):
-        n = milestone_type.rsplit("_", 1)[-1]
-        return f"{name} reaches {n} career points"
-    if milestone_type.startswith("career_wins_"):
-        n = milestone_type.rsplit("_", 1)[-1]
-        return f"{name} reaches {n} career wins"
-    return f"{name} — {milestone_type}"
+def detect_career_points_milestones(sb, game, ordered_goals, later=None) -> list[dict]:
+    return _impl.detect_career_points_milestones(PWHL, sb, game, ordered_goals, later)
 
 
 def attach_player_names(sb, milestones: list[dict]) -> None:
-    """pwhl_players uses player_id (not id) and separate first_name/
-    last_name columns (not a single name column) — different shape than
-    NHL's players table."""
-    player_ids = {m["player_id"] for m in milestones if m.get("player_id") is not None}
-    if not player_ids:
-        return
-
-    r = (
-        sb.table("pwhl_players")
-        .select("player_id, first_name, last_name")
-        .in_("player_id", list(player_ids))
-        .execute()
-    )
-    name_map = {
-        row["player_id"]: f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-        for row in r.data or []
-    }
-
-    for m in milestones:
-        pid = m.get("player_id")
-        if pid is None:
-            continue
-        name = name_map.get(pid) or f"Player #{pid}"
-        m["description"] = build_description(m["milestone_type"], name, m["team"])
+    _impl.attach_player_names(PWHL, sb, milestones)
 
 
-def run_for_games(sb, games: list[dict], later: LaterGames | None = None):
-    """Shared detection + upsert logic for a list of games — used by both
-    run_for_date (date-driven) and run_for_game (--game, single game_id,
-    for spot-checks/debugging like today's SH-goal validation). `later`
-    puts threshold checks on totals as of the games' date."""
-    if not games:
-        log.info("  No games found.")
-        return
-
-    log.info(f"  {len(games)} game(s) found.")
-    all_milestones = []
-
-    for game in games:
-        log.info(f"  Game {game['game_id']} (season {game['season_id']}, {game['season_type']})")
-
-        ordered_goals = get_goal_rows(sb, game["game_id"])
-
-        all_milestones.extend(detect_hat_tricks(game, ordered_goals))
-        all_milestones.extend(detect_season_goal_milestones(sb, game, ordered_goals, later))
-        all_milestones.extend(detect_season_points_milestones(sb, game, ordered_goals, later))
-        all_milestones.extend(detect_career_points_milestones(sb, game, ordered_goals, later))
-        all_milestones.extend(build_shorthanded_goal_milestones(sb, game, ordered_goals))
-
-        appearances = get_goalie_appearances(sb, game)
-        all_milestones.extend(detect_shutouts(appearances, game))
-        all_milestones.extend(detect_goalie_win_milestones(sb, appearances, game, later))
-
-    if not all_milestones:
-        log.info("No milestones detected.")
-        return
-
-    attach_player_names(sb, all_milestones)
-
-    log.info(f"Upserting {len(all_milestones)} milestone(s)...")
-    for m in all_milestones:
-        try:
-            sb.table("milestones").upsert(
-                m, on_conflict="game_id,player_id,milestone_type,event_key"
-            ).execute()
-        except Exception as e:
-            log.error(
-                f"  Failed to upsert milestone {m['milestone_type']} for game {m['game_id']}: {e}"
-            )
-
-    log.info("Done.")
+def run_for_games(sb, games: list[dict], later=None):
+    _impl.run_for_games(PWHL, sb, games, later)
 
 
 def run_for_date(sb, target_date: str):
-    log.info(f"Scanning PWHL games for {target_date}...")
-    games = get_games_for_date(sb, target_date)
-    run_for_games(sb, games, LaterGames(sb, target_date))
+    _impl.run_for_date(PWHL, sb, target_date)
 
 
 def run_for_game(sb, game_id: int):
-    """Single-game path for --game. Does NOT require game_state='Final'
-    (get_games_for_date does) since you may want to re-run detection on
-    a specific game during testing regardless of its recorded state."""
-    log.info(f"Scanning PWHL game {game_id}...")
-    game = get_game_by_id(sb, game_id)
-    if game is None:
-        log.error(f"  game_id {game_id} not found in pwhl_game_log")
-        return
-    run_for_games(sb, [game], LaterGames(sb, game["game_date"]))
+    _impl.run_for_game(PWHL, sb, game_id)
 
 
 def main():
     parser = argparse.ArgumentParser(description="EyeWall PWHL milestone detection")
-    parser.add_argument("--date", help="Specific date (YYYY-MM-DD). Default: the last 3 days (ET).")
-    parser.add_argument(
-        "--since", help="Scan every date from this YYYY-MM-DD through yesterday (ET)."
-    )
-    parser.add_argument("--game", type=int, help="Single game_id (debugging/spot-checks).")
+    _impl.add_scan_arguments(parser)
     args = parser.parse_args()
-
-    sb = get_client()
-
-    if args.game:
-        run_for_game(sb, args.game)
-    elif args.since:
-        start = datetime.strptime(args.since, "%Y-%m-%d").date()
-        end = today_et() - timedelta(days=1)
-        if start > end:
-            log.error("--since date is after yesterday; nothing to do.")
-            sys.exit(1)
-        d = start
-        while d <= end:
-            run_for_date(sb, d.isoformat())
-            d += timedelta(days=1)
-    elif args.date:
-        run_for_date(sb, args.date)
-    else:
-        for d in catch_up_dates():
-            run_for_date(sb, d)
+    # Module-level names, looked up at call time (tests patch them).
+    _impl.scan(args, get_client(), run_for_date, run_for_game, today_et())
 
 
 if __name__ == "__main__":

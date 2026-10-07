@@ -1,0 +1,234 @@
+[
+  {
+    "description": "First101 Last101 reaches 15 goals this season",
+    "detail": {
+      "season_goals": 15
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "season_goals_15",
+    "opponent": null,
+    "player_id": 101,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "First101 Last101 reaches 30 points this season",
+    "detail": {
+      "season_points": 30
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "season_points_30",
+    "opponent": null,
+    "player_id": 101,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "First102 Last102 reaches 20 goals this season",
+    "detail": {
+      "season_goals": 20
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "season_goals_20",
+    "opponent": null,
+    "player_id": 102,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "First103 Last103 reaches 20 points this season",
+    "detail": {
+      "season_points": 21
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "season_points_20",
+    "opponent": null,
+    "player_id": 103,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "First301 Last301 reaches 15 goals this season",
+    "detail": {
+      "season_goals": 15
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 262,
+    "is_pwhl": true,
+    "milestone_type": "season_goals_15",
+    "opponent": null,
+    "player_id": 301,
+    "season": 8,
+    "team": "BOS"
+  },
+  {
+    "description": "First301 Last301 reaches 20 points this season",
+    "detail": {
+      "season_points": 22
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 262,
+    "is_pwhl": true,
+    "milestone_type": "season_points_20",
+    "opponent": null,
+    "player_id": 301,
+    "season": 8,
+    "team": "BOS"
+  },
+  {
+    "description": "First701 Last701 reaches 25 career wins",
+    "detail": {
+      "career_wins": 25
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "career_wins_25",
+    "opponent": "SEA",
+    "player_id": 701,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "Hat trick — First301 Last301 (BOS)",
+    "detail": {
+      "assists": [
+        [
+          null,
+          null
+        ],
+        [
+          null,
+          null
+        ],
+        [
+          302,
+          null
+        ]
+      ],
+      "goal_count": 3
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 262,
+    "is_pwhl": true,
+    "milestone_type": "hat_trick",
+    "opponent": "MIN",
+    "player_id": 301,
+    "season": 8,
+    "team": "BOS"
+  },
+  {
+    "description": "Natural hat trick — First101 Last101 (TOR)",
+    "detail": {
+      "assists": [
+        [
+          102,
+          103
+        ],
+        [
+          103,
+          null
+        ],
+        [
+          null,
+          null
+        ]
+      ],
+      "goal_periods": [
+        1,
+        1,
+        2
+      ],
+      "goal_time_seconds": [
+        78,
+        174,
+        592
+      ]
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "natural_hat_trick",
+    "opponent": "SEA",
+    "player_id": 101,
+    "season": 8,
+    "team": "TOR"
+  },
+  {
+    "description": "Player #801 reaches 25 career wins",
+    "detail": {
+      "career_wins": 25
+    },
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 262,
+    "is_pwhl": true,
+    "milestone_type": "career_wins_25",
+    "opponent": "MIN",
+    "player_id": 801,
+    "season": 8,
+    "team": "BOS"
+  },
+  {
+    "description": "Shorthanded goal — First201 Last201 (SEA)",
+    "detail": {
+      "period_id": 2,
+      "time_seconds": 829
+    },
+    "event_key": "2_829",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "sh_goal",
+    "opponent": "TOR",
+    "player_id": 201,
+    "season": 8,
+    "team": "SEA"
+  },
+  {
+    "description": "Shorthanded goal — First202 Last202 (SEA)",
+    "detail": {
+      "period_id": 3,
+      "time_seconds": 500
+    },
+    "event_key": "3_500",
+    "game_date": "2026-01-20",
+    "game_id": 261,
+    "is_pwhl": true,
+    "milestone_type": "sh_goal",
+    "opponent": "TOR",
+    "player_id": 202,
+    "season": 8,
+    "team": "SEA"
+  },
+  {
+    "description": "Shutout — Player #801 (BOS)",
+    "detail": {},
+    "event_key": "",
+    "game_date": "2026-01-20",
+    "game_id": 262,
+    "is_pwhl": true,
+    "milestone_type": "shutout",
+    "opponent": "MIN",
+    "player_id": 801,
+    "season": 8,
+    "team": "BOS"
+  }
+]
