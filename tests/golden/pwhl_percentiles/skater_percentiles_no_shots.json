@@ -1,0 +1,498 @@
+[
+  {
+    "on_conflict": "player_id,team_id,season_id,season_type",
+    "rows": [
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 33,
+        "player_id": 101,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 38,
+        "pct_penalties": 38,
+        "player_id": 102,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 62,
+        "pct_penalties": 71,
+        "player_id": 103,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 21,
+        "pct_penalties": 17,
+        "player_id": 104,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 29,
+        "pct_penalties": 21,
+        "player_id": 105,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 22,
+        "pct_penalties": 44,
+        "player_id": 106,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 67,
+        "pct_penalties": 0,
+        "player_id": 107,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 108,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 96,
+        "pct_penalties": 29,
+        "player_id": 109,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 92,
+        "pct_penalties": 75,
+        "player_id": 110,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 17,
+        "pct_penalties": 62,
+        "player_id": 111,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 75,
+        "player_id": 112,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 79,
+        "pct_penalties": 42,
+        "player_id": 113,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 33,
+        "pct_penalties": 22,
+        "player_id": 114,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 89,
+        "pct_penalties": 67,
+        "player_id": 115,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 116,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 42,
+        "pct_penalties": 54,
+        "player_id": 117,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 0,
+        "player_id": 118,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 25,
+        "pct_penalties": 8,
+        "player_id": 119,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 88,
+        "pct_penalties": 33,
+        "player_id": 120,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 50,
+        "pct_penalties": 75,
+        "player_id": 121,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 0,
+        "player_id": 122,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 11,
+        "pct_penalties": 11,
+        "player_id": 123,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 124,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 0,
+        "pct_penalties": 67,
+        "player_id": 125,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 75,
+        "pct_penalties": 17,
+        "player_id": 126,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 75,
+        "player_id": 127,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 33,
+        "pct_penalties": 75,
+        "player_id": 128,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 21,
+        "pct_penalties": 75,
+        "player_id": 129,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 0,
+        "player_id": 130,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 0,
+        "pct_penalties": 33,
+        "player_id": 131,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 132,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 8,
+        "pct_penalties": 75,
+        "player_id": 133,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 71,
+        "pct_penalties": 4,
+        "player_id": 134,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 54,
+        "pct_penalties": 50,
+        "player_id": 135,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 67,
+        "pct_penalties": 75,
+        "player_id": 136,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 4,
+        "pct_penalties": 25,
+        "player_id": 137,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 78,
+        "pct_penalties": 56,
+        "player_id": 138,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 44,
+        "pct_penalties": 78,
+        "player_id": 139,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 140,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 58,
+        "pct_penalties": 75,
+        "player_id": 141,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 21,
+        "pct_penalties": 58,
+        "player_id": 142,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 83,
+        "pct_penalties": 0,
+        "player_id": 143,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 12,
+        "pct_penalties": 46,
+        "player_id": 144,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 46,
+        "pct_penalties": 12,
+        "player_id": 145,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 56,
+        "pct_penalties": 78,
+        "player_id": 146,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 11,
+        "pct_penalties": 11,
+        "player_id": 147,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": null,
+        "pct_penalties": null,
+        "player_id": 148,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6
+      },
+      {
+        "pct_a1": null,
+        "pct_finishing": null,
+        "pct_goals": 100,
+        "pct_penalties": 33,
+        "player_id": 101,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2
+      }
+    ],
+    "table": "pwhl_player_seasons"
+  }
+]

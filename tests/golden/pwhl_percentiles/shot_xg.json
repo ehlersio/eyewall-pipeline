@@ -1,0 +1,384 @@
+[
+  {
+    "on_conflict": "player_id,team_id,season_id,season_type",
+    "rows": [
+      {
+        "finishing": 2.232,
+        "player_id": 139,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.768
+      },
+      {
+        "finishing": 0.253,
+        "player_id": 140,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.747
+      },
+      {
+        "finishing": 1.912,
+        "player_id": 109,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 2.088
+      },
+      {
+        "finishing": 3.217,
+        "player_id": 135,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.783
+      },
+      {
+        "finishing": 1.535,
+        "player_id": 137,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.465
+      },
+      {
+        "finishing": 3.816,
+        "player_id": 110,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 2.184
+      },
+      {
+        "finishing": 5.188,
+        "player_id": 115,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 1.812
+      },
+      {
+        "finishing": -0.849,
+        "player_id": 136,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.849
+      },
+      {
+        "finishing": 0.059,
+        "player_id": 116,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 1.941
+      },
+      {
+        "finishing": -1.25,
+        "player_id": 113,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 2.25
+      },
+      {
+        "finishing": 0.842,
+        "player_id": 134,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 1.158
+      },
+      {
+        "finishing": 1.4,
+        "player_id": 138,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.6
+      },
+      {
+        "finishing": 2.578,
+        "player_id": 120,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.422
+      },
+      {
+        "finishing": 2.248,
+        "player_id": 123,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.752
+      },
+      {
+        "finishing": -0.503,
+        "player_id": 107,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 1.503
+      },
+      {
+        "finishing": -0.115,
+        "player_id": 106,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 2.115
+      },
+      {
+        "finishing": 1.071,
+        "player_id": 105,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 1.929
+      },
+      {
+        "finishing": 2.87,
+        "player_id": 102,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 2.13
+      },
+      {
+        "finishing": 3.362,
+        "player_id": 122,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.638
+      },
+      {
+        "finishing": 1.152,
+        "player_id": 121,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.848
+      },
+      {
+        "finishing": 2.59,
+        "player_id": 124,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.41
+      },
+      {
+        "finishing": 0.086,
+        "player_id": 103,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 1.914
+      },
+      {
+        "finishing": 1.891,
+        "player_id": 108,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 2.109
+      },
+      {
+        "finishing": 7.416,
+        "player_id": 104,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 1,
+        "xg_for": 1.584
+      },
+      {
+        "finishing": 0.449,
+        "player_id": 143,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 1.551
+      },
+      {
+        "finishing": 2.188,
+        "player_id": 148,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 1.812
+      },
+      {
+        "finishing": 1.476,
+        "player_id": 142,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 1.524
+      },
+      {
+        "finishing": 2.711,
+        "player_id": 117,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 2.289
+      },
+      {
+        "finishing": 1.443,
+        "player_id": 145,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 1.557
+      },
+      {
+        "finishing": 0.136,
+        "player_id": 144,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 0.864
+      },
+      {
+        "finishing": 2.101,
+        "player_id": 146,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 1.899
+      },
+      {
+        "finishing": 1.395,
+        "player_id": 119,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 1.605
+      },
+      {
+        "finishing": 1.912,
+        "player_id": 141,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 2.088
+      },
+      {
+        "finishing": 0.864,
+        "player_id": 118,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 3,
+        "xg_for": 2.136
+      },
+      {
+        "finishing": 1.707,
+        "player_id": 130,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.293
+      },
+      {
+        "finishing": 0.935,
+        "player_id": 128,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.065
+      },
+      {
+        "finishing": 2.298,
+        "player_id": 129,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 0.702
+      },
+      {
+        "finishing": -0.822,
+        "player_id": 125,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 0.822
+      },
+      {
+        "finishing": 5.632,
+        "player_id": 132,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.368
+      },
+      {
+        "finishing": 2.881,
+        "player_id": 126,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.119
+      },
+      {
+        "finishing": -0.059,
+        "player_id": 127,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.059
+      },
+      {
+        "finishing": 1.908,
+        "player_id": 131,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 4,
+        "xg_for": 1.092
+      },
+      {
+        "finishing": 3.777,
+        "player_id": 147,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 6,
+        "xg_for": 2.223
+      },
+      {
+        "finishing": 2.026,
+        "player_id": 114,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 1.974
+      },
+      {
+        "finishing": -0.303,
+        "player_id": 133,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 5,
+        "xg_for": 0.303
+      },
+      {
+        "finishing": 2.113,
+        "player_id": 112,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 1.887
+      },
+      {
+        "finishing": 4.896,
+        "player_id": 111,
+        "season_id": 8,
+        "season_type": "regular",
+        "team_id": 2,
+        "xg_for": 1.104
+      }
+    ],
+    "table": "pwhl_player_seasons"
+  }
+]
