@@ -13,6 +13,7 @@ honours .order()/.range() so select_all's paging works.
 """
 
 import os
+import sys
 from datetime import date
 
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -229,3 +230,50 @@ class TestProcessGameUsesBatchedSet:
 
         assert built == ["WSH"]
         assert client.executes == 2
+
+
+class TestMainScanPassesTheBatchedSet:
+    """Regression (2026-10-06 nightly, first dispatched run): main() built
+    the batched set as `generated`, then reused the name for the success
+    counter two lines later, so process_game got an int and its membership
+    check raised TypeError on the first game."""
+
+    def test_process_game_receives_the_set_and_the_counter_counts(self, monkeypatch, capsys):
+        games = [
+            {
+                "game_id": 1,
+                "season": 20262027,
+                "home_team": "CAR",
+                "away_team": "FLA",
+                "game_date": "2026-10-05",
+                "game_type": 2,
+            },
+            {
+                "game_id": 2,
+                "season": 20262027,
+                "home_team": "BOS",
+                "away_team": "NYR",
+                "game_date": "2026-10-05",
+                "game_type": 2,
+            },
+        ]
+        done = {(1, "CAR", "en")}
+        seen = []
+
+        def fake_process_game(
+            game_id, season, home, away, force=False, locale="en", generated=None
+        ):
+            seen.append(generated)
+            return (True, False)
+
+        monkeypatch.setattr(s, "get_completed_games", lambda season, since=None: games)
+        monkeypatch.setattr(s, "fetch_generated", lambda ids: done)
+        monkeypatch.setattr(s, "process_game", fake_process_game)
+        monkeypatch.setattr(s.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(sys, "argv", ["ai_summaries.py", "20262027", "--locale", "en"])
+
+        s.main()
+
+        assert seen and all(g is done for g in seen)
+        out = capsys.readouterr().out
+        assert "Generated: 2 | Failed: 2" in out

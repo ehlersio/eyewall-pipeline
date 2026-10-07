@@ -274,9 +274,11 @@ def main():
         print("No completed games found — exiting")
         return
 
+    # The batched existence set; keep its name distinct from the counter
+    # below (the two were both `generated` once, and process_game got an int).
     generated = set() if args.force else fetch_generated([g["game_id"] for g in games])
     total = len(games)
-    generated = 0
+    generated_count = 0
     failed = 0
 
     for locale in locales:
@@ -298,12 +300,12 @@ def main():
                 generated=generated,
             )
 
-            generated += (1 if home_ok else 0) + (1 if away_ok else 0)
+            generated_count += (1 if home_ok else 0) + (1 if away_ok else 0)
             failed += (0 if home_ok else 1) + (0 if away_ok else 1)
 
             time.sleep(REQUEST_DELAY)
 
-    print(f"\nDone. Generated: {generated} | Failed: {failed}")
+    print(f"\nDone. Generated: {generated_count} | Failed: {failed}")
 
 
 if __name__ == "__main__":
