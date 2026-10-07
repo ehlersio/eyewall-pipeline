@@ -123,3 +123,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"echl-nightly.yml\",\"status\":\"failure\",\"title\":\"EyeWall ECHL Nightly Pipeline failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
+
+      - name: Report success
+        if: success()
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"echl-nightly.yml\",\"status\":\"ok\",\"title\":\"EyeWall ECHL Nightly Pipeline succeeded\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
