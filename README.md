@@ -241,6 +241,19 @@ python hockeytech_elo.py ahl --dry-run                    # print ratings + toda
 python hockeytech_elo.py echl --dry-run --date 2026-10-15 # as if on opening day
 ```
 
+### `hockeytech_playoff_odds.py` (2026-10)
+AHL/ECHL/PWHL playoff odds → `{league}_playoff_odds` (one row per team per nightly run, history kept; read by eyewall-poller's `/{league}/playoff-odds`). Runs right after the Elo step in `ahl-/echl-/pwhl-nightly.yml`. Same model as `playoff_odds.py`: every remaining regular-season game in `{league}_game_log` (not final, dated today or later) simulated 10,000 times (never fewer than 2,000) on `{league}_team_elo_ratings` + home advantage, with `playoff_odds.rating_sd()`'s rating uncertainty (NHL-tuned, not re-tuned for these leagues). The past-regulation share is measured each run from HockeyTech's schedule feed (this season's and last regular season's finals; AHL 2025-26: 23.3%), and points follow `League.standings_points` (AHL/ECHL 2-2-1, PWHL 3-2-1). The season is the earliest regular season with a game left, so the next season's preseason odds appear once its schedule is ingested and the current one is over.
+
+**Playoff formats are encoded per league and season** (`hockeytech_leagues.PlayoffFormat`), each verified from the league's own site and cited there: AHL 2025-26 (23 of 32: Atlantic 6, North 5, Central 5, Pacific 7), ECHL 2025-26 (top 4 per division), PWHL 2025-26 (top 4 of 8) and 2026-27 (top 4 per conference; conferences encoded because HockeyTech lists all 12 teams as one group). Ranking: points percentage, then regulation wins (AHL/PWHL), then random. **A season without a verified format is still simulated, but `make_playoffs_pct`/`win_division_pct` are written NULL and `format` = `unverified`** — as of 2026-10-07 that's the AHL's 2026-27 (Hamilton's move left the Atlantic at 7 and the North at 8; the AHL hasn't said how many qualify from each) and the ECHL's 2026-27 (only the 2026 format is published). Add the `PlayoffFormat` when the league publishes it. Divisions come from HockeyTech's standings feed, checked against the format each run; a mismatch (realignment) is treated as unverified.
+
+```
+python hockeytech_playoff_odds.py ahl                     # current season, 10,000 sims
+python hockeytech_playoff_odds.py pwhl 11 --sims 2000 --dry-run
+python hockeytech_playoff_odds.py echl --seed 1 --date 2026-10-20
+```
+
+Requires `docs/2026-10-08_hockeytech_playoff_odds.sql` (all three tables + RLS). Until it's run, the write logs one error and the step moves on.
+
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
 

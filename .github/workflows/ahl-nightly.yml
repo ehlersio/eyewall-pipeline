@@ -180,6 +180,22 @@ jobs:
         # /ahl/prediction) and ahl_game_win_probs for today's/tomorrow's
         # games. Tables: docs/hockeytech_elo_ddl.sql.
 
+      - name: AHL playoff odds (hockeytech_playoff_odds.py)
+        if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NHL_SEASON: ${{ secrets.NHL_SEASON }}
+        run: python hockeytech_playoff_odds.py ahl
+        # Simulates the rest of the regular season 10,000 times from
+        # ahl_team_elo_ratings (the Elo step above) over the games left in
+        # ahl_game_log (the stats step), into ahl_playoff_odds (read by
+        # eyewall-poller's /ahl/playoff-odds). make_playoffs_pct is NULL
+        # for a season whose playoff format isn't verified in
+        # hockeytech_leagues.py. Table: docs/2026-10-08_hockeytech_playoff_odds.sql
+        # (logs one error and moves on until it's been run). NHL_SEASON:
+        # db.py resolves it at import.
+
       - name: AHL milestones (hockeytech_milestones.py)
         if: steps.guard.outputs.skip != 'true'
         env:
