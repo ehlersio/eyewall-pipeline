@@ -2,7 +2,9 @@
 test_hockeytech_characterization.py -- characterization ("golden master")
 tests for the AHL and ECHL pipeline modules. Written before each
 ahl_*/echl_* pair was merged into one shared hockeytech_* module, and kept
-as the guard on that shared code.
+as the guard on that shared code. The live-refresh and news cases also run
+for PWHL: pwhl_live_refresh.py and pwhl_news.py were pinned the same way
+before they became wrappers over the shared modules (2026-10).
 
 Each case runs a module's real entry point for BOTH leagues against the same
 fake HockeyTech/RSS responses and a fake Supabase client, and compares what
@@ -52,6 +54,8 @@ import hockeytech_news
 import hockeytech_penalty_shots
 import hockeytech_shot_events
 import hockeytech_stats
+import pwhl_live_refresh
+import pwhl_news
 import season_lookup
 
 SUPABASE_MODULES = (
@@ -102,7 +106,14 @@ ECHL = League(
     echl_live_refresh, echl_news,
     73, 76, 78, 8, 99, "FLA", "TR", "Florida Everblades", "Trois-Rivières Lions",
 )  # fmt: skip
+# PWHL is pinned for live refresh and news only; its stats and per-game
+# modules are pwhl_*.py's own (no shared implementation to guard).
+PWHL = League(
+    "pwhl", None, None, None, None, pwhl_live_refresh, pwhl_news,
+    8, 9, 11, 3, 12, "MTL", "LV", "Montréal Victoire", "PWHL Las Vegas",
+)  # fmt: skip
 LEAGUES = [pytest.param(AHL, id="ahl"), pytest.param(ECHL, id="echl")]
+LIVE_LEAGUES = [*LEAGUES, pytest.param(PWHL, id="pwhl")]
 
 NOW = real_datetime(2026, 1, 15, 17, 0, tzinfo=UTC)
 
@@ -289,6 +300,7 @@ def team_special(L):
 
 def scorebar(L):
     return [
+        *pwhl_overtime_finals(L),
         {"ID": "1001", "SeasonID": str(L.regular), "Date": "2026-01-14", "HomeID": str(L.team_a),
          "VisitorID": str(L.team_b), "HomeGoals": "4", "VisitorGoals": "2",
          "GameStatusString": "Final", "GameStatus": "4", "venue_name": "Home Arena",
@@ -395,9 +407,44 @@ def parens_response(view, L):
     ]  # fmt: skip
 
 
-def rss(feed_url):
+def pwhl_overtime_finals(L):
+    """Finals past regulation, which PWHL writes as ot/shootout booleans
+    and AHL/ECHL as ended_in. PWHL only, so the AHL/ECHL goldens (written
+    before these rows existed) stay as they were."""
+    if L.key != "pwhl":
+        return []
+    return [
+        {"ID": "1020", "SeasonID": str(L.regular), "Date": "2026-01-14", "HomeID": str(L.team_a),
+         "VisitorID": str(L.team_b), "HomeGoals": "3", "VisitorGoals": "2",
+         "GameStatusString": "Final", "GameStatusStringLong": "Final OT", "GameStatus": "4"},
+        {"ID": "1021", "SeasonID": str(L.regular), "Date": "2026-01-14", "HomeID": str(L.team_b),
+         "VisitorID": str(L.team_a), "HomeGoals": "2", "VisitorGoals": "3",
+         "GameStatusString": "Final", "GameStatusStringLong": "Final SO", "GameStatus": "4"},
+        {"ID": "1022", "SeasonID": str(L.playoffs), "Date": "2026-01-14", "HomeID": str(L.team_a),
+         "VisitorID": str(L.team_b), "HomeGoals": "1", "VisitorGoals": "0",
+         "GameStatusString": "Final", "GameStatusStringLong": "Final 2OT", "GameStatus": "4"},
+        {"ID": "1023", "SeasonID": str(L.regular), "Date": "2026-01-14", "HomeID": str(L.team_b),
+         "VisitorID": str(L.team_a), "HomeGoals": "5", "VisitorGoals": "1",
+         "GameStatusString": "Final", "GameStatusStringLong": "Final", "GameStatus": "4"},
+    ]  # fmt: skip
+
+
+def pwhl_rss_items(feed_url):
+    """Items for PWHL's keyword filter: two that match (title, then
+    excerpt, in another case) and one that doesn't."""
+    return f"""
+<item><title>PWHL announces schedule</title><link>{feed_url}/pwhl</link>
+<pubDate>Tue, 13 Jan 2026 09:30:00 GMT</pubDate></item>
+<item><title>Game recap</title><link>{feed_url}/recap</link>
+<description>The VICTOIRE won in Laval.</description>
+<pubDate>Thu, 15 Jan 2026 01:00:00 +0000</pubDate></item>
+<item><title>NBA trade deadline</title><link>{feed_url}/nba</link>
+<description>Basketball only.</description></item>"""
+
+
+def rss(feed_url, extra=""):
     return f"""<?xml version="1.0"?>
-<rss xmlns:media="http://search.yahoo.com/mrss/"><channel>
+<rss xmlns:media="http://search.yahoo.com/mrss/"><channel>{extra}
 <item><title>Headline one</title><link>{feed_url}/one</link>
 <description><![CDATA[<p>First &amp; story</p>]]></description>
 <pubDate>Wed, 14 Jan 2026 12:00:00 GMT</pubDate>
@@ -600,7 +647,9 @@ class Harness:
         self.requests.append({"url": url})
         if "oursportscentral" in url:
             raise urllib.error.URLError("connection refused")
-        return FakeHTTPResponse(rss(url.rstrip("/")).encode())
+        feed = url.rstrip("/")
+        extra = pwhl_rss_items(feed) if self.L.key == "pwhl" else ""
+        return FakeHTTPResponse(rss(feed, extra).encode())
 
     # Supabase selects
     def select(self, table, eq):
@@ -722,21 +771,21 @@ def test_penalty_shots_single_game(monkeypatch, L):
     assert_golden(f"{L.key}_penalty_shots_single_game", h.record())
 
 
-@pytest.mark.parametrize("L", LEAGUES)
+@pytest.mark.parametrize("L", LIVE_LEAGUES)
 def test_live_refresh(monkeypatch, L):
     h = Harness(monkeypatch, L)
     L.live.main()
     assert_golden(f"{L.key}_live_refresh", h.record())
 
 
-@pytest.mark.parametrize("L", LEAGUES)
+@pytest.mark.parametrize("L", LIVE_LEAGUES)
 def test_live_refresh_when_scorebar_fails(monkeypatch, L):
     h = Harness(monkeypatch, L, fail_scorebar=True)
     L.live.main()
     assert_golden(f"{L.key}_live_refresh_scorebar_fails", h.record())
 
 
-@pytest.mark.parametrize("L", LEAGUES)
+@pytest.mark.parametrize("L", LIVE_LEAGUES)
 def test_news(monkeypatch, L):
     h = Harness(monkeypatch, L)
     L.news.main()

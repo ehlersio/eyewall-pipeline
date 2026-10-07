@@ -84,7 +84,7 @@ from datetime import UTC, date, datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
-from hockeytech_leagues import ended_in
+from hockeytech_leagues import PWHL, ended_in
 from pipeline_common import FetchError, OnRosterMarker, hockeytech_statview_get
 from pwhl_strength_state import get_penalties_for_season
 from pwhl_strength_state import penalty_window as _penalty_window
@@ -120,43 +120,12 @@ HEADERS = {
     "Referer": "https://www.thepwhl.com/",
 }
 
-TEAM_ID_MAP = {
-    "1": "BOS",
-    "2": "MIN",
-    "3": "MTL",
-    "4": "NY",
-    "5": "OTT",
-    "6": "TOR",
-    "8": "SEA",
-    "9": "VAN",
-    # 2026-27 expansion teams — IDs confirmed via HockeyTech's real signing
-    # data + team-filter dropdown (docs/hockeytech-api-notes.md, 2026-07-04).
-    # Not yet in bootstrap's teams[] (no roster/division assigned
-    # pre-season), so fetches for these will just come back empty until
-    # that changes — wiring the IDs in now means nothing needs a manual
-    # add once rosters exist.
-    "10": "DET",
-    "11": "HAM",
-    "12": "LV",
-    "13": "SJS",
-}
-
-# Team codes the feed uses that TEAM_ID_MAP isn't keyed on. The 2023
-# showcase (season 2) calls Montréal "MON"; every other season calls it
-# "MTL". Unmapped, its 21 skaters and 3 goalies resolved to no team at
-# all and were stored with team_id NULL -- which never matches the
-# upsert's conflict key, so each run inserted another copy of them (84
-# skater + 12 goalie rows by 2026-06). Same failure the ECHL's Iowa and
-# Utah rows hit; see hockeytech_leagues.py (2026-09).
-#
-# The 2026-27 expansion teams are the same story: TEAM_ID_MAP files them
-# as "LV" and "SJS" (the app's codes), but HockeyTech's feed calls team 12
-# "VEG" in the 2026-27 preseason (season 10) and "VGS" in the regular
-# season (season 11), and team 13 "SJ" in both (teamsbyseason and
-# statviewfeed view=teams, checked 2026-10-05). Unmapped, every Las Vegas
-# and San Jose skater, goalie and standings row was skipped.
-TEAM_CODE_ALIASES = {"MON": "3", "VEG": "12", "VGS": "12", "SJ": "13"}
-
+# HockeyTech team ids -> codes, and the codes the feed uses that the map
+# isn't keyed on (MON for Montréal in the 2023 showcase, VEG/VGS/SJ for the
+# 2026-27 expansion teams): both live in hockeytech_leagues.PWHL, shared with
+# pwhl_live_refresh.py, pwhl_news.py and hockeytech_elo.py.
+TEAM_ID_MAP = PWHL.team_id_map
+TEAM_CODE_ALIASES = PWHL.team_code_aliases
 CODE_TO_TEAM_ID = {code: team_id for team_id, code in TEAM_ID_MAP.items()} | TEAM_CODE_ALIASES
 
 
@@ -168,7 +137,8 @@ def team_id_for(team_code: str, team_link: str | None = None) -> str | None:
     row["_team_link"]). It's preferred when it names a team we know, since
     codes drift between seasons (MON/MTL, VEG/VGS) while ids don't. The
     code is the fallback for rows without one. Callers skip rows they
-    can't place rather than writing team_id NULL -- see TEAM_CODE_ALIASES."""
+    can't place rather than writing team_id NULL -- see
+    hockeytech_leagues.PWHL.team_code_aliases."""
     link = str(team_link or "").strip()
     if link in TEAM_ID_MAP:
         return link

@@ -1,17 +1,23 @@
 """
 hockeytech_live_refresh.py -- frequent refresh of {league}_game_log's
 live-volatile fields (game_state, game_status_code, home_score, away_score,
-ended_in)
-for games in a narrow window around today. Shared by ahl_live_refresh.py
-and echl_live_refresh.py.
+and ended_in -- or PWHL's ot/shootout, see League.ot_shootout_columns) for
+games in a narrow window around today. Shared by ahl_live_refresh.py,
+echl_live_refresh.py and pwhl_live_refresh.py.
 
 Why this exists: the nightly {league}_stats.py ingest writes the whole
 season once a day, and nothing updates game_state/scores again until the
 following night -- so a game happening today would sit at the last nightly
 snapshot and the Worker's live-game detection (/{league}/today, polled every
 minute) could never see it live. This is a narrow, fast refresh of just those
-4 columns, run from live-score-refresh.yml; nothing else {league}_stats.py
+columns, run from live-score-refresh.yml; nothing else {league}_stats.py
 owns (rosters, season stats, the full schedule) is touched.
+
+Deliberately feed=modulekit&view=scorebar, not the statviewfeed schedule
+view pwhl_stats.py reads: that view's rows have no numeric status code
+(only the string game_status), while scorebar has both GameStatusString
+and a numeric GameStatus (confirmed live 2026-08-29). game_status_code is
+written only here.
 """
 
 import logging
@@ -78,16 +84,22 @@ def main(lg: League) -> None:
         # clock time, e.g. "7:00PM", not a state word), 4=final. 2/3
         # unconfirmed -- the Worker treats "not 1, not 4" as live.
         status_code = int(g["GameStatus"]) if g.get("GameStatus") not in (None, "") else None
-        rows.append(
-            {
-                "game_id": int(gid),
-                "game_state": g.get("GameStatusString", "") or "",
-                "game_status_code": status_code,
-                "home_score": int(g.get("HomeGoals", 0) or 0),
-                "away_score": int(g.get("VisitorGoals", 0) or 0),
-                "ended_in": ended_in(g.get("GameStatusStringLong")),
-            }
-        )
+        row = {
+            "game_id": int(gid),
+            "game_state": g.get("GameStatusString", "") or "",
+            "game_status_code": status_code,
+            "home_score": int(g.get("HomeGoals", 0) or 0),
+            "away_score": int(g.get("VisitorGoals", 0) or 0),
+        }
+        # Written here, not only by the nightly stats run, so a game that
+        # just ended in OT reads Final/OT tonight.
+        outcome = ended_in(g.get("GameStatusStringLong"))
+        if lg.ot_shootout_columns:
+            row["ot"] = outcome == "OT"
+            row["shootout"] = outcome == "SO"
+        else:
+            row["ended_in"] = outcome
+        rows.append(row)
 
     sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     total = 0

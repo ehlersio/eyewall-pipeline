@@ -1,0 +1,23 @@
+{
+  "posts": [],
+  "reads": [],
+  "requests": [
+    {
+      "params": {
+        "client_code": "pwhl",
+        "feed": "modulekit",
+        "key": "446521baf8c38984",
+        "lang": "en",
+        "league_id": "",
+        "limit": "100",
+        "numberofdaysahead": "1",
+        "numberofdaysback": "1",
+        "site_id": "0",
+        "view": "scorebar"
+      },
+      "referer": "https://www.thepwhl.com/",
+      "url": "https://lscluster.hockeytech.com/feed/index.php"
+    }
+  ],
+  "writes": []
+}

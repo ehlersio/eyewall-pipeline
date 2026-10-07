@@ -34,41 +34,19 @@ Usage:
 
 import argparse
 import sys
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import elo
 from db import get_client
-from hockeytech_leagues import AHL, ECHL, League
+from hockeytech_leagues import AHL, ECHL
+from hockeytech_leagues import PWHL as _PWHL
 from season_lookup import get_hockeytech_seasons, get_season_type
 
-# The PWHL is on the same HockeyTech feed; only what this module needs
-# (pwhl_stats.py has the full config and TEAM_ID_MAP this mirrors).
-PWHL = League(
-    key="pwhl",
-    label="PWHL",
-    hockeytech_key="446521baf8c38984",
-    site_id="0",
-    league_id="1",
-    referer="https://www.thepwhl.com/",
-    team_id_map={
-        "1": "BOS",
-        "2": "MIN",
-        "3": "MTL",
-        "4": "NY",
-        "5": "OTT",
-        "6": "TOR",
-        "8": "SEA",
-        "9": "VAN",
-        "10": "DET",
-        "11": "HAM",
-        "12": "LV",
-        "13": "SJS",
-    },
-    fallback_season=8,
-    season_examples="",
-    news_sources=(),
-)
+# The PWHL config is hockeytech_leagues.PWHL. Its modulekit schedule and
+# seasons reads here have always sent league_id=1 (the scorebar sends "").
+PWHL = replace(_PWHL, league_id="1")
 LEAGUES = {"ahl": AHL, "echl": ECHL, "pwhl": PWHL}
 ET = ZoneInfo("America/New_York")
 REPLAY_FROM = "2023-09-01"  # 2023-24 onward -- the backtested window
