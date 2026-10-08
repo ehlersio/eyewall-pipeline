@@ -1,6 +1,7 @@
 """Tests for hockeytech_power_rankings.py -- no network, no Supabase, no AI."""
 
 import os
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 
@@ -85,11 +86,11 @@ def test_last_ten_uses_the_leagues_points():
     rows += [log(9, "2026-10-09", 1, 2, 2, 3, ended_in="OT", so=True)]  # OT/SO loss
     rows += [log(10, "2026-10-10", 2, 1, 2, 3, ended_in="SO", so=True)]  # OT/SO win (away)
     rows += [log(11, "2026-10-11", 2, 1, 5, 1)]  # regulation loss
-    ahl = hpr.last_ten("1", hpr.finals("ahl", rows), hpr.STANDINGS_POINTS["ahl"])
+    ahl = hpr.last_ten("1", hpr.finals("ahl", rows), AHL.standings_points)
     # Last 10 = games 2..11: 7 regulation wins, OT loss, SO win, regulation loss.
     assert (ahl["wins"], ahl["losses"], ahl["ot_losses"]) == (8, 1, 1)
     assert ahl["pts_pct"] == (8 * 2 + 1) / 20
-    pwhl = hpr.last_ten("1", hpr.finals("pwhl", rows), hpr.STANDINGS_POINTS["pwhl"])
+    pwhl = hpr.last_ten("1", hpr.finals("pwhl", rows), PWHL.standings_points)
     assert pwhl["pts_pct"] == (7 * 3 + 2 + 1) / 30
     assert hpr.last_ten("9", hpr.finals("ahl", rows), (2, 2, 1)) is None
 
@@ -162,6 +163,15 @@ def test_pwhl_points_pct_and_corsi():
     c = ranked[0]["components"]
     assert c["pts_pct"] == 0.8  # 24 / (10 x 3)
     assert c["cf_pct"] == 0.55 and c["ranks"]["cf_pct"] == 1
+
+
+def test_points_system_is_the_league_configs(monkeypatch):
+    # hockeytech_leagues.League.standings_points is the one source: change it
+    # there and the rankings follow (no copy of the table in this module).
+    assert not hasattr(hpr, "STANDINGS_POINTS")
+    monkeypatch.setitem(hpr.LEAGUES, "ahl", replace(AHL, standings_points=(3, 2, 1)))
+    ranked = hpr.compute_rankings("ahl", [team(1, pts=24), team(2, pts=12)], [])
+    assert ranked[0]["components"]["pts_pct"] == 0.8  # 24 / (10 x 3)
 
 
 def test_weights_add_to_one():

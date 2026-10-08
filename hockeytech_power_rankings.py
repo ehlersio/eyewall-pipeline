@@ -23,7 +23,7 @@ rest up proportionally (WEIGHTS below). Fixed -- no tuning per night.
 
 Points % = points / (GP x points for a win), last-10 from the team's last
 ten finals in {league}_game_log (regulation win / OT-SO win / OT-SO loss
-points from STANDINGS_POINTS), PP%/PK% from {league}_team_seasons (the
+points from League.standings_points), PP%/PK% from {league}_team_seasons (the
 league's own numbers, special=true standings).
 
 Runs nightly, after the stats step. Writes only once every team has
@@ -73,9 +73,6 @@ MIN_GAMES_TO_RANK = 3
 RECENT_DAYS = 2
 REQUEST_DELAY = 1.0  # seconds between generation calls, as ai_summaries.py
 NEUTRAL = 0.5
-
-# (regulation win, OT/shootout win, OT/shootout loss); regulation loss 0.
-STANDINGS_POINTS = {"ahl": (2, 2, 1), "echl": (2, 2, 1), "pwhl": (3, 2, 1)}
 
 # Raw weights; normalised to sum 1 in compute_rankings(). See the docstring.
 WEIGHTS = {
@@ -232,7 +229,8 @@ def normaliser(values):
 
 def compute_rankings(key, team_rows, games) -> list[dict]:
     """[{team_id, rank, score, components}] best first."""
-    points_system = STANDINGS_POINTS[key]
+    # (regulation win, OT/shootout win, OT/shootout loss); regulation loss 0.
+    points_system = LEAGUES[key].standings_points
     weights = WEIGHTS[key]
     total = sum(weights.values())
     teams = [

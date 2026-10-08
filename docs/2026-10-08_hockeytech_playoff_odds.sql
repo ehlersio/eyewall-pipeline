@@ -19,6 +19,8 @@
 --   proj_points_p10/p50/p90  10th/50th/90th percentile of final standings
 --                      points across the simulated seasons.
 --   current_points, games_remaining  at run time.
+--   games_played       added by 2026-10-08_hockeytech_playoff_odds_games_played.sql
+--                      (run that file after this one).
 --   sims               simulated seasons (>= 2,000; 10,000 by default).
 --   format             the verified format's one-line description, or
 --                      'unverified'.
