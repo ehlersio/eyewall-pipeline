@@ -326,6 +326,7 @@ def test_verified_rows():
         "proj_points_p50": 62,
         "proj_points_p90": 64,
         "current_points": 4,
+        "games_played": 3,
         "games_remaining": 1,
         "sims": 3,
         "format": "16 of 30: top 4 in each division (points %)",
@@ -367,6 +368,12 @@ class FakeQuery:
             if name == "upsert":
                 if self.table in self.db.missing:
                     raise RuntimeError(f'relation "public.{self.table}" does not exist')
+                gone = [c for c in self.db.missing_columns if any(c in r for r in a[0])]
+                if gone:
+                    raise RuntimeError(
+                        f"{{'code': 'PGRST204', 'message': \"Could not find the '{gone[0]}' "
+                        f"column of '{self.table}' in the schema cache\"}}"
+                    )
                 self.db.writes.append((self.table, k.get("on_conflict"), a[0]))
                 return SimpleNamespace(data=a[0])
         rows = self.db.tables.get(self.table, [])
@@ -377,8 +384,9 @@ class FakeQuery:
 
 
 class FakeDB:
-    def __init__(self, tables, missing=()):
+    def __init__(self, tables, missing=(), missing_columns=()):
         self.tables, self.missing, self.writes = tables, set(missing), []
+        self.missing_columns = list(missing_columns)
 
     def table(self, name):
         return FakeQuery(self, name)
@@ -438,7 +446,38 @@ def test_run_writes_projected_points_only_for_an_unverified_season(monkeypatch):
     assert {r["format"] for r in rows} == {"unverified"}
     by_team = {r["team_id"]: r for r in rows}
     assert by_team[74]["current_points"] == 2 and by_team[74]["games_remaining"] == 1
+    assert by_team[74]["games_played"] == 1 and by_team[66]["games_played"] == 1
     assert by_team[74]["proj_points_p10"] >= 2
+
+
+def test_run_writes_without_games_played_until_the_column_exists(monkeypatch, caplog):
+    db = FakeDB(
+        {"echl_game_log": [log_row(1, 78, "2026-10-20", 74, 66)], "echl_team_elo_ratings": []},
+        missing_columns=["games_played"],
+    )
+    wire(
+        monkeypatch,
+        db,
+        {
+            "74": {"group": "North", "points": 2, "gp": 1, "rw": 0},
+            "66": {"group": "North", "points": 0, "gp": 1, "rw": 0},
+        },
+        SCHEDULE,
+    )
+    with caplog.at_level("WARNING"):
+        assert hpo.run("echl", n_sims=10, seed=1, today=TODAY) == 0
+    [(table, _, rows)] = db.writes
+    assert table == "echl_playoff_odds" and len(rows) == 2
+    assert all("games_played" not in r for r in rows)
+    assert {r["current_points"] for r in rows} == {2, 0}
+    warnings = [r for r in caplog.records if "games_played is missing" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_write_rows_does_not_retry_other_errors():
+    db = FakeDB({}, missing={"ahl_playoff_odds"})
+    assert hpo.write_rows(db, "ahl", [{"team_id": 1, "games_played": 3}]) is False
+    assert db.writes == []
 
 
 def test_run_tolerates_a_missing_odds_table(monkeypatch):

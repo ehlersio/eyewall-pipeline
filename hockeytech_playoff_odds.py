@@ -31,13 +31,17 @@ The HockeyTech counterpart of playoff_odds.py (NHL), same model:
 - Ranking per simulated season: points percentage, then regulation wins
   where the format says so, then random (later tiebreakers aren't modeled).
 
-One row per team per run (`run_date`, ET), history kept. The season is the
-earliest regular season (Worker season list) with a game left in
-{league}_game_log -- the next season's preseason odds once its schedule is
-ingested and the current one is over.
+One row per team per run (`run_date`, ET), history kept. Each row carries
+the team's games_played from the same standings feed as current_points, so
+the app's early-season note reads it from the odds row, not the standings.
+The season is the earliest regular season (Worker season list) with a game
+left in {league}_game_log -- the next season's preseason odds once its
+schedule is ingested and the current one is over.
 
-Tables: docs/2026-10-08_hockeytech_playoff_odds.sql. Until it has been run
-the write logs one error and the run ends without failing the nightly.
+Tables: docs/2026-10-08_hockeytech_playoff_odds.sql, then
+docs/2026-10-08_hockeytech_playoff_odds_games_played.sql. Until the first
+has been run the write logs one error and the run ends without failing the
+nightly; until the second, the rows are written without games_played.
 
 Usage:
   python hockeytech_playoff_odds.py ahl              # current season, 10,000 sims
@@ -302,6 +306,7 @@ def odds_rows(
                 "proj_points_p50": round(float(p50[i])),
                 "proj_points_p90": round(float(p90[i])),
                 "current_points": teams[t]["points"],
+                "games_played": teams[t]["gp"],
                 "games_remaining": remaining[t],
                 "sims": n_sims,
                 "format": fmt.description if made is not None else UNVERIFIED,
@@ -334,13 +339,34 @@ def load_ratings(client, key) -> dict | None:
     return {str(r["team_id"]): float(r["rating"]) for r in rows or []}
 
 
+def _upsert(client, key, rows):
+    for i in range(0, len(rows), 200):
+        client.table(f"{key}_playoff_odds").upsert(
+            rows[i : i + 200], on_conflict="season_id,team_id,run_date"
+        ).execute()
+
+
 def write_rows(client, key, rows) -> bool:
-    """Upsert, tolerating a missing table: one logged error, no exception."""
+    """Upsert, tolerating a missing table: one logged error, no exception.
+
+    games_played comes from docs/2026-10-08_hockeytech_playoff_odds_games_played.sql,
+    which the owner runs. Until then the upsert fails with PostgREST's
+    missing-column error: that is logged once and the rows are written
+    without it, as before."""
     try:
-        for i in range(0, len(rows), 200):
-            client.table(f"{key}_playoff_odds").upsert(
-                rows[i : i + 200], on_conflict="season_id,team_id,run_date"
-            ).execute()
+        try:
+            _upsert(client, key, rows)
+        except Exception as e:
+            if "games_played" not in str(e):
+                raise
+            log.warning(
+                f"  {key}_playoff_odds.games_played is missing (run "
+                "docs/2026-10-08_hockeytech_playoff_odds_games_played.sql); "
+                f"writing without it this run: {e}"
+            )
+            _upsert(
+                client, key, [{k: v for k, v in r.items() if k != "games_played"} for r in rows]
+            )
     except Exception as e:
         log.error(
             f"  {key}_playoff_odds write FAILED -- has "

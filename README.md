@@ -234,7 +234,7 @@ Neither is used; the public methodology page says so. Revisit the goalie adjustm
 **AHL / ECHL Elo — tested, then wired in via `hockeytech_elo.py` below (2026-09):** `backtest_hockeytech_elo.py` (read-only; results in `docs/hockeytech_elo_backtest_results.md`) replays 2023-24 through 2025-26 for each league from HockeyTech's `schedule` view (the `{league}_game_log` tables only hold 2025-26, and the feed's "Final OT"/"Final SO" status supplies the OT flag). On the 2025-26 holdout, Elo with elo.py's NHL constants scores Brier **0.2452** (AHL) / **0.2428** (ECHL) vs 0.250 for a constant home-win rate. The live `/{league}/prediction` point-split heuristic scores **0.344 / 0.338**, worse than a coin flip: it serves 0% or 100% in ~40% of games and gives the home team 0% whenever stats are tied, including every season opener. Tuning K / home advantage / regression is noise on a flat surface, so the recommendation is Elo with the existing constants. Results JSON is gitignored.
 
 ### `hockeytech_elo.py` (2026-09)
-AHL/ECHL/PWHL counterpart of `elo_ratings.py` + `win_probs.py`, run as the last step of `ahl-nightly.yml` / `echl-nightly.yml` / `pwhl-nightly.yml` (`if: !cancelled()`: it doesn't read the tables the other steps write, so a failed ingestion step doesn't block it). Each run replays every regular-season and playoff game since 2023-24 from HockeyTech's `schedule` view with elo.py's constants, the same setup the backtest above validated, and regresses once per new regular season as soon as that season is within 14 days of starting, so opener previews already use regressed ratings. Relocated franchises carry their rating (`RELOCATED`: AHL 317 Bridgeport → 457 Hamilton); new team_ids start at 1500. Writes `{league}_team_elo_ratings` (read by eyewall-poller's `/{league}/prediction`) and `{league}_game_win_probs` for today's/tomorrow's unstarted games, rewritten until puck drop so the remaining row is the last pre-game number. If the Worker's season list is unreachable it exits 1 and leaves yesterday's ratings in place. PWHL (added 2026-09): season types come from the Worker (`get_season_type`) and only dates from HockeyTech, whose own labels lag (it calls season 10, which holds the 2026-27 regular-season schedule, "2026-27 Pre-Season"); the four 2026-27 expansion teams start at 1500. Its backtest is in the same doc (Elo 0.240 vs the heuristic's 0.312 on 2025-26). Tables: `docs/hockeytech_elo_ddl.sql`, `docs/pwhl_elo_ddl.sql`.
+AHL/ECHL/PWHL counterpart of `elo_ratings.py` + `win_probs.py`, run in `ahl-nightly.yml` / `echl-nightly.yml` / `pwhl-nightly.yml` after the stats and percentile steps and before the playoff-odds step that reads its ratings (`if: !cancelled()`: it doesn't read the tables the other steps write, so a failed ingestion step doesn't block it). It is no longer the last step: see [HockeyTech nightly step order](#hockeytech-nightly-step-order-ahl--echl--pwhl). Each run replays every regular-season and playoff game since 2023-24 from HockeyTech's `schedule` view with elo.py's constants, the same setup the backtest above validated, and regresses once per new regular season as soon as that season is within 14 days of starting, so opener previews already use regressed ratings. Relocated franchises carry their rating (`RELOCATED`: AHL 317 Bridgeport → 457 Hamilton); new team_ids start at 1500. Writes `{league}_team_elo_ratings` (read by eyewall-poller's `/{league}/prediction`) and `{league}_game_win_probs` for today's/tomorrow's unstarted games, rewritten until puck drop so the remaining row is the last pre-game number. If the Worker's season list is unreachable it exits 1 and leaves yesterday's ratings in place. PWHL (added 2026-09): season types come from the Worker (`get_season_type`) and only dates from HockeyTech, whose own labels lag (it calls season 10, which holds the 2026-27 regular-season schedule, "2026-27 Pre-Season"); the four 2026-27 expansion teams start at 1500. Its backtest is in the same doc (Elo 0.240 vs the heuristic's 0.312 on 2025-26). Tables: `docs/hockeytech_elo_ddl.sql`, `docs/pwhl_elo_ddl.sql`.
 
 ```
 python hockeytech_elo.py ahl --dry-run                    # print ratings + today's/tomorrow's probabilities
@@ -242,7 +242,7 @@ python hockeytech_elo.py echl --dry-run --date 2026-10-15 # as if on opening day
 ```
 
 ### `hockeytech_playoff_odds.py` (2026-10)
-AHL/ECHL/PWHL playoff odds → `{league}_playoff_odds` (one row per team per nightly run, history kept; read by eyewall-poller's `/{league}/playoff-odds`). Runs right after the Elo step in `ahl-/echl-/pwhl-nightly.yml`. Same model as `playoff_odds.py`: every remaining regular-season game in `{league}_game_log` (not final, dated today or later) simulated 10,000 times (never fewer than 2,000) on `{league}_team_elo_ratings` + home advantage, with `playoff_odds.rating_sd()`'s rating uncertainty (NHL-tuned, not re-tuned for these leagues). The past-regulation share is measured each run from HockeyTech's schedule feed (this season's and last regular season's finals; AHL 2025-26: 23.3%), and points follow `League.standings_points` (AHL/ECHL 2-2-1, PWHL 3-2-1). The season is the earliest regular season with a game left, so the next season's preseason odds appear once its schedule is ingested and the current one is over.
+AHL/ECHL/PWHL playoff odds → `{league}_playoff_odds` (one row per team per nightly run, history kept; read by eyewall-poller's `/{league}/playoff-odds`). Runs right after the Elo step in `ahl-/echl-/pwhl-nightly.yml`. Same model as `playoff_odds.py`: every remaining regular-season game in `{league}_game_log` (not final, dated today or later) simulated 10,000 times (never fewer than 2,000) on `{league}_team_elo_ratings` + home advantage, with `playoff_odds.rating_sd()`'s rating uncertainty (NHL-tuned, not re-tuned for these leagues). The past-regulation share is measured each run from HockeyTech's schedule feed (this season's and last regular season's finals; AHL 2025-26: 23.3%), and points follow `League.standings_points` (AHL/ECHL 2-2-1, PWHL 3-2-1). Each row also carries `games_played` (the team's GP from the same standings read as `current_points`), so the app's early-season note reads it from the odds row instead of loading the standings. The season is the earliest regular season with a game left, so the next season's preseason odds appear once its schedule is ingested and the current one is over.
 
 **Playoff formats are encoded per league and season** (`hockeytech_leagues.PlayoffFormat`), each verified from the league's own site and cited there: AHL 2025-26 (23 of 32: Atlantic 6, North 5, Central 5, Pacific 7), ECHL 2025-26 (top 4 per division), PWHL 2025-26 (top 4 of 8) and 2026-27 (top 4 per conference; conferences encoded because HockeyTech lists all 12 teams as one group). Ranking: points percentage, then regulation wins (AHL/PWHL), then random. **A season without a verified format is still simulated, but `make_playoffs_pct`/`win_division_pct` are written NULL and `format` = `unverified`** — as of 2026-10-07 that's the AHL's 2026-27 (Hamilton's move left the Atlantic at 7 and the North at 8; the AHL hasn't said how many qualify from each) and the ECHL's 2026-27 (only the 2026 format is published). Add the `PlayoffFormat` when the league publishes it. Divisions come from HockeyTech's standings feed, checked against the format each run; a mismatch (realignment) is treated as unverified.
 
@@ -252,7 +252,7 @@ python hockeytech_playoff_odds.py pwhl 11 --sims 2000 --dry-run
 python hockeytech_playoff_odds.py echl --seed 1 --date 2026-10-20
 ```
 
-Requires `docs/2026-10-08_hockeytech_playoff_odds.sql` (all three tables + RLS). Until it's run, the write logs one error and the step moves on.
+Requires `docs/2026-10-08_hockeytech_playoff_odds.sql` (all three tables + RLS), then `docs/2026-10-08_hockeytech_playoff_odds_games_played.sql` (the `games_played` column). Until the first is run, the write logs one error and the step moves on; until the second, the step logs "games_played is missing" once and writes the rows without it.
 
 ### `validate_rapm.py`
 Internal RAPM quality checks + optional Evolving Hockey CSV correlation. Run manually after full-season pipeline. Pass threshold: r ≥ 0.85 vs EH.
@@ -561,7 +561,7 @@ AHL/ECHL/PWHL nightly power rankings → `{league}_power_rankings` (`season_id, 
 | Component | PWHL | AHL/ECHL | Source |
 |-----------|------|----------|--------|
 | Points % | 35% | 41.2% | `{league}_team_seasons` (points / (GP × win points)) |
-| Last-10 points % | 20% | 23.5% | last 10 finals in `{league}_game_log` (AHL/ECHL 2-2-1 points, PWHL 3-2-1) |
+| Last-10 points % | 20% | 23.5% | last 10 finals in `{league}_game_log` (points from `League.standings_points`: AHL/ECHL 2-2-1, PWHL 3-2-1) |
 | Goal diff/GP | 20% | 23.5% | `{league}_team_seasons` |
 | Corsi for % | 15% | — | `pwhl_team_seasons.corsi_for_pct` (AHL/ECHL have no shot attempts) |
 | Special teams (PP% + PK%)/2 | 10% | 11.8% | `{league}_team_seasons` |
@@ -1091,7 +1091,7 @@ python ahl_news.py
 - **Shutouts** come from `{league}_goalie_game_box`, because goal rows don't name the goalie. The goalie must be his team's only one with ice time, and the opponent must have no goal rows at all, empty-net goals included.
 - **Shootout attempts** (period 7) aren't counted as goals. A traded player's season total sums his team rows, and the milestone names the team he played for that night.
 
-Nightly in `ahl-/echl-nightly.yml` after the Elo step, followed by `trivia_questions.py --sport ahl|echl`.
+Nightly in `ahl-/echl-nightly.yml` after the Elo and playoff-odds steps, followed by `trivia_questions.py --sport ahl|echl` and the power rankings.
 
 ```bash
 python hockeytech_milestones.py ahl --since 2026-10-02   # backfill the season so far
@@ -1301,9 +1301,9 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
 | `nightly.yml` | Worker dispatch 07:00 UTC; cron 07:00 UTC fallback | NHL-only pipeline (`run.py`, then `milestones.py`, then an informational Ruff lint that can't block ingest — `ci.yml` is the real gate) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
-| `pwhl-nightly.yml` | Worker dispatch 07:20 UTC; cron fallback | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia. `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow. `workflow_dispatch` accepts an optional `season_id` (2026-10), passed to every per-season step, so a playoff round can be backfilled from GitHub (`gh workflow run pwhl-nightly.yml -f season_id=<id>`) |
-| `ahl-nightly.yml` | Worker dispatch 07:40 UTC; cron fallback | AHL news, stats/rosters/standings, per-game box scores, shot events, penalty shots. `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
-| `echl-nightly.yml` | Worker dispatch 08:00 UTC; cron fallback | Same step order and `season_id` input as `ahl-nightly.yml` (news, stats, box scores, shot events, penalty shots) |
+| `pwhl-nightly.yml` | Worker dispatch 07:20 UTC; cron fallback | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia, power rankings, Elo, playoff odds, upcoming schedules (order below). `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow. `workflow_dispatch` accepts an optional `season_id` (2026-10), passed to every per-season step, so a playoff round can be backfilled from GitHub (`gh workflow run pwhl-nightly.yml -f season_id=<id>`) |
+| `ahl-nightly.yml` | Worker dispatch 07:40 UTC; cron fallback | AHL news, stats/rosters/standings, per-game box scores, goal on-ice, shot events, penalty shots, xG + percentiles, Elo, playoff odds, milestones, trivia, power rankings (order below). `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
+| `echl-nightly.yml` | Worker dispatch 08:00 UTC; cron fallback | Same step order and `season_id` input as `ahl-nightly.yml` (order below) |
 | `moneypuck-ingest.yml` | Worker dispatch 10:00 UTC; cron fallback | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `ai_pipeline.yml` | Worker dispatch 14:00 UTC; cron fallback | Morning job: `ai_predictions.py`. A bare dispatch (the Worker's) runs the morning job only (`job` input defaults to `morning`). The night job (summaries, scouting, results-vs-process) has no schedule, since `run.py` already runs those every night; run it by hand with `-f job=night` or `-f job=all` |
 | `live-score-refresh.yml` | Manual only (2026-10) | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py`. The Worker now writes live state and finals to `{league}_game_log` itself (see `ahl_live_refresh.py` above); this is a manual backfill for a game it missed. Its old `*/5` cron fired every 3–10 hours in practice |
@@ -1313,6 +1313,51 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `meta-token-check.yml` | Weekly (Mon 12:00 UTC) | `social_posts.py check`: Meta Page token reaches the Page and Instagram, and neither the token nor its data access ends within 14 days (2026-10) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 | `ci.yml` | Every PR | Ruff check + format check + pytest |
+
+### HockeyTech nightly step order (AHL / ECHL / PWHL)
+
+The steps as they run in each workflow. Steps marked † have `if: !cancelled()`, so they still run after an earlier step failed (they read nothing the failed step would have written that night, or tolerate yesterday's copy).
+
+`ahl-nightly.yml` and `echl-nightly.yml` (identical order; `{l}` = `ahl`/`echl`):
+
+1. `{l}_news.py`
+2. `{l}_stats.py` (rosters, player/goalie/team stats, game log)
+3. `{l}_game_boxscore.py`
+4. `hockeytech_goal_on_ice.py {l}`
+5. `{l}_shot_events.py`
+6. `{l}_penalty_shots.py`
+7. `hockeytech_shot_xg.py {l}`
+8. `hockeytech_percentiles.py {l}`
+9. `hockeytech_goalie_percentiles.py {l}`
+10. `hockeytech_elo.py {l}` †
+11. `hockeytech_playoff_odds.py {l}` † (reads the ratings step 10 wrote)
+12. `hockeytech_milestones.py {l}`
+13. `trivia_questions.py --sport {l}`
+14. `hockeytech_power_rankings.py {l} --narratives` †
+
+`pwhl-nightly.yml`:
+
+1. `pwhl_news.py`
+2. `pwhl_stats.py` (rosters, player/goalie/team stats, game log)
+3. `pwhl_shot_events.py`
+4. `pwhl_stats.py --gw-goals-rollup-only`
+5. `pwhl_pbp_events.py`
+6. `pwhl_stats.py --shot-totals-only`
+7. `pwhl_game_boxscore.py`
+8. `pwhl_goal_on_ice.py`
+9. `pwhl_penalty_shots.py`
+10. `pwhl_stats.py --toi-rollup-only`
+11. `pwhl_shot_xg.py`
+12. `pwhl_percentiles.py`
+13. `pwhl_goalie_percentiles.py`
+14. `pwhl_milestones.py`
+15. `trivia_questions.py --sport pwhl`
+16. `hockeytech_power_rankings.py pwhl --narratives` †
+17. `hockeytech_elo.py pwhl` †
+18. `hockeytech_playoff_odds.py pwhl` † (reads the ratings step 17 wrote)
+19. `pwhl_stats.py --upcoming-game-logs` †
+
+The per-season steps take the workflow's optional `season_id` input; news, Elo, playoff odds, milestones, trivia, power rankings and the upcoming-schedules step resolve their own season (or need none).
 
 ### Pipeline scheduling (2026-10)
 
