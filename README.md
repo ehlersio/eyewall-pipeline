@@ -1292,7 +1292,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 |-------|-------------|
 | `trivia_questions` | (Session 92) Daily trivia — one row per `(question_date, tier, sport, team)`, `team` defaults to `'ALL'` for easy/hard so the unique constraint enforces one question per exact scope per day. Public-read, no owner (same RLS posture as `player_narratives`) — see [Daily Trivia](#daily-trivia). `tier='easy'`/`'medium'` written nightly by `trivia_questions.py`; `tier='hard'` is hand-inserted directly in the Supabase SQL editor. |
 | `trivia_answers` | (Session 92) Signed-in users' trivia answers — `auth.uid()`-scoped RLS, same posture as `user_preferences` below. **Not written by this pipeline** — the frontend writes directly via the Supabase JS client (the one deliberate exception to "the frontend never talks to Supabase directly," same as `user_preferences`). Documented here because its DDL lives in this repo's `docs/` folder alongside every other schema reference. |
-| `user_preferences` | (Session 90-91) One row per signed-in user — `favorite_team`/`favorite_sport`, synced from the frontend's Settings. **Not written by this pipeline** — same Supabase-Auth-direct exception as `trivia_answers` above. DDL: `docs/session90_user_preferences_table.sql` + `docs/session91_favorite_sport_column.sql`. |
+| `user_preferences` | (Session 90-91) One row per signed-in user — `favorite_team`/`favorite_sport`, synced from the frontend's Settings. **Not written by this pipeline** — same Supabase-Auth-direct exception as `trivia_answers` above. DDL: `docs/session90_user_preferences_table.sql` + `docs/session91_favorite_sport_column.sql` (`favorite_sport` widened to the AHL/ECHL by `docs/favorite_sport_all_leagues.sql`). |
 
 ---
 
