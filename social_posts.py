@@ -774,7 +774,10 @@ def render_recap_list(games, hit, span, league=None):
 
 def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE, teams=None):
     """sections: [(heading, [{name, team, value, detail}])] -> one card.
-    Row heights shrink to fit however many rows the sections hold."""
+    Row heights shrink to fit however many rows the sections hold. A row's
+    optional `rank` replaces its position in the section (a bottom five
+    reads 28-32), and `show_team=False` leaves off the team code after the
+    name (team rows, whose name is already the team's)."""
     img, d, top, bottom = new_card(kicker, title, subtitle, note)
     head_h, gap, sec_gap = 48, 6, 22
     n_rows = sum(len(rows) for _, rows in sections)
@@ -787,20 +790,22 @@ def render_leaders(kicker, title, subtitle, sections, note=NHL_NOTE, teams=None)
         for i, r in enumerate(rows):
             mid = y + h // 2
             row_box(d, y, h, team_color(r["team"], teams))
-            d.text((116, mid), str(i + 1), font=display(int(h * 0.55)), fill=MUTED, anchor="mm")
+            rank = str(r.get("rank", i + 1))
+            d.text((116, mid), rank, font=display(int(h * 0.55)), fill=MUTED, anchor="mm")
             value_font = display(int(h * 0.58))
             value_w = d.textlength(r["value"], font=value_font)
             name_max = W - 100 - value_w - 40 - 160
             name_font = fit(d, r["name"], body, int(h * 0.42), name_max - 90, min_size=22)
             d.text((160, mid), r["name"], font=name_font, fill=TEXT, anchor="lm")
             name_w = d.textlength(r["name"], font=name_font)
-            d.text(
-                (160 + name_w + 16, mid + 2),
-                r["team"],
-                font=label(int(h * 0.34)),
-                fill=team_color(r["team"], teams),
-                anchor="lm",
-            )
+            if r.get("show_team", True):
+                d.text(
+                    (160 + name_w + 16, mid + 2),
+                    r["team"],
+                    font=label(int(h * 0.34)),
+                    fill=team_color(r["team"], teams),
+                    anchor="lm",
+                )
             d.text((W - 100, mid), r["value"], font=value_font, fill=TEXT, anchor="rm")
             if r.get("detail"):
                 d.text(
