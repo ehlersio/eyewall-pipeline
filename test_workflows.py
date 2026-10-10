@@ -149,3 +149,26 @@ def test_sbnation_has_no_push_trigger():
 def test_hockeytech_nightlies_ingest_goal_on_ice(league):
     t = text(f"{league}-nightly.yml")
     assert f'python hockeytech_goal_on_ice.py {league} "${{{{ inputs.season_id }}}}"' in t
+
+
+def test_social_posts_every_cron_and_kind_routes_to_a_script():
+    """Each social-posts.yml cron maps to a post kind, and each kind (cron or
+    dispatch option) reaches a script whose CLI accepts it -- the Friday and
+    Sunday posts (2026-10) live in their own scripts."""
+    t = text("social-posts.yml")
+    crons = re.findall(r"(?m)^    - cron: '([^']+)'$", t)
+    mapped = dict(re.findall(r"(?m)^            ((?:'[^']+'\|?)+)\)\s+kind=([a-z-]+) ;;$", t))
+    by_cron = {c.strip("'"): kind for pat, kind in mapped.items() for c in pat.split("|")}
+    assert len(crons) == len(set(crons)) and set(crons) == set(by_cron)
+    options = re.search(r"options: \[([^\]]+)\]", t).group(1).split(", ")
+    routes = re.findall(r"(?m)^            ([a-z|*-]+)\) script=(\w+\.py) ;;$", t)
+
+    def script_for(kind):
+        for pattern, script in routes:
+            if any(re.fullmatch(p.replace("*", ".*"), kind) for p in pattern.split("|")):
+                return script
+        return "social_posts.py"
+
+    for kind in set(by_cron.values()) | (set(options) - {"check"}):
+        src = (Path(__file__).parent / script_for(kind)).read_text()
+        assert f'"{kind}"' in src, f"{kind} -> {script_for(kind)}"

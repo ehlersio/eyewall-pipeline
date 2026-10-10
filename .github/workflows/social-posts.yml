@@ -13,7 +13,14 @@ name: Social Posts
 #                              (milk_carton.py)
 #   goal-of-week  Fridays    -- last Mon-Sun's Goal of the Week, a Reel redrawn
 #                              from NHL tracking data (goal_of_week.py)
-# (the pwhl-*/minor-* posts are social_posts_leagues.py, milk-carton is
+#   trends        Fridays    -- NHL Team Trends: 5v5 control, luck, special
+#                              teams, discipline, movers (team_trends.py)
+#   pwhl-trends   Fridays    -- the PWHL version (team_trends.py)
+#   minor-trends  Fridays    -- AHL + ECHL special teams and discipline
+#                              (team_trends.py)
+#   cherry-picked Sundays    -- Cherry Picked Stats: true, rotating facts
+#                              about Mon-Sat, every league (cherry_picked.py)
+# (the other pwhl-*/minor-* posts are social_posts_leagues.py, milk-carton is
 # milk_carton.py, goal-of-week is goal_of_week.py)
 #
 # Times are UTC and sit well after the nightly pipeline, which is scheduled
@@ -36,8 +43,14 @@ name: Social Posts
 #   milk-carton   21:00 / 22:00 Mon (5pm / 6pm EDT) -- NHL stats API and
 #                 MoneyPuck, which has Sunday's games by Monday afternoon
 #   goal-of-week  17:00 / 18:00 Fri (1pm / 2pm EDT) -- NHL game center and
-#                 tracking replays directly, so it doesn't wait on the nightly;
-#                 Friday has no other post
+#                 tracking replays directly, so it doesn't wait on the nightly
+#   trends        15:00 / 16:00 Fri (11am / noon EDT) -- through Thursday's
+#                 games (or Wednesday's, while MoneyPuck catches up)
+#   pwhl-trends   20:00 / 21:00 Fri
+#   minor-trends  22:00 / 23:00 Fri
+#   cherry-picked 15:00 / 16:00 Sun (11am / noon EDT) -- after the nightly
+#                 has Saturday's games; needs docs/2026-10-09_social_post_facts.sql
+# The Team Trends posts wait until every team has 10 games (exit 0 before).
 
 on:
   schedule:
@@ -61,13 +74,21 @@ on:
     - cron: '0 22 * * 1'
     - cron: '0 17 * * 5'
     - cron: '0 18 * * 5'
+    - cron: '0 15 * * 5'
+    - cron: '0 16 * * 5'
+    - cron: '0 20 * * 5'
+    - cron: '0 21 * * 5'
+    - cron: '0 22 * * 5'
+    - cron: '0 23 * * 5'
+    - cron: '0 15 * * 0'
+    - cron: '0 16 * * 0'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, goal-of-week, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
       dry_run:
         description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
@@ -105,6 +126,10 @@ jobs:
             '0 17 * * 4'|'0 18 * * 4')  kind=pwhl-leaders ;;
             '0 21 * * 1'|'0 22 * * 1')  kind=milk-carton ;;
             '0 17 * * 5'|'0 18 * * 5')  kind=goal-of-week ;;
+            '0 15 * * 5'|'0 16 * * 5')  kind=trends ;;
+            '0 20 * * 5'|'0 21 * * 5')  kind=pwhl-trends ;;
+            '0 22 * * 5'|'0 23 * * 5')  kind=minor-trends ;;
+            '0 15 * * 0'|'0 16 * * 0')  kind=cherry-picked ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
@@ -118,6 +143,8 @@ jobs:
           fi
           script=social_posts.py
           case "$kind" in
+            trends|pwhl-trends|minor-trends) script=team_trends.py ;;
+            cherry-picked) script=cherry_picked.py ;;
             pwhl-*|minor-*) script=social_posts_leagues.py ;;
             milk-carton) script=milk_carton.py ;;
             goal-of-week) script=goal_of_week.py ;;
