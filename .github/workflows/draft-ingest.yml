@@ -97,7 +97,7 @@ jobs:
           POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"draft-ingest.yml\",\"status\":\"failure\",\"title\":\"Draft Day Ingest failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify" -H "X-Poll-Secret: $POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"draft-ingest.yml\",\"status\":\"failure\",\"title\":\"Draft Day Ingest failed\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
 
       - name: Report success
         if: success()
@@ -106,4 +106,4 @@ jobs:
           POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify?secret=$POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"draft-ingest.yml\",\"status\":\"ok\",\"title\":\"Draft Day Ingest succeeded\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
+          curl -fsS -X POST "${WORKER_URL:-https://eyewall-poller.billowing-queen-bf23.workers.dev}/ops/notify" -H "X-Poll-Secret: $POLL_SECRET" -H 'content-type: application/json' -d "{\"source\":\"draft-ingest.yml\",\"status\":\"ok\",\"title\":\"Draft Day Ingest succeeded\",\"body\":\"$RUN_URL\",\"url\":\"$RUN_URL\"}"
