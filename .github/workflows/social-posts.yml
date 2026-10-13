@@ -154,10 +154,10 @@ jobs:
           echo "flag=$flag" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -179,11 +179,15 @@ jobs:
           META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-        run: python ${{ steps.pick.outputs.script }} ${{ steps.pick.outputs.kind }} ${{ steps.pick.outputs.flag }}
+          SCRIPT: ${{ steps.pick.outputs.script }}
+          KIND: ${{ steps.pick.outputs.kind }}
+          FLAG: ${{ steps.pick.outputs.flag }}
+        # $FLAG unquoted on purpose: it is zero or more words (--dry-run --date D).
+        run: python "$SCRIPT" "$KIND" $FLAG
 
       - name: Keep dry-run images
         if: contains(steps.pick.outputs.flag, '--dry-run')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: social-${{ steps.pick.outputs.kind }}
           path: social_out/

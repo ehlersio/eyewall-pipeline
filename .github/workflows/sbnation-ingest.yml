@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Fetch all SBNation atom feeds and POST to worker
+        env:
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
         run: |
           # All SBNation/Vox Media blogs block Cloudflare datacenter IPs.
           # GH-hosted runners are not blocked — fetch here and POST to worker.
@@ -97,7 +99,7 @@ jobs:
           HTTP_STATUS=$(echo "$BUNDLE" | curl -s -o response.txt -w "%{http_code}" \
             -X POST \
             -H "Content-Type: application/json" \
-            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            -H "x-ingest-secret: $POLL_SECRET" \
             --data-binary @- \
             "https://eyewall-poller.billowing-queen-bf23.workers.dev/atom/ingest")
 

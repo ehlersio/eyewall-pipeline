@@ -47,11 +47,11 @@ jobs:
 
       - name: Checkout repo
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -76,7 +76,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_stats.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python ahl_stats.py "$SEASON_ID"
         # Populates ahl_game_log (which games are Final), ahl_players,
         # ahl_player_seasons, ahl_goalie_seasons, ahl_team_seasons.
         # Everything below this step depends on ahl_game_log/ahl_players
@@ -95,7 +96,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_game_boxscore.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python ahl_game_boxscore.py "$SEASON_ID"
         # Populates ahl_skater_game_box/ahl_goalie_game_box -- per-game
         # granularity ahl_player_seasons/ahl_goalie_seasons don't have.
         # Reads completed games from ahl_game_log, so must run after the
@@ -107,7 +109,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_goal_on_ice.py ahl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_goal_on_ice.py ahl "$SEASON_ID"
         # ahl_goal_on_ice: the skaters on the ice for every goal, from
         # gameSummary (read by eyewall-poller's /ahl/game-box `goals`).
         # Needs ahl_game_log from the stats step. Table:
@@ -119,7 +122,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_shot_events.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python ahl_shot_events.py "$SEASON_ID"
         # Skips games already in ahl_shot_events or ahl_skipped_games
         # (idempotent by default). Goal rows already carry assists/PP/SH/
         # EN/GWG flags straight from the PBP goal event -- no gameSummary
@@ -134,7 +138,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python ahl_penalty_shots.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python ahl_penalty_shots.py "$SEASON_ID"
         # Skips games already in ahl_penalty_shots or ahl_skipped_games
         # (idempotent by default). Independent of the shot-events step
         # above (own PBP fetch, own skip-tracking pipeline name) -- order
@@ -145,7 +150,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_shot_xg.py ahl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_shot_xg.py ahl "$SEASON_ID"
         # ahl_player_xg from ahl_shot_events, so after the shot-events step.
         # Tables: docs/2026-10-07_hockeytech_percentiles.sql (logs one error
         # and skips until that's been run).
@@ -155,7 +161,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_percentiles.py ahl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_percentiles.py ahl "$SEASON_ID"
         # Reads ahl_player_seasons (stats step), assists from
         # ahl_shot_events and finishing from ahl_player_xg (the step above).
 
@@ -164,7 +171,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_goalie_percentiles.py ahl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_goalie_percentiles.py ahl "$SEASON_ID"
         # Reads ahl_goalie_seasons, ahl_shot_events, ahl_game_log and
         # ahl_goalie_game_box (credits each goal to the goalie who allowed it).
 
