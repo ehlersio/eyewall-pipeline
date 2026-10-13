@@ -1,8 +1,8 @@
 name: CI
 
-# Lint + unit tests on every PR. The nightly workflows only run ruff (and
-# only on their schedule), so before this nothing ran the pytest suite
-# outside a local machine.
+# Lint + unit tests + dependency scans on every PR. The nightly workflows
+# only run ruff (and only on their schedule), so before this nothing ran the
+# pytest suite outside a local machine.
 
 on:
   pull_request:
@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      # Runtime dependencies only: requirements-dev.txt never ships to the
+      # nightly runs, so a dev-tool advisory shouldn't block a PR.
+      - name: Audit runtime dependencies (pip-audit)
+        run: pip-audit -r requirements.txt --progress-spinner off
+
       # test_goal_of_week.py encodes a real MP4 and checks it with ffprobe;
       # it only skips when ffmpeg is missing outside CI.
       - name: Ensure ffmpeg
@@ -43,3 +48,21 @@ jobs:
           SUPABASE_URL: https://placeholder.supabase.co
           SUPABASE_SERVICE_KEY: placeholder
         run: pytest -q
+
+  # Fails a PR that adds or bumps a dependency (any manifest, workflow actions
+  # included) with a known high or critical advisory.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never

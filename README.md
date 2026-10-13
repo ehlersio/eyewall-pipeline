@@ -8,7 +8,7 @@ AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and were added as
 
 ### 1. Install Python dependencies
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt  # dev file: pinned pytest + ruff, same as CI
+pip install -r requirements.txt -r requirements-dev.txt  # dev file: pinned pytest + ruff + pip-audit, same as CI
 ```
 
 Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`, `python-dotenv`, `pdfplumber`
@@ -1326,7 +1326,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `tankathon-sync.yml` | Weekly (Tue 8am ET) | `draft_pick_order_2026` sync from NHL API results (Session 51; runs `draft_ingest.py --sync-pick-order`, despite the filename — Tankathon is no longer this table's source) |
 | `meta-token-check.yml` | Weekly (Mon 12:00 UTC) | `social_posts.py check`: Meta Page token reaches the Page and Instagram, and neither the token nor its data access ends within 14 days (2026-10) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
-| `ci.yml` | Every PR | Ruff check + format check + pytest |
+| `ci.yml` | Every PR | Ruff check + format check + pytest; `pip-audit -r requirements.txt` (runtime dependencies only, fails on any known advisory); `dependency-review` job (PRs only) fails a PR whose added or changed dependencies, actions included, carry a high or critical advisory |
 
 Every action is pinned to a full commit SHA with its version in a comment (`uses: actions/checkout@<sha> # v7.0.1`); Dependabot's `github-actions` entry in `.github/dependabot.yml` opens the weekly bump PRs. Workflow inputs, step outputs and secrets reach `run:` scripts through `env:` (`"$SEASON_ID"`, `$POLL_SECRET`), never as `${{ }}` inside the script, so a value can't be read as shell. Logs of this public repo are public: don't echo API responses that list account resources (`draft-ingest.yml` prints only whether its KV namespace lookup worked).
 

@@ -237,3 +237,30 @@ def test_social_posts_every_cron_and_kind_routes_to_a_script():
     for kind in set(by_cron.values()) | (set(options) - {"check"}):
         src = (Path(__file__).parent / script_for(kind)).read_text()
         assert f'"{kind}"' in src, f"{kind} -> {script_for(kind)}"
+
+
+def test_ci_scans_dependencies():
+    """pip-audit gates on runtime dependencies only, from the pinned dev file;
+    dependency-review runs on PRs only, read-only, failing on high/critical
+    advisories (security audit 2026-10-13)."""
+    j = jobs("ci.yml")
+    test_steps = dict(steps(j["test"]))
+    assert (
+        "pip install -r requirements.txt -r requirements-dev.txt"
+        in test_steps["Install dependencies"]
+    )
+    assert re.search(
+        r"(?m)^pip-audit==\d+(\.\d+)*$", (WORKFLOWS.parents[1] / "requirements-dev.txt").read_text()
+    )
+    assert (
+        "run: pip-audit -r requirements.txt "
+        in test_steps["Audit runtime dependencies (pip-audit)"]
+    )
+
+    review = j["dependency-review"]
+    assert "if: github.event_name == 'pull_request'" in review
+    assert re.search(r"(?m)^    permissions:\n      contents: read\n    steps:$", review)
+    step = dict(steps(review))["Dependency review"]
+    assert "uses: actions/dependency-review-action@" in step
+    assert "fail-on-severity: high" in step
+    assert "comment-summary-in-pr: never" in step
