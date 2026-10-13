@@ -55,7 +55,7 @@ def test_failures_notify_the_worker(name):
         notify = dict(steps(body)).get("Notify on failure")
         assert notify, f"{name}:{job} has no Notify on failure step"
         assert "if: failure()" in notify
-        assert '/ops/notify?secret=$POLL_SECRET"' in notify
+        assert '/ops/notify" -H "X-Poll-Secret: $POLL_SECRET"' in notify
         assert "POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}" in notify
         assert f'\\"source\\":\\"{name}\\"' in notify
         assert '\\"status\\":\\"failure\\"' in notify
@@ -72,7 +72,8 @@ def test_successes_report_ok_to_the_worker(name):
         ok = step_map.get("Report success")
         assert ok, f"{name}:{job} has no Report success step"
         assert "if: success()" in ok
-        assert '/ops/notify?secret=$POLL_SECRET"' in ok
+        assert '/ops/notify" -H "X-Poll-Secret: $POLL_SECRET"' in ok
+        assert "POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}" in ok
         assert f'\\"source\\":\\"{name}\\"' in ok
         assert '\\"status\\":\\"ok\\"' in ok
         assert "failed" not in ok.split("run:")[1]
@@ -180,6 +181,18 @@ def test_no_expressions_inside_run_scripts(name):
     assert scripts
     for script in scripts:
         assert "${{" not in script, script
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_secrets_never_travel_in_a_url(name):
+    """A query-string secret lands in Cloudflare's request logs and breaks
+    when it holds a URL-special character. The Worker reads X-Poll-Secret
+    (or x-ingest-secret) first; every /ops/notify call sends it that way."""
+    t = text(name)
+    assert not re.search(r"[?&]secret=", t, re.I)
+    for script in run_scripts(name):
+        for curl in re.findall(r"curl [^\n]*/ops/notify[^\n]*", script):
+            assert '-H "X-Poll-Secret: $POLL_SECRET"' in curl, curl
 
 
 @pytest.mark.parametrize("name", ALL)
