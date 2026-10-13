@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -38,14 +38,17 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
         run: |
+          # This log is public: print only whether the lookup worked, never
+          # the response (it lists every KV namespace on the account).
           CF_RESPONSE=$(curl -s -X GET \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
             -H "Authorization: Bearer $CLOUDFLARE_API_KEY")
-          echo "Cloudflare API response: $CF_RESPONSE"
 
-          NS_ID=$(echo "$CF_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('errors','')) or None if not d.get('success') else None; ns=d.get('result') or []; m=next((n['id'] for n in ns if n['title']=='eyewall-cache'),None); print([n['title'] for n in ns],file=sys.stderr) if not m else None; exit(1) if not m else print(m)")
-
-          echo "KV namespace: $NS_ID"
+          if ! NS_ID=$(echo "$CF_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); m=next((n['id'] for n in d.get('result') or [] if n['title']=='eyewall-cache'),None); sys.exit(1) if not (d.get('success') and m) else print(m)" 2>/dev/null); then
+            echo "Cloudflare KV namespace lookup failed (API error, or no eyewall-cache namespace)"
+            exit 1
+          fi
+          echo "Cloudflare KV namespace lookup succeeded"
 
           KEYS=$(curl -s -X GET \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces/$NS_ID/keys?prefix=draft%3Apicks%3A2026" \

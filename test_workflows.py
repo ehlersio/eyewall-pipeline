@@ -148,7 +148,59 @@ def test_sbnation_has_no_push_trigger():
 @pytest.mark.parametrize("league", ["ahl", "echl"])
 def test_hockeytech_nightlies_ingest_goal_on_ice(league):
     t = text(f"{league}-nightly.yml")
-    assert f'python hockeytech_goal_on_ice.py {league} "${{{{ inputs.season_id }}}}"' in t
+    assert f'python hockeytech_goal_on_ice.py {league} "$SEASON_ID"' in t
+
+
+def run_scripts(name):
+    """Every run: script in a workflow, inline or block (| / >)."""
+    lines = text(name).split("\n")
+    out = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*(?:- )?)run:\s*(.*)$", line)
+        if not m:
+            continue
+        if m.group(2) not in ("|", ">", "|-", ">-"):
+            out.append(m.group(2))
+            continue
+        block = []
+        for nxt in lines[i + 1 :]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= len(m.group(1)):
+                break
+            block.append(nxt)
+        out.append("\n".join(block))
+    return out
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_no_expressions_inside_run_scripts(name):
+    """Inputs, step outputs and secrets reach the shell through env:, so a
+    value is never spliced into the script and parsed as shell (security
+    audit 2026-10-13)."""
+    scripts = run_scripts(name)
+    assert scripts
+    for script in scripts:
+        assert "${{" not in script, script
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_actions_are_pinned_to_a_commit_sha(name):
+    """Tags can be moved; a SHA can't. Dependabot (github-actions) bumps
+    these, keeping the version comment."""
+    for uses in re.findall(r"(?m)^\s*(?:- )?uses:\s*(.+)$", text(name)):
+        assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*", uses), uses
+
+
+def test_draft_ingest_does_not_log_the_kv_namespace_listing():
+    t = text("draft-ingest.yml")
+    # Only ever piped to the parser, never echoed to the (public) log.
+    echoes = re.findall(r"echo [^\n]*\$CF_RESPONSE[^\n]*", t)
+    assert echoes and all(re.search(r'\$CF_RESPONSE" \| python3 ', e) for e in echoes)
+    assert 'echo "KV namespace: $NS_ID"' not in t
+
+
+def test_dependabot_keeps_action_shas_current():
+    t = (WORKFLOWS.parent / "dependabot.yml").read_text()
+    assert re.search(r'package-ecosystem: "github-actions"\n\s+directory: "/"', t)
 
 
 def test_social_posts_every_cron_and_kind_routes_to_a_script():

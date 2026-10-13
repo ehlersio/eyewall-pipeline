@@ -69,6 +69,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -960,6 +961,34 @@ def caption_leaders(week, season_pts, gax, span):
 # ── Publishing ──────────────────────────────────────────────────────────
 
 
+# The token never goes in a URL: httpx error text includes the URL, and
+# publish failures are printed to the Actions log and stored in
+# social_posts.error. GETs send it as a Bearer header; POSTs in the form body.
+# Errors are raised from the status code, never raise_for_status().
+_TOKEN_IN_TEXT = re.compile(r"((?:access|input)_token=)[^&\s'\"]+")
+
+
+def redact(text):
+    """Text of an error, safe to print or store: any access_token=/input_token=
+    value, and the Page token itself, masked. A last line of defence; no
+    Graph call should put the token anywhere an error can carry it."""
+    text = _TOKEN_IN_TEXT.sub(r"\1[redacted]", str(text))
+    token = os.environ.get("META_PAGE_TOKEN")
+    return text.replace(token, "[redacted]") if token else text
+
+
+def graph_get(path, token, **params):
+    res = httpx.get(
+        f"{GRAPH}/{path}",
+        params=params,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    if res.status_code >= 400:
+        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
+    return res.json()
+
+
 def graph_post(path, token, **params):
     res = httpx.post(f"{GRAPH}/{path}", data={**params, "access_token": token}, timeout=60)
     if res.status_code >= 400:
@@ -971,13 +1000,7 @@ def wait_for_container(
     container_id, token, tries=CONTAINER_POLL_TRIES, seconds=CONTAINER_POLL_SECONDS
 ):
     for _ in range(tries):
-        res = httpx.get(
-            f"{GRAPH}/{container_id}",
-            params={"fields": "status_code", "access_token": token},
-            timeout=30,
-        )
-        res.raise_for_status()
-        status = res.json().get("status_code")
+        status = graph_get(container_id, token, fields="status_code").get("status_code")
         if status == "FINISHED":
             return
         if status in ("ERROR", "EXPIRED"):
@@ -1149,8 +1172,9 @@ def publish_everywhere(client, kind, post_key, urls, caption, platforms, done, *
         try:
             media_id = publisher(account_id, token, urls, text, **extra)
         except (RuntimeError, httpx.HTTPError, KeyError) as e:
-            print(f"  {platform}: publish failed: {e}")
-            record(client, platform, kind, post_key, "failed", urls, text, error=str(e)[:1000])
+            error = redact(e)
+            print(f"  {platform}: publish failed: {error}")
+            record(client, platform, kind, post_key, "failed", urls, text, error=error[:1000])
             code = 1
             continue
         record(client, platform, kind, post_key, "published", urls, text, media_id=media_id)
@@ -1376,13 +1400,6 @@ POSTS = {
 }
 
 
-def graph_get(path, token, **params):
-    res = httpx.get(f"{GRAPH}/{path}", params={**params, "access_token": token}, timeout=30)
-    if res.status_code >= 400:
-        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
-    return res.json()
-
-
 # `check` fails when the token or its data access ends within this many days.
 TOKEN_WARN_DAYS = 14
 
@@ -1456,7 +1473,7 @@ def check_credentials(now: datetime | None = None):
         try:
             res = call()
         except (RuntimeError, httpx.HTTPError) as e:
-            print(f"  FAIL  {label}: {e}")
+            print(f"  FAIL  {label}: {redact(e)}")
             ok = False
             continue
         pair = match(res)
@@ -1472,7 +1489,7 @@ def check_credentials(now: datetime | None = None):
     try:
         info = graph_get("debug_token", token, input_token=token)
     except (RuntimeError, httpx.HTTPError) as e:
-        print(f"  FAIL  {label}: {e}")
+        print(f"  FAIL  {label}: {redact(e)}")
         ok = False
     else:
         problems = token_lifetime_problems(info, now or datetime.now(UTC))

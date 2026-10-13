@@ -88,11 +88,13 @@ jobs:
 
       - name: POST to EyeWall worker
         if: steps.guard.outputs.skip != 'true'
+        env:
+          POLL_SECRET: ${{ secrets.EYEWALL_POLL_SECRET }}
         run: |
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST \
             -H "Content-Type: text/plain" \
-            -H "x-ingest-secret: ${{ secrets.EYEWALL_POLL_SECRET }}" \
+            -H "x-ingest-secret: $POLL_SECRET" \
             --data-binary @skaters.csv \
             "https://eyewall-poller.billowing-queen-bf23.workers.dev/moneypuck/ingest")
           echo "Worker responded: $HTTP_STATUS"
@@ -103,7 +105,10 @@ jobs:
 
       - name: Summary
         if: steps.guard.outputs.skip != 'true'
-        run: echo "MoneyPuck ingest complete — ${{ steps.fetch.outputs.rows }} rows (season start year ${{ steps.fetch.outputs.year_used }}) sent to worker"
+        env:
+          ROWS: ${{ steps.fetch.outputs.rows }}
+          YEAR_USED: ${{ steps.fetch.outputs.year_used }}
+        run: echo "MoneyPuck ingest complete — $ROWS rows (season start year $YEAR_USED) sent to worker"
 
       - name: Notify on failure
         if: failure()

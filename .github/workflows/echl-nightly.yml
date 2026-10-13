@@ -47,11 +47,11 @@ jobs:
 
       - name: Checkout repo
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -76,7 +76,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python echl_stats.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python echl_stats.py "$SEASON_ID"
         # Populates echl_game_log (which games are Final), echl_players,
         # echl_player_seasons, echl_goalie_seasons, echl_team_seasons.
         # Everything below this step depends on echl_game_log/echl_players
@@ -87,14 +88,16 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python echl_game_boxscore.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python echl_game_boxscore.py "$SEASON_ID"
 
       - name: ECHL goal on-ice rosters (hockeytech_goal_on_ice.py)
         if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_goal_on_ice.py echl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_goal_on_ice.py echl "$SEASON_ID"
         # echl_goal_on_ice: the skaters on the ice for every goal, from
         # gameSummary (read by eyewall-poller's /echl/game-box `goals`).
         # Needs echl_game_log from the stats step. Table:
@@ -106,21 +109,24 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python echl_shot_events.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python echl_shot_events.py "$SEASON_ID"
 
       - name: Ingest ECHL penalty shots
         if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python echl_penalty_shots.py "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python echl_penalty_shots.py "$SEASON_ID"
 
       - name: ECHL shot-location xG proxy (hockeytech_shot_xg.py)
         if: steps.guard.outputs.skip != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_shot_xg.py echl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_shot_xg.py echl "$SEASON_ID"
         # echl_player_xg from echl_shot_events, so after the shot-events step.
         # Tables: docs/2026-10-07_hockeytech_percentiles.sql (logs one error
         # and skips until that's been run).
@@ -130,7 +136,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_percentiles.py echl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_percentiles.py echl "$SEASON_ID"
         # Reads echl_player_seasons (stats step), assists from
         # echl_shot_events and finishing from echl_player_xg (the step above).
 
@@ -139,7 +146,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python hockeytech_goalie_percentiles.py echl "${{ inputs.season_id }}"
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python hockeytech_goalie_percentiles.py echl "$SEASON_ID"
         # Reads echl_goalie_seasons, echl_shot_events, echl_game_log and
         # echl_goalie_game_box (credits each goal to the goalie who allowed it).
 

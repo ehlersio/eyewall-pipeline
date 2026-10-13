@@ -292,6 +292,64 @@ class TestShip:
         assert {status for status, _ in recs.values()} == {"rendered"}
 
 
+SECRET = "EAAG-secret-page-token-123"
+
+
+def graph_400(sent):
+    """httpx.get stand-in: Graph answers 400. The request is built from the
+    real arguments, so a token put in the URL would reach the error text."""
+
+    def get(url, params=None, headers=None, timeout=None):
+        req = ig.httpx.Request("GET", url, params=params, headers=headers)
+        sent.append(req)
+        body = {"error": {"message": "Invalid parameter", "code": 100}}
+        return ig.httpx.Response(400, json=body, request=req)
+
+    return get
+
+
+class TestTokenNeverLeaks:
+    def test_container_poll_error_keeps_token_out_of_record_and_log(self, monkeypatch, capsys):
+        monkeypatch.setenv("META_PAGE_TOKEN", SECRET)
+        monkeypatch.setenv("IG_USER_ID", "u1")
+        sent = []
+        with (
+            patch.object(ig, "graph_post", return_value={"id": "c1"}),
+            patch.object(ig.httpx, "get", side_effect=graph_400(sent)),
+            patch.object(ig, "record") as rec,
+        ):
+            code = ig.publish_everywhere(
+                MagicMock(),
+                "recap",
+                "recap-x",
+                ["a.jpg"],
+                "cap",
+                {"instagram": ig.PLATFORMS["instagram"]},
+                set(),
+            )
+        assert code == 1
+        assert rec.call_args.args[4] == "failed"
+        error = rec.call_args.kwargs["error"]
+        assert "(400)" in error and "Invalid parameter" in error
+        for text in (error, capsys.readouterr().out):
+            assert SECRET not in text
+            assert "access_token=" not in text
+        # Clean at the source, not just masked on the way out.
+        assert "[redacted]" not in error
+        assert sent[0].headers["Authorization"] == f"Bearer {SECRET}"
+        assert SECRET not in str(sent[0].url)
+
+    def test_redact_masks_token_params_and_the_token_itself(self, monkeypatch):
+        monkeypatch.setenv("META_PAGE_TOKEN", SECRET)
+        url = f"https://graph.facebook.com/v25.0/c1?fields=status_code&access_token={SECRET}"
+        assert ig.redact(f"Client error for url '{url}'") == (
+            "Client error for url 'https://graph.facebook.com/v25.0/c1"
+            "?fields=status_code&access_token=[redacted]'"
+        )
+        assert ig.redact("input_token=abc&x=1") == "input_token=[redacted]&x=1"
+        assert ig.redact(RuntimeError(f"echo {SECRET}")) == "echo [redacted]"
+
+
 class TestGates:
     def test_published_everywhere_is_skipped(self):
         rows = [

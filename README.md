@@ -529,6 +529,8 @@ Each post checks its data before it goes out. `rankings` needs all 32 teams rank
 
 One Facebook Login Page access token (`META_PAGE_TOKEN`) covers both platforms. Instagram posts go through the Business account linked to the Page. A Page token made from a long-lived user token doesn't expire, so nothing refreshes it, but Meta's data access on it does (about 90 days; renewed by re-authorising the app, next due 2026-12-17), and posting stops when it lapses. `check` reads both dates from Graph API `debug_token` and fails when either is under 14 days away; `meta-token-check.yml` runs it every Monday at 12:00 UTC and pushes an ops alert on failure (2026-10). The token needs `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic` and `instagram_content_publish`.
 
+The token never goes in a URL (2026-10, security audit finding 9): Graph GETs (the container poll, `check`) send it as an `Authorization: Bearer` header and POSTs in the form body, and errors are raised from the status code with Graph's own message, never `raise_for_status()`, whose text includes the URL. Any error printed or stored in `social_posts.error` also passes through `redact()`, which masks `access_token=`/`input_token=` values and the token itself.
+
 ```bash
 python social_posts.py winners --dry-run                           # render to social_out/, no upload/post
 python social_posts.py recap --dry-run --date 2026-10-19           # as if run that day (ET)
@@ -1325,6 +1327,8 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `meta-token-check.yml` | Weekly (Mon 12:00 UTC) | `social_posts.py check`: Meta Page token reaches the Page and Instagram, and neither the token nor its data access ends within 14 days (2026-10) |
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 | `ci.yml` | Every PR | Ruff check + format check + pytest |
+
+Every action is pinned to a full commit SHA with its version in a comment (`uses: actions/checkout@<sha> # v7.0.1`); Dependabot's `github-actions` entry in `.github/dependabot.yml` opens the weekly bump PRs. Workflow inputs, step outputs and secrets reach `run:` scripts through `env:` (`"$SEASON_ID"`, `$POLL_SECRET`), never as `${{ }}` inside the script, so a value can't be read as shell. Logs of this public repo are public: don't echo API responses that list account resources (`draft-ingest.yml` prints only whether its KV namespace lookup worked).
 
 ### HockeyTech nightly step order (AHL / ECHL / PWHL)
 
