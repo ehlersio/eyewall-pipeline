@@ -298,8 +298,10 @@ def get_season_type(season_id: str | int) -> str | None:
 #           2023 showcase (9 games, 2023-12-04..07, before the inaugural
 #           regular season) -- CLAUDE.md, "PWHL season 2 is the 2023
 #           showcase". Keep "showcase".
-#   "10" -- HockeyTech names it "2026-27 Pre-Season" (hyphenated), which the
-#           Worker's deriveSeasonType() reads as "regular" (checked 2026-09).
+#   "10" -- HockeyTech names it "2026-27 Pre-Season" (hyphenated). The
+#           Worker's deriveSeasonType() read that as "regular" until poller
+#           #140 (2026-09-22) made it match on letters only; kept here so a
+#           resolve never needs the network for it (checked 2026-10-14).
 # Every other past id is here too, so a resolve never needs the network for
 # them. Was copied into nine pwhl_* modules (some without "10"); one copy
 # since 2026-10.
