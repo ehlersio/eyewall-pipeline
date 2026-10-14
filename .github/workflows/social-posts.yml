@@ -7,6 +7,8 @@ name: Social Posts
 #   leaders   Tuesdays     -- last week's + season leaders, goals above expected
 #   pwhl-winners  daily      -- PWHL projected winners, skipped with no PWHL games
 #   pwhl-recap    Tuesdays   -- last week's PWHL projected winners, graded
+#   minor-winners daily      -- AHL + ECHL projected winners, a slide per
+#                              league, skipped with no AHL/ECHL games
 #   minor-recap   Wednesdays -- AHL + ECHL: last week graded + top scorer
 #   pwhl-leaders  Thursdays  -- last week's + season PWHL leaders
 #   milk-carton   Mondays    -- the week's roughest NHL week, on a milk carton
@@ -38,6 +40,12 @@ name: Social Posts
 #   pwhl-winners  15:45 / 16:45 daily (11:45am ET, before the earliest
 #                 PWHL puck drop; hockeytech_elo.py logs them at ~3:20am ET)
 #   pwhl-recap    20:00 / 21:00 Tue
+#   minor-winners 16:15 / 17:15 daily (12:15pm ET; the ahl-/echl-nightly
+#                 runs, which end with hockeytech_elo.py, are dispatched by
+#                 the Worker at ~07:40 / 08:00 UTC and take under 10 min,
+#                 and their schedule fallback runs a few hours late at most;
+#                 the earliest AHL/ECHL weekday puck drops are school-day
+#                 matinees around 10:30am local, left off the card anyway)
 #   minor-recap   17:00 / 18:00 Wed
 #   pwhl-leaders  17:00 / 18:00 Thu
 #   milk-carton   21:00 / 22:00 Mon (5pm / 6pm EDT) -- NHL stats API and
@@ -66,6 +74,8 @@ on:
     - cron: '45 16 * * *'
     - cron: '0 20 * * 2'
     - cron: '0 21 * * 2'
+    - cron: '15 16 * * *'
+    - cron: '15 17 * * *'
     - cron: '0 17 * * 3'
     - cron: '0 18 * * 3'
     - cron: '0 17 * * 4'
@@ -88,7 +98,7 @@ on:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-recap, pwhl-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-winners, minor-recap, pwhl-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
       dry_run:
         description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
@@ -127,6 +137,7 @@ jobs:
             '0 17 * * 2'|'0 18 * * 2')  kind=leaders ;;
             '45 15 * * *'|'45 16 * * *') kind=pwhl-winners ;;
             '0 20 * * 2'|'0 21 * * 2')  kind=pwhl-recap ;;
+            '15 16 * * *'|'15 17 * * *') kind=minor-winners ;;
             '0 17 * * 3'|'0 18 * * 3')  kind=minor-recap ;;
             '0 17 * * 4'|'0 18 * * 4')  kind=pwhl-leaders ;;
             '0 21 * * 1'|'0 22 * * 1')  kind=milk-carton ;;
