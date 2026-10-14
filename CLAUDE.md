@@ -128,7 +128,7 @@ Since 2026-10 there is one resolver, `season_lookup.resolve_pwhl_season_type(sea
 ## PWHL team IDs
 HockeyTech IDs, including 2026-27 expansion teams: DET=10, HAM=11, LV=12, SJS=13. This map is duplicated across `hockeytech_leagues.PWHL.team_id_map` (which `pwhl_stats.py`'s `TEAM_ID_MAP` and `hockeytech_elo.py` use), `pwhl_stats.py`'s `CITY_TEAM_MAP`, `pwhl_salaries.py`'s `TEAM_NAME_MAP` + regex fallback, and independently in `eyewall-poller`'s `pwhl.js` and `eyewall-analytics`'s `pwhlConfig.js`. Any future expansion wave needs all of these touched — confirm via grep, don't assume from memory.
 
-New teams also need a `pwhl_teams` row seeded before `pwhl_players.team_id` FK inserts will work — see `seed_expansion_teams.py` as a reference pattern (disposable script, safe to delete, kept as an example of the seeding shape).
+New teams also need a `pwhl_teams` row seeded before `pwhl_players.team_id` FK inserts will work — not automated: insert the `pwhl_teams` row by hand (SQL editor) before the first roster fetch for a new team_id.
 
 ## `shot_events.car_game` — means "Carolina played," not "the requested team played"
 
