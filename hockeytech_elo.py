@@ -73,10 +73,12 @@ def fetch_schedule(league, season_id):
 
 def pwhl_seasons():
     """PWHL seasons in get_hockeytech_seasons()' shape. Dates come from
-    HockeyTech's `seasons` view, types from the Worker (get_season_type):
-    HockeyTech's own labels lag -- it calls season 10 "2026-27 Pre-Season"
-    while it holds the 2026-27 regular-season schedule. None if HockeyTech
-    is unreachable; seasons the Worker doesn't recognise are left out."""
+    HockeyTech's `seasons` view, types from the Worker (get_season_type),
+    which matches HockeyTech's names by letters only, so "2026-27 Pre-Season"
+    (season 10, Nov 22-30) is "preseason" and 11 is the 2026-27 regular
+    season; replay_seasons() then keeps only regular/playoffs. None if
+    HockeyTech is unreachable; seasons the Worker doesn't recognise are left
+    out."""
     from hockeytech_stats import FetchError, _modulekit_get
 
     try:
