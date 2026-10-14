@@ -1,8 +1,8 @@
 # EyeWall Analytics Pipeline
 
-Nightly data pipeline that populates Supabase with NHL + PWHL + AHL + ECHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL/AHL/ECHL news, milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds — NHL/PWHL only), and daily trivia questions (easy/medium tiers, guardrailed AI generation — see [Daily Trivia](#daily-trivia)).
+Nightly data pipeline that populates Supabase with NHL + PWHL + AHL + ECHL stats, MoneyPuck analytics, shot events, shift charts, zone starts, RAPM-derived WAR, Elo win probabilities, playoff odds, a public prediction scorecard, power rankings with AI narratives, AI-generated game summaries, predictions, matchup analysis, player scouting blurbs (skaters + goalies), PWHL salary data, PWHL/AHL/ECHL news, milestone detection (hat tricks, shorthanded goals, shutouts, season/career goal and points thresholds — all four leagues (no career thresholds for AHL/ECHL)), Instagram/Facebook posts, and daily trivia questions (easy/medium tiers, guardrailed AI generation — see [Daily Trivia](#daily-trivia)).
 
-AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and were added as data-layer-only builds (stats, per-game box scores, shot events, penalty shots, news, intraday live-score refresh) — see [AHL Pipeline Modules](#ahl-pipeline-modules) / [ECHL Pipeline Modules](#echl-pipeline-modules) below. Neither league has shift data or attempt-level PBP events (hits/blocked shots/faceoffs) in the HockeyTech feed at all, so WAR/RAPM/Corsi are not buildable for either — see [Known Limitations](#known-limitations).
+AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and share its `hockeytech_*` modules: stats, per-game box scores, goal on-ice rosters, shot events, penalty shots, a shot-location xG proxy with per-GP percentiles, Elo win probabilities, playoff odds, power rankings with EyeWall AI narratives, milestones, trivia, news and a weekly Instagram/Facebook recap card — see [AHL Pipeline Modules](#ahl-pipeline-modules) / [ECHL Pipeline Modules](#echl-pipeline-modules) below. Neither league has shift data or attempt-level PBP events (hits/blocked shots/faceoffs) in the HockeyTech feed at all, so WAR/RAPM/Corsi are not buildable for either — see [Known Limitations](#known-limitations).
 
 ## Setup
 
@@ -11,23 +11,20 @@ AHL and ECHL are the same HockeyTech/LeagueStat vendor as PWHL and were added as
 pip install -r requirements.txt -r requirements-dev.txt  # dev file: pinned pytest + ruff + pip-audit, same as CI
 ```
 
-Required packages: `requests`, `supabase`, `scikit-learn`, `scipy`, `python-dotenv`, `pdfplumber`
+Runtime packages are pinned in `requirements.txt` (requests, supabase + its sub-packages, httpx, python-dotenv, numpy, scikit-learn, scipy, pillow). `pdfplumber` is **not** in it: `pip install pdfplumber` before running `pwhl_salaries.py`. `goal_of_week.py` also needs `ffmpeg` on PATH. CI runs Python 3.11 (`.python-version`).
 
 ### 2. Create your .env file
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+The repo has no example env file (removed 2026-06); create `.env` with:
 ```
 SUPABASE_URL=https://mqgasjzywoibdgxjjkux.supabase.co
 SUPABASE_SERVICE_KEY=your_service_role_key_here
-NHL_SEASON=20252026
-PWHL_SEASON=8
+NHL_SEASON=20262027          # fallback only (Worker unreachable)
+PWHL_SEASON=8                # fallback only
+# AHL_SEASON=94 / ECHL_SEASON=78   # optional fallbacks (default 90 / 73)
 PRIMARY_TEAM_ABBR=CAR
 OPENROUTER_API_KEY=your_openrouter_api_key
-WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev
-POLL_SECRET=your_worker_poll_secret
+WORKER_URL=https://eyewall-poller.billowing-queen-bf23.workers.dev   # news + draft scripts only; season_lookup.py has its own Worker URL
+EYEWALL_POLL_SECRET=your_worker_poll_secret   # must equal the Worker's POLL_SECRET; the ahl/echl/pwhl news scripts fail at import without it
 # Optional -- only social_posts.py uses these; without them it renders but doesn't publish
 META_PAGE_TOKEN=your_facebook_page_access_token
 IG_USER_ID=your_instagram_business_account_id
@@ -41,8 +38,23 @@ FB_PAGE_ID=your_facebook_page_id
 # NHL — run everything (nightly order)
 python run.py
 
-# Run individual NHL modules
+# Run individual NHL stages: python run.py <stage> [season]
+# (a numeric second argument is passed to every stage that takes one; any word not listed here runs the full nightly)
 python run.py nhl              # NHL stats only
+python run.py injuries         # ESPN injuries only
+python run.py scratches        # Game scratches (incremental; season = backfill)
+python run.py goalie_starts    # Boxscore goalie starters, new games only
+python run.py starting_goalie  # Start probabilities for every team's next game
+python run.py transactions     # ESPN NHL transactions (second argument is a calendar year)
+python run.py draft_history    # Draft pick history, last 5 drafts (second argument is a first draft year)
+python run.py trade_trees      # Structured trades + where each asset went next
+python run.py win_probs        # Pre-game Elo win probabilities, games today/tomorrow
+python run.py playoff_odds     # Simulated playoff odds only
+python run.py prediction_scorecard [--backtest]  # Public scorecard (live rows; --backtest adds the three backtests)
+python run.py injury_impact [--full]  # Man-games + WAR lost to injury (last 7 days; --full = every game of the season)
+python run.py projected_lines  # Next-game projected lines, every team
+python run.py special          # PP/PK unit inference only
+python run.py ai               # AI sub-pipeline only (game_scoring, summaries, scouting, narratives, NHL trivia)
 python run.py shots            # Shot events (incremental)
 python run.py shifts           # Shift charts (incremental)
 python run.py zones            # Zone starts (incremental)
@@ -75,10 +87,10 @@ python trivia_questions.py --sport pwhl           # PWHL only (what pwhl-nightly
 python trivia_questions.py --tier easy --dry-run --date 2026-08-10  # Preview without writing
 python trivia_questions.py --tier easy --dry-run --locale fr        # Preview French-only questions
 
-# PWHL — run individually (no orchestrator yet)
+# PWHL — run individually; pwhl-nightly.yml is the order of record
 python pwhl_stats.py 8         # 2025-26 regular season stats
 python pwhl_stats.py 9         # 2025-26 playoffs stats
-python pwhl_pbp_events.py      # Current season PBP events (defaults to season 8)
+python pwhl_pbp_events.py      # Current season PBP events (live-resolved)
 python pwhl_pbp_events.py 9    # Specific playoff season
 python pwhl_pbp_events.py --force  # Re-ingest already-processed games
 python pwhl_shot_events.py     # Shot events + gameSummary merge (assists, PP/SH/EN/GW flags)
@@ -90,6 +102,17 @@ python pwhl_shot_events.py 8 --reingest        # Re-ingest every completed game 
 python pwhl_salaries.py        # Salary scraper (PWHLPA PDF)
 python pwhl_salaries.py --dry-run  # Parse only, don't upsert
 python pwhl_news.py            # Fetch PWHL news and POST to Worker
+python pwhl_game_boxscore.py   # per-game skater/goalie box scores (optional season_id)
+python pwhl_goal_on_ice.py     # skaters on the ice for each goal
+python pwhl_penalty_shots.py   # penalty shots (makes + misses)
+python pwhl_stats.py --gw-goals-rollup-only   # rollups the nightly runs after the steps they read; also
+python pwhl_stats.py --shot-totals-only       #   take an optional season_id
+python pwhl_stats.py --toi-rollup-only
+python pwhl_stats.py --upcoming-game-logs     # next season's schedule(s) into pwhl_game_log
+python pwhl_shot_xg.py && python pwhl_percentiles.py && python pwhl_goalie_percentiles.py  # xG proxy + skater/goalie percentiles
+python pwhl_milestones.py                     # milestones
+python hockeytech_elo.py pwhl && python hockeytech_playoff_odds.py pwhl  # Elo + win probabilities, then playoff odds
+python hockeytech_power_rankings.py pwhl --narratives                   # power rankings + EyeWall AI narratives
 
 # AHL — run individually (no orchestrator yet)
 python ahl_stats.py                        # current season (live-resolved)
@@ -106,6 +129,8 @@ python ahl_live_refresh.py                 # narrow live game_state/score refres
 python ahl_news.py                         # AHL news -> Worker
 python hockeytech_milestones.py ahl        # milestones, last 3 ET days (--date/--since/--game)
 python trivia_questions.py --sport ahl     # daily AHL trivia (easy + medium)
+python hockeytech_elo.py ahl && python hockeytech_playoff_odds.py ahl   # Elo + win probabilities, then playoff odds
+python hockeytech_power_rankings.py ahl --narratives                   # power rankings + EyeWall AI narratives
 
 # ECHL — run individually (no orchestrator yet)
 python echl_stats.py                       # current season (live-resolved)
@@ -121,6 +146,8 @@ python echl_live_refresh.py                # narrow live game_state/score refres
 python echl_news.py                        # ECHL news -> Worker
 python hockeytech_milestones.py echl       # milestones, last 3 ET days
 python trivia_questions.py --sport echl    # daily ECHL trivia (easy + medium)
+python hockeytech_elo.py echl && python hockeytech_playoff_odds.py echl
+python hockeytech_power_rankings.py echl --narratives
 ```
 
 ---
@@ -129,8 +156,10 @@ python trivia_questions.py --sport echl    # daily ECHL trivia (easy + medium)
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → playoff_race → shot_events → shift_data → zone_starts → rapm → moneypuck → line_combinations → projected_lines → power_rankings → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → draft_history → trade_trees → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
+
+`nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
 
 ### `nhl_stats.py`
 Rosters, skater/goalie/team stats, game log for all 32 teams. Accepts season argument: `python nhl_stats.py 20242025`. Runtime: ~2-3 min.
@@ -204,6 +233,8 @@ Per-player expected weights by score state. Used by `rapm.py` for score-state no
 
 The pool is regular-season games only: preseason and playoff games are left out of the shots, the shifts (and so the 150-minute qualifying ice time) and the zone starts, and `score_state.py` drops them the same way. RAPM, and the WAR `moneypuck.py` builds on it, are written to the `game_type` 2 rows, so they're regular-season numbers; playoff RAPM/WAR is a separate model. Until 2026-09 preseason games were in the pool, and playoff games were in until step 3 of the game-type split, since `shot_events`/`shift_events`/`zone_starts` keep a season's preseason and playoff games. Each read now filters on those tables' `game_type` computed field, one game type per read (`rapm.fetch_rated()`), so a keyset page stays on the `(season, game_type, id)` index.
 
+**Sign convention fixed (2026-09-28, #168):** each shot's design row is signed from the game's reference team (alphabetically first), the same side as its `y` (`design_row()`). Before, rows were always shooters +1 / defenders -1 while `y` was reference-signed, so RAPM — and WAR — leaned on where a team's name sorts (2025-26 roster WAR summed by team ran ANA +35.8 down to WSH -7.4, alphabetically). 2023-24 through 2025-26 were recomputed. **Stale values cleared (#176):** `write_rapm()` nulls `rapm`/`rapm_toi_min` on any row of the `game_type` it's writing that this run didn't rate (for the regular season, WAR then uses its xG fallback), and the roster read pages in `player_id` order with `select_all()`.
+
 **Playoff RAPM and WAR (2026-09):** after the regular-season fit, `rapm.run()` fits the same regression (`build_regression()`) over the pool seasons' playoff games and writes it to the `game_type` 3 rows (`run_playoffs()`).
 - **Shrunk toward the regular season:** the ridge is fit on the residual `y - X @ prior`, where `prior` is each player's regular-season RAPM from the same run (`playoff_rapm()`). That is a ridge regression whose prior mean is the regular-season value rather than zero. A small playoff sample leaves a player near their regular-season number; a deep run moves them.
 - **Floor:** 60 minutes of playoff ice time in the pool (`PLAYOFF_MIN_SECS`). Same alpha (`RAPM_ALPHA`) as the regular season.
@@ -234,7 +265,7 @@ Neither is used; the public methodology page says so. Revisit the goalie adjustm
 **AHL / ECHL Elo — tested, then wired in via `hockeytech_elo.py` below (2026-09):** `backtest_hockeytech_elo.py` (read-only; results in `docs/hockeytech_elo_backtest_results.md`) replays 2023-24 through 2025-26 for each league from HockeyTech's `schedule` view (the `{league}_game_log` tables only hold 2025-26, and the feed's "Final OT"/"Final SO" status supplies the OT flag). On the 2025-26 holdout, Elo with elo.py's NHL constants scores Brier **0.2452** (AHL) / **0.2428** (ECHL) vs 0.250 for a constant home-win rate. The live `/{league}/prediction` point-split heuristic scores **0.344 / 0.338**, worse than a coin flip: it serves 0% or 100% in ~40% of games and gives the home team 0% whenever stats are tied, including every season opener. Tuning K / home advantage / regression is noise on a flat surface, so the recommendation is Elo with the existing constants. Results JSON is gitignored.
 
 ### `hockeytech_elo.py` (2026-09)
-AHL/ECHL/PWHL counterpart of `elo_ratings.py` + `win_probs.py`, run in `ahl-nightly.yml` / `echl-nightly.yml` / `pwhl-nightly.yml` after the stats and percentile steps and before the playoff-odds step that reads its ratings (`if: !cancelled()`: it doesn't read the tables the other steps write, so a failed ingestion step doesn't block it). It is no longer the last step: see [HockeyTech nightly step order](#hockeytech-nightly-step-order-ahl--echl--pwhl). Each run replays every regular-season and playoff game since 2023-24 from HockeyTech's `schedule` view with elo.py's constants, the same setup the backtest above validated, and regresses once per new regular season as soon as that season is within 14 days of starting, so opener previews already use regressed ratings. Relocated franchises carry their rating (`RELOCATED`: AHL 317 Bridgeport → 457 Hamilton); new team_ids start at 1500. Writes `{league}_team_elo_ratings` (read by eyewall-poller's `/{league}/prediction`) and `{league}_game_win_probs` for today's/tomorrow's unstarted games, rewritten until puck drop so the remaining row is the last pre-game number. If the Worker's season list is unreachable it exits 1 and leaves yesterday's ratings in place. PWHL (added 2026-09): season types come from the Worker (`get_season_type`) and only dates from HockeyTech, whose own labels lag (it calls season 10, which holds the 2026-27 regular-season schedule, "2026-27 Pre-Season"); the four 2026-27 expansion teams start at 1500. Its backtest is in the same doc (Elo 0.240 vs the heuristic's 0.312 on 2025-26). Tables: `docs/hockeytech_elo_ddl.sql`, `docs/pwhl_elo_ddl.sql`.
+AHL/ECHL/PWHL counterpart of `elo_ratings.py` + `win_probs.py`, run in `ahl-nightly.yml` / `echl-nightly.yml` / `pwhl-nightly.yml` after the stats and percentile steps and before the playoff-odds step that reads its ratings (`if: !cancelled()`: it doesn't read the tables the other steps write, so a failed ingestion step doesn't block it). It is no longer the last step: see [HockeyTech nightly step order](#hockeytech-nightly-step-order-ahl--echl--pwhl). Each run replays every regular-season and playoff game since 2023-24 from HockeyTech's `schedule` view with elo.py's constants, the same setup the backtest above validated, and regresses once per new regular season as soon as that season is within 14 days of starting, so opener previews already use regressed ratings. Relocated franchises carry their rating (`RELOCATED`: AHL 317 Bridgeport → 457 Hamilton); new team_ids start at 1500. Writes `{league}_team_elo_ratings` (read by eyewall-poller's `/{league}/prediction`) and `{league}_game_win_probs` for today's/tomorrow's unstarted games, rewritten until puck drop so the remaining row is the last pre-game number. If the Worker's season list is unreachable it exits 1 and leaves yesterday's ratings in place. PWHL (added 2026-09): season types come from the Worker (`get_season_type`) and only dates from HockeyTech, whose labels can't be trusted as-is (season 10 is the 2026-27 preseason, Nov 22–30, but is named "2026-27 Pre-Season", which the Worker's `deriveSeasonType()` reads as regular — see `season_lookup.PWHL_SEASON_TYPE_MAP`, which `pwhl_seasons()` here doesn't consult). The 2026-27 regular season is season 11 (opens Dec 5); the four expansion teams start at 1500. Its backtest is in the same doc (Elo 0.240 vs the heuristic's 0.312 on 2025-26). Tables: `docs/hockeytech_elo_ddl.sql`, `docs/pwhl_elo_ddl.sql`.
 
 ```
 python hockeytech_elo.py ahl --dry-run                    # print ratings + today's/tomorrow's probabilities
@@ -494,7 +525,7 @@ Requires `docs/session_prediction_scorecard.sql` to be run in Supabase first (cr
 
 ### `social_posts.py` (2026-09)
 
-Automatic posts to Instagram and the EyeWall Facebook Page, run by `.github/workflows/social-posts.yml` (not `run.py`):
+Automatic posts to Instagram and the EyeWall Facebook Page (not X/Twitter: its API charges per post), run by `.github/workflows/social-posts.yml` (not `run.py`):
 
 | Post | When (UTC, backup an hour later) | Source |
 |---|---|---|
@@ -550,14 +581,14 @@ gh workflow run meta-token-check.yml                                # the same c
 Requires `docs/session_social_posts.sql` to be run in Supabase first (the `social_posts` table + the `social` bucket), plus `docs/2026-10-09_social_post_facts.sql` for `cherry-picked`, and GitHub secrets `META_PAGE_TOKEN`, `IG_USER_ID` and `FB_PAGE_ID`. A platform without its id isn't published to.
 
 ### `power_rankings.py`
-32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` ("Sticks" persona). Writes to `power_rankings_narratives` (history retained for movement arrows).
+32-team nightly rankings. 5 weighted normalized components + early-season roster WAR prior (tapers 15%→0% by game 20). AI narrative per team via `ai_client.py` (the EyeWall AI persona, `ai_persona.py`). Writes to `power_rankings_narratives` (history retained for movement arrows). Writes nothing until every team has 3 GP (`MIN_GAMES_TO_RANK`, 2026-09: at 0 GP the order came from row order and STL #1 went out as the weekly post).
 
 **Formula:**
 
 | Component | Weight | Source |
 |-----------|--------|--------|
 | Points % | 25% | `team_seasons` |
-| L10 points % | 25% | NHL standings API (frontend) |
+| L10 points % | 25% | `team_seasons.l10_*` (from `standings/now`, nhl_stats.py) |
 | Goal diff/GP | 20% | `team_seasons` |
 | 5v5 xGF% | 20% | `team_seasons.xgf_pct` |
 | Special teams avg | 10% | `team_seasons` |
@@ -609,7 +640,7 @@ Live NHL draft pick polling — NHL API → Supabase + AI analysis via Worker. `
 Draft pick order scraper. No longer scheduled against `draft_pick_order_2026` (Session 51 — see `draft_ingest.py --sync-pick-order` above); its Session 49 year-guard (PR #20) stays in the codebase and would still fire correctly if it were run. Retained for any future Tankathon-sourced use (mock draft, big board, etc.), none of which exist yet in this repo.
 
 ### `milestones.py`
-Nightly, over the last 3 days' completed games in Eastern time (2026-10; was runner-UTC yesterday only, so a failed night lost its milestones for good). Re-scanning is idempotent: the upsert key makes a repeat a no-op, and threshold milestones are judged on the totals as they stood after that date (`LaterGames` takes off what the player did in games played since, since `player_seasons` and the NHL career totals include them). Detects hat tricks, natural hat tricks (3 *consecutive* goals by one skater, no other scorer of either team between them), shorthanded goals (from real `situation_code`, shootout-period goals excluded), shutouts (goalie played the whole game, 0 goals against), and threshold crossings — season goals (50), season points (100), career points (500/1000/1500, via a live NHL `/player/{id}/landing` call, only for players who crossed a season threshold tonight), career wins (200/300/400, goalie must have earned a credited win tonight). Writes into the shared `milestones` table (see [Shared Tables](#shared-tables-both-leagues-one-table)) with `is_pwhl=false`. Mirrored by PWHL's `pwhl_milestones.py` below — every `milestone_type` string is intentionally identical between the two pipelines except the numeric thresholds themselves, which are tuned per league (see that module's docstring for why PWHL's are much lower).
+Nightly, over the last 3 days' completed games in Eastern time (2026-10; was runner-UTC yesterday only, so a failed night lost its milestones for good). Re-scanning is idempotent: the upsert key makes a repeat a no-op, and threshold milestones are judged on the totals as they stood after that date (`LaterGames` takes off what the player did in games played since, since `player_seasons` and the NHL career totals include them). Detects hat tricks, natural hat tricks (3 *consecutive* goals by one skater, no other scorer of either team between them), shorthanded goals (from real `situation_code`, shootout-period goals excluded), shutouts (goalie played the whole game, 0 goals against), and threshold crossings — season goals (50), season points (100), career points (500/1000/1500, via a live NHL `/player/{id}/landing` call, only for players who crossed a season threshold tonight), career wins (200/300/400, goalie must have earned a credited win tonight). Writes into the shared `milestones` table (see [Shared Tables](#shared-tables-all-leagues-one-table)) with `is_pwhl=false`. Mirrored by PWHL's `pwhl_milestones.py` below — every `milestone_type` string is intentionally identical between the two pipelines except the numeric thresholds themselves, which are tuned per league (see that module's docstring for why PWHL's are much lower).
 
 ```bash
 python milestones.py                    # the last 3 days' games (ET)
@@ -617,11 +648,14 @@ python milestones.py --date 2026-06-15  # specific date
 python milestones.py --since 2026-06-01 # date range through yesterday (ET)
 ```
 
-### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
+### `game_scoring.py`
+Goal-by-goal scorers/assists from NHL play-by-play → `game_scoring` (incremental: games already in the table are skipped unless `--force`; `python game_scoring.py [season]`, `--backfill`, `--game <id>`). First step of `run.py`'s AI sub-pipeline; read by `ai_context.py` and `milestones.py`.
+
+### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `power_rankings.py`, `hockeytech_power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
 
 #### Model provider: OpenRouter
 
-**`ai_client.py`** (2026-08, model switched 2026-09) — shared `generate(prompt, system=None, max_tokens=1024)` used by all 6 AI-generation scripts (`ai_scouting.py`, `ai_summaries.py`, `ai_predictions.py`, `power_rankings.py`, `trivia_questions.py`, and — via `ai_scouting.py`'s re-export — `ai_results_vs_process.py`/`ai_line_chemistry.py`), replacing 5 near-identical copies of the same HTTP call. Calls OpenRouter's `deepseek/deepseek-v4.1-flash`, switched from `google/gemma-4-26b-a4b-it` (itself switched from Cloudflare Workers AI's `llama-3.1-8b-instruct-fp8-fast`) after a side-by-side test on this pipeline's real game-summary prompt found Gemma miscalculating a playoff series record and a derived save-count stat, and leaking untranslated English slang into French output — errors DeepSeek didn't reproduce in the same test. No provider is pinned — OpenRouter's default routing already picks among DeepSeek's own listing and third-party hosts by price/health. Since 2026-10 it retries twice (2 s, then 4 s) on a 429, a 5xx, a timeout or a dropped connection before returning `None`.
+**`ai_client.py`** (2026-08, model switched 2026-09) — shared `generate(prompt, system=None, max_tokens=1024)` used by every AI-generation script (`ai_scouting.py`, `ai_summaries.py`, `ai_predictions.py`, `power_rankings.py`, `hockeytech_power_rankings.py`, `trivia_questions.py`, and — via `ai_scouting.py`'s re-export — `ai_results_vs_process.py`/`ai_line_chemistry.py`), replacing 5 near-identical copies of the same HTTP call. Calls OpenRouter's `deepseek/deepseek-v4.1-flash`, switched from `google/gemma-4-26b-a4b-it` (itself switched from Cloudflare Workers AI's `llama-3.1-8b-instruct-fp8-fast`) after a side-by-side test on this pipeline's real game-summary prompt found Gemma miscalculating a playoff series record and a derived save-count stat, and leaking untranslated English slang into French output — errors DeepSeek didn't reproduce in the same test. No provider is pinned — OpenRouter's default routing already picks among DeepSeek's own listing and third-party hosts by price/health. Since 2026-10 it retries twice (2 s, then 4 s) on a 429, a 5xx, a timeout or a dropped connection before returning `None`.
 
 **NHL API retries (2026-10):** `pipeline_common.nhl_get` is the one NHL GET helper (`nhl_stats`, `shot_events`, `shift_data`, `zone_starts`, `game_scoring` and `line_combinations` used to carry their own copies, none of which retried). It takes a path under `api-web.nhle.com/v1` or a full URL, tries 3 times with 1 s/2 s backoff on timeouts, connection errors and 429/5xx, fails at once on any other HTTP error, and raises `FetchError` when it gives up — the same shape as the HockeyTech helper. Covered by `test_retries.py`.
 
@@ -633,9 +667,11 @@ Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_I
 
 **`ai_scouting.py`** — Generates AI scouting blurbs for both skaters and goalies. Skaters pulled from `player_seasons` via `get_player_context()`; goalies pulled from `goalie_seasons` via `get_goalie_context()` (new — added this offseason). Goalies get a goalie-specific prompt in `build_player_scouting_prompt()` focused on SV%, GAA, GSAX, and percentile ranks rather than the skater-centric goals/assists framing. Respects `--force`, `--missing`, and `--dry-run` flags for both skaters and goalies.
 
-**French/English localization (Track B Phase B1, complete)** — `player_scouting`, `player_narratives`, `game_summaries`, `trivia_questions` and (since 2026-09, `docs/session_locale_predictions.sql`) `game_predictions` rows all carry a `locale` column (`en`/`fr`), part of each table's upsert conflict key (`docs/session_locale_trackb_b0_schema.sql`, applied to prod). `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_summaries.py` and `ai_predictions.py` default to generating both locales per run (an outer `for locale in LOCALES` loop, `LOCALES` defined in `ai_scouting.py`); pass `--locale en`/`--locale fr` to generate just one, e.g. for a targeted backfill. French output uses `ai_persona.py`'s `get_system_prompt('fr')`, which appends a Québécois hockey-terminology instruction to the existing English persona rather than replacing it — the persona's accuracy/formatting rules apply the same regardless of output language. `trivia_questions.py` is wired differently since it has no persona voice (a one-sentence phrasing task with a hard guardrail — see its module docstring): `generate_question_text()` takes its own inline French instruction rather than `get_system_prompt()`, and `STAT_CATEGORIES` carries a `label_fr` for each category since the deterministic `explanation` field (not just the AI prompt) is directly user-facing. Live spot-checks against the original model (llama-3.1-8b-instruct-fp8-fast) produced fluent, grammatically sound French that correctly left `RAPM`/`WAR` untranslated and used correct gender agreement (PWHL "patineuses" vs. NHL "patineurs"), but wasn't perfect glossary compliance — one blurb used "power play" in English despite the glossary specifying "avantage numérique," and produced one garbled/invented word ("événance"). Track B Phase B2 (`eyewall-poller` serving + `eyewallanalytics` frontend locale param) shipped in a follow-up session — the whole localization plan (Track A + Track B) is complete. See [Model provider](#model-provider-openrouter) below — the model backing all of this (French and English both) changed again shortly after, superseding the quality notes above.
+**French/English localization (Track B Phase B1, complete)** — `player_scouting`, `player_narratives`, `game_summaries`, `trivia_questions` and (since 2026-09, `docs/session_locale_predictions.sql`) `game_predictions` rows all carry a `locale` column (`en`/`fr`), part of each table's upsert conflict key (`docs/session_locale_trackb_b0_schema.sql`, applied to prod). `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_summaries.py` and `ai_predictions.py` default to generating both locales per run (an outer `for locale in LOCALES` loop, `LOCALES` defined in `ai_scouting.py`); pass `--locale en`/`--locale fr` to generate just one, e.g. for a targeted backfill. French output uses `ai_persona.py`'s `get_system_prompt('fr')`, which appends a Québécois hockey-terminology instruction to the existing English persona rather than replacing it — the persona's accuracy/formatting rules apply the same regardless of output language. `trivia_questions.py` is wired differently since it has no persona voice (a one-sentence phrasing task with a hard guardrail — see its module docstring): `generate_question_text()` takes its own inline French instruction rather than `get_system_prompt()`, and `STAT_CATEGORIES` carries a `label_fr` for each category since the deterministic `explanation` field (not just the AI prompt) is directly user-facing. Live spot-checks against the original model (llama-3.1-8b-instruct-fp8-fast) produced fluent, grammatically sound French that correctly left `RAPM`/`WAR` untranslated and used correct gender agreement (PWHL "patineuses" vs. NHL "patineurs"), but wasn't perfect glossary compliance — one blurb used "power play" in English despite the glossary specifying "avantage numérique," and produced one garbled/invented word ("événance"). Track B Phase B2 (`eyewall-poller` serving + `eyewallanalytics` frontend locale param) shipped in a follow-up session — the whole localization plan (Track A + Track B) is complete. See [Model provider](#model-provider-openrouter) above — the model backing all of this (French and English both) changed again shortly after, superseding the quality notes above.
 
 **`ai_summaries.py` scan scope (2026-10)** — only regular-season and playoff games (`game_type` 2 and 3) get a recap; `game_log` also holds preseason finals, and until 2026-10 every September exhibition got a two-locale summary. The nightly scan covers games dated in the last 7 days (`--days N`, `0` = whole season for a backfill) instead of re-walking the season, and reads the rows already in `game_summaries` in one batched query per run rather than one count query per game × team × locale. Existing preseason rows in `game_summaries` are left alone. Covered by `test_ai_summaries_scan.py`.
+
+**Recap context fixes (2026-10)** — periods are labeled P1–P3/OT/2OT/SO (`early_season.period_label`), and a regular-season shootout is never called overtime. Shootout attempts are kept out of period shots. A playoff series counts every game between the two teams in both arenas. Empty net is read from the scoring side (a 6-on-5 goal is "extra attacker", not "[en]"). Missing stats are left out rather than printed as None/Unknown. No prompt invents a "Player <id>" name: names come from the game's `rosterSpots`, then `players`, else the player is left out.
 
 **`ai_predictions.py` early in a season (2026-09)** — the pre-game context is built for the game's own season (from its game id, not `NHL_SEASON`), and preseason games get no prediction. Until 2026-09-29 the first week of every season got none either: `player_seasons` has no rows for a team until it plays, so the `min_gp=5` player filter left both teams empty and the game was skipped. Now, until a team has played 20 regular-season games, its player list is its **current live roster** (`/roster/{team}/current`) ranked on last season's regular-season stats, each labeled as last season's with the player's line so far this season, plus roster players with no NHL stats last season; a player who changed teams says so, and if the roster can't be fetched the list is last season's players on that team, flagged as unconfirmed. Zone starts (until 10 games) and team Corsi are blended per player/team with last season by games played, `(gp*this + k*last)/(gp+k)` with the same k values as the Worker's `/prediction/analyze` (10 shots/Corsi, 20 goals, 30 special teams; `early_season.py`), and labeled "early-season estimate". Recent form is this season's regular-season/playoff games only (preseason is never form); last season's record is shown while the team is early. A stat neither season has reads "not available" and the prompt tells the model not to cite it — nothing is filled in with 0 or a default. The matchup prompt uses the same player lists and the teams' lines from games of the game's own type (a playoff game gets playoff units). It labels units carried over from last season or, in the playoffs, from the regular season. A team yet to play a regular-season game has no lines of its own, so the prompt uses its projected lines from preseason games (`projected_lines`, basis `preseason`), labeled as a projection, not a confirmed lineup. Covered by `test_ai_predictions_early_season.py`.
 
@@ -645,11 +681,11 @@ Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_I
 
 **`ai_persona.py`** — `build_player_scouting_prompt()` now branches on `position == 'G'` to give goalies a tailored prompt.
 
-**`power_rankings.py`** — AI narratives now cached per-team in Worker KV using `narrative:{period}:{gameId}:{carAbbr}` key pattern so each team's perspective is independently cached.
+**`power_rankings.py`** — one EyeWall AI narrative per team per night, written with the ranking to `power_rankings_narratives` (no KV).
 
 **`ai_results_vs_process.py`** (Session 56, NHL only) — Generates "results vs. process" blurbs explaining *why* a player's on-ice goal results (`on_ice_gf_pct`) diverge from their underlying process (`ev_off_pct`), not just restating the two numbers. Pulls qualifying skaters (non-null `results_vs_process_diff` — moneypuck.py's GP≥25 guardrail is the only gate; this script never re-checks GP itself) via the new `get_results_vs_process_context()` in `ai_context.py`. Writes to a new `player_narratives` table rather than `player_scouting` — see that table's description below. Respects `--force`, `--missing`, `--dry-run`, `--team`, `--player` flags, same CLI shape as `ai_scouting.py`. Skater-only (MoneyPuck's on-ice GF/GA split doesn't exist for goalies).
 
-**`ai_persona.py`** — new `build_results_vs_process_prompt()`, dumps the player's on-ice GF%/process xGF%/diff and an explicit over/underperforming direction, with task instructions asking Sticks to explain the *why* (finishing luck, goaltending support, sustainability) rather than just restate the numbers.
+**`ai_persona.py`** — new `build_results_vs_process_prompt()`, dumps the player's on-ice GF%/process xGF%/diff and an explicit over/underperforming direction, with task instructions asking the EyeWall AI persona to explain the *why* (finishing luck, goaltending support, sustainability) rather than just restate the numbers.
 
 **`ai_line_chemistry.py`** (2026-07, all 32 teams) — Generates "line chemistry" blurbs explaining *why* an inferred line/D-pair performs the way it does: how its xGF% compares to the team's other units of the same type and to the league-wide average, and what its members' individual 5v5 process stats (`xgf_per60`, `xga_per60`, `goals_per60`, `pct_ev_off`, `pct_ev_def`) suggest is driving that gap. Pulls context via the new `get_line_chemistry_context()` in `ai_context.py`. Writes to `player_narratives` (`narrative_type='line_chemistry'`) — since that table is keyed one row per player, a unit's blurb is written identically to each of its 2-3 members' rows rather than once per unit. Respects `--force`, `--missing`, `--dry-run`, `--team` flags, same CLI shape as `ai_results_vs_process.py` (no `--player` mode — units aren't single-player-addressable the same way).
 
@@ -672,6 +708,8 @@ Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_I
 Fixed by removing team names from the prompt entirely for medium tier — the frontend conveys team identity via a logo (the row's own real `team` column), never via anything the model says. Full detail in the module's own docstring.
 
 **Real-value sourcing:** one stat category (`goals`/`assists`/`points`/`pp_goals`) applies globally per day, rotating by `question_date.toordinal() % 4` — simpler than per-scope rotation and thematically fine ("today everyone's answering a goals question, at different scopes"). A scope with fewer than 4 qualified players, or where the top 3 distractors can't be made value-distinct from the leader, fails closed (skipped, not guessed) rather than shipping an ambiguous question.
+
+**Early-season fallback (2026-09):** while the current NHL season can't fill a question (too few players at `NHL_MIN_GP` = 10 GP), `nhl_question_source()` uses last season's real numbers, worded from a template "in 2025–26" (the model wrote "this season" when asked to phrase it). The current season takes over once enough players qualify.
 
 ```bash
 python trivia_questions.py --sport nhl    # what nightly.yml calls — NHL only
@@ -703,16 +741,16 @@ pwhl = get_pwhl_season()  # {"season_id": 8, "season_type": "regular", "start_ye
 
 **PWHL-specific gotcha, found the hard way (2026-07):** `get_pwhl_season()` deliberately resolves to the most recent **regular** season, not just the most recent season of any type — because almost every `pwhl.js` Worker endpoint filters `season_type=eq.regular`, and resolving to a playoffs-type season_id (which briefly shipped and broke Cypress across every PWHL view) makes those queries return nothing at all. This means `PWHL_SEASON` is *not* the right value for everything, though — see the `fetch_roster()` note below.
 
-**KV override escape hatch:** if live resolution ever misjudges the real season boundary (most likely risk window: the real Sept/Oct transition, which has never been observed), it can be forced without a redeploy:
+**KV override escape hatch:** if live resolution ever misjudges the real season boundary (most likely risk window: the Sept/Oct transition), it can be forced without a redeploy:
 ```bash
 wrangler kv key put --binding=CACHE "config:season:nhl:override" '"20262027"'
-wrangler kv key put --binding=CACHE "config:season:pwhl:override" '{"seasonId":9,"seasonType":"regular","startYear":2026}'
+wrangler kv key put --binding=CACHE "config:season:pwhl:override" '{"seasonId":11,"seasonType":"regular","startYear":2026}'
 ```
 Delete the override key(s) once live resolution is confirmed correct again.
 
 ---
 
-
+## PWHL Pipeline Modules
 
 All PWHL modules use HockeyTech API (no authentication required) and write to `pwhl_*` Supabase tables.
 
@@ -778,15 +816,11 @@ Since 2026-10:
 Ingests PWHL PBP events (faceoffs, hits, penalties, goalie changes) from HockeyTech. Incremental by default — skips already-processed games.
 
 ```bash
-python pwhl_pbp_events.py          # Current season (defaults to PWHL_SEASON env or "8")
+python pwhl_pbp_events.py          # Current season (live-resolved via season_lookup; PWHL_SEASON env only if the Worker is unreachable)
 python pwhl_pbp_events.py 9        # Specific season
 python pwhl_pbp_events.py --force  # Re-ingest all games
 python pwhl_pbp_events.py --game 338  # Single game (debug)
 ```
-
-**Important:** `PWHL_SEASON` env var must be non-empty or script defaults to `"8"`. If the GH Actions secret is empty, the default applies correctly via `.strip() or "8"`.
-
-**Not yet part of live season resolution (as of 2026-07):** unlike `pwhl_stats.py`/`pwhl_salaries.py`/`db.py`, this file wasn't touched during the season-resolution rollout — it likely still reads `PWHL_SEASON` directly rather than via `season_lookup.get_pwhl_season()`. Worth checking before assuming it picks up the live-resolved season automatically.
 
 ### `pwhl_shot_events.py`
 Ingests PWHL shot coordinates from HockeyTech PBP. Writes to `pwhl_shot_events` with `x_norm`, `y_norm`, `event_type`, `shooter_id`, `team_id`, `period_id`, `time_seconds`.
@@ -932,14 +966,18 @@ python pwhl_goalie_percentiles.py 8           # specific season_id
 | ID | Season | Type |
 |----|--------|------|
 | 1 | 2023-24 | Regular |
+| 2 | 2023 | Showcase (9 games, Dec 4–7) |
 | 3 | 2023-24 | Playoffs |
+| 4 | 2024-25 | Pre-Season |
 | 5 | 2024-25 | Regular |
 | 6 | 2024-25 | Playoffs |
+| 7 | 2025-26 | Pre-Season |
 | 8 | 2025-26 | Regular |
 | 9 | 2025-26 | Playoffs |
-| 10 | 2026-27 | Pre-Season (current as of 2026-07; `hide_in_standings: true`, no games yet) |
+| 10 | 2026-27 | Pre-Season (Nov 22–30) |
+| 11 | 2026-27 | Regular (opens Dec 5; the Worker makes it current around Nov 20) |
 
-IDs 2, 4, 7 are real preseason entries in HockeyTech's own `bootstrap` response (confirmed 2026-07 — they're not missing/gapped as this table previously assumed), just hidden from standings and with little-to-no game data.
+Preseason ids are hidden from standings; types are in `season_lookup.PWHL_SEASON_TYPE_MAP`.
 
 **Discrepancy, now resolved (2026-09):** the PWHL season-type map (`pwhl_stats.py`'s `SEASON_TYPE_MAP` then; `season_lookup.PWHL_SEASON_TYPE_MAP` since 2026-10) labels ID `2` as `"showcase"` (comment: "2024 Showcase, 9 games, pre-launch tournament"), while the `bootstrap` response (confirmed 2026-07-05) names it `"2024 Preseason"`. `SEASON_TYPE_MAP` is right, per the season's own game data: `pwhl_game_log` has exactly 9 games for season 2, all played across four days, 2023-12-04 to 2023-12-07 — three and a half weeks before the inaugural regular season (ID 1) opened on 2024-01-01 — with all six teams playing 3 apiece. That's the pre-launch showcase slate, not a preseason warm-up to it. Left labeled `"showcase"`.
 
@@ -954,30 +992,35 @@ The PWHL currently has no equivalent to MoneyPuck WAR/RAPM. Building it requires
 ### What we have
 - ✅ `pwhl_shot_events` — coordinates, event_type, shooter_id, team_id, game_id, period, time (~6,000+ shots/season)
 - ✅ `pwhl_pbp_events` — faceoffs, hits, penalties, goalie changes
-- ✅ 3 seasons of data (2023-24, 2024-25, 2025-26)
+- ✅ Per-game skater/goalie box scores, `pwhl_goal_on_ice` (on-ice skaters per goal), penalty shots
+- ✅ Shot-location xG proxy (`pwhl_shot_xg.py`) + skater/goalie percentiles
+- ✅ Elo win probabilities, playoff odds, power rankings (`hockeytech_elo.py` / `hockeytech_playoff_odds.py` / `hockeytech_power_rankings.py`)
+- ✅ 3 completed seasons of data (2023-24, 2024-25, 2025-26); 2026-27 (season 11) opens Dec 5
 
 ### Build plan
 
 **Step 1 — PWHL xG model** (`pwhl_xg.py`)
 Train logistic regression on `pwhl_shot_events`: distance + angle → goal probability. Store per-shot xG in new `xg` column on `pwhl_shot_events`. ~6,000 shots/season is sufficient for a basic model.
+**Status:** built instead as a distance-bucket proxy (`pwhl_shot_xg.py`, calibrated 2026-08/09; no per-shot `xg` column). A fitted distance+angle model is still open.
 
 **Step 2 — Shift data** (`pwhl_shift_data.py`)
-HockeyTech PBP confirmed to have NO `player_change` events across all 3 seasons (checked June 2026). Cannot derive shift intervals from existing data. PWHL WAR/RAPM blocked until season 4 data becomes available in October 2026 — HockeyTech may add shift events for the expanded league.
+HockeyTech PBP confirmed to have NO `player_change` events across all 3 seasons (checked June 2026), so shift intervals can't be derived from PBP. But `modulekit&view=gameshifts` returned populated shifts for a PWHL control game during the 2026-08 AHL/ECHL investigation (see [Known Limitations](#known-limitations)). Nothing ingests that view yet; check its coverage across PWHL seasons before scoping shift-based RAPM.
 
 **Correction (Session 42):** `pwhl_goal_on_ice` (goal-level on-ice rosters, see above) does **not** change this calculus, despite being "independent of the shift-derivation approach" in a narrow sense. It's goal-scoped, not continuous — it only captures on-ice composition at the instant of a goal, and goals are rare relative to total ice time, so it's far too coarse/sparse a signal to substitute for real shift intervals. Don't treat it as a lighter-weight WAR/RAPM path.
 
 **Alternative:** Use lineup-based approach — derive approximate on-ice time from faceoff events + penalties from `pwhl_pbp_events`. Less accurate but buildable from existing data.
 
 **Step 3 — Zone starts** (`pwhl_zone_starts.py`)
-Count OZ/DZ/NZ faceoffs per player from `pwhl_pbp_events`.
+Count OZ/DZ/NZ faceoffs per player from `pwhl_pbp_events`. Not started (needs shifts).
 
 **Step 4 — RAPM** (`pwhl_rapm.py`)
-Ridge regression marginal xG/60 at 5v5. Mirror `rapm.py`. Needs shift data from Step 2.
+Ridge regression marginal xG/60 at 5v5. Mirror `rapm.py`. Needs shift data from Step 2. Not started.
 
 **Step 5 — Surface in UI**
 Add Analytics tab to `PWHLPlayerPopup`. Show CF%, FF%, xGF%, Corsi rank. Near-term alternative: surface team-level Corsi/Fenwick rankings (already in `pwhl_team_seasons`) as a League Analytics view.
+**Status:** partly done: player percentiles feed the player popup; team Corsi/Fenwick feeds the League view and PWHL power rankings.
 
-**Estimated effort:** 3-4 sessions. Recommend October 2026 when new season data starts accumulating.
+**Estimated effort:** 3-4 sessions.
 
 ---
 
@@ -1121,9 +1164,9 @@ python hockeytech_milestones.py echl --game 24296        # single game (debug)
 | 46 | 2004-05 | Regular | Earliest cleanly-listed season |
 | 90 | 2025-26 | Regular | Most recent completed regular season |
 | 92 | 2026 | Calder Cup Playoffs | 24 games, Apr-Jun 2026 |
-| 94 | 2026-27 | Regular | Starts 2026-10-02, zero games as of this writing |
+| 94 | 2026-27 | Regular | Current (opened 2026-10-02) |
 
-Confirmed live via `feed=modulekit&view=seasons`, 2026-08-29 — season_id is NOT sequential-by-year the way it might look (seasons back to 2004-05 exist). Always resolve current from the live feed (`ahl_stats.py`'s `resolve_current_season()`), never hardcode a "current" value here.
+Confirmed live via `feed=modulekit&view=seasons`, 2026-08-29 — season_id is NOT sequential-by-year the way it might look (seasons back to 2004-05 exist). Never hardcode a "current" value here: it comes from the Worker's `/config/seasons` (`season_lookup.get_hockeytech_season()`), which `hockeytech_stats.resolve_current_season()` reads.
 
 ---
 
@@ -1134,7 +1177,7 @@ All ECHL modules use the same HockeyTech/LeagueStat vendor as AHL/PWHL (confirme
 **One real operational difference from AHL/PWHL/OHL/WHL/QMJHL, worth remembering if this key ever breaks:** ECHL's HockeyTech key is NOT exposed on echl.com's own site — the site was rebuilt on Laravel/Livewire and renders stats server-side, so the "open the network tab" recovery path AHL/PWHL use doesn't work here. This key was recovered from `sportsdataverse-py`'s league registry (`sportsdataverse/hockeytech/_leagues.py`) and independently re-verified live against the real feed. If it ever stops working, re-check that registry first — a network-tab hunt on echl.com will not work, for the same reason it didn't during the original investigation.
 
 ### `echl_stats.py`
-Fetches rosters, skater/goalie/team stats, and game log. Same season-resolution pattern as `ahl_stats.py` (live-resolves from HockeyTech's own `seasons` feed, `ECHL_SEASON` env var fallback, "most recent started `career=1` season" logic, not simply max `season_id`).
+Fetches rosters, skater/goalie/team stats, and game log. Same season resolution as `ahl_stats.py` (the Worker's `/config/seasons`, then `ECHL_SEASON`, then 73; the Worker picks the most recent started `career=1` season, not simply max `season_id`), and the same nightly upcoming-season game log (78, 2026-27).
 
 ```bash
 python echl_stats.py                  # current season (live-resolved)
@@ -1198,7 +1241,7 @@ python echl_news.py
 | 75 | 2026 | All-Star | |
 | 76 | 2026 | Kelly Cup Playoffs | |
 | 77 | 2026 | Preseason | |
-| 78 | 2026-27 | Regular | Not started as of this writing |
+| 78 | 2026-27 | Regular | Game log ingested nightly ahead of the opener |
 
 Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-season label convention is `"{year} Kelly Cup Playoffs"` — a real, different format from AHL's bare `"{year} Playoffs"` string (checked directly against `echl.com` rather than assumed to transfer from AHL, a recurring lesson across every league addition in this system).
 
@@ -1236,6 +1279,12 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `trade_assets` | (2026-09) Every player / pick / consideration in each trade, picks resolved to the drafted player, `next_trade_id` linking to where it went next — see `trade_trees.py` above |
 | `playoff_odds` | (2026-09) Simulated playoff/division odds and projected points, one row per `(season, run_date, team)`, with a `change` explanation — see `playoff_odds.py` above |
 | `playoff_odds_game_impacts` | (2026-09) Each team's playoff odds under each result of the next game-day's games (that game flipped in the same simulated seasons), one row per `(season, run_date, game_id, outcome, team)` — see `playoff_odds.py` above |
+| `team_elo_ratings` | (2026-09) NHL Elo per team, full nightly replay — `elo_ratings.py` |
+| `game_win_probs` | (2026-09) Pre-game Elo win probability per game, today's/tomorrow's games — `win_probs.py` |
+| `prediction_scorecard` | (2026-09) Live + backtest grades, one row per model × kind × period — `prediction_scorecard.py` |
+| `goalie_game_starts` / `goalie_start_probs` | (2026-09) Who started / probability each candidate starts the next game — `goalie_starts.py` / `starting_goalie.py` |
+| `injury_games_lost` / `team_injury_impact` | (2026-09) Man-games and WAR lost — `injury_impact.py` |
+| `projected_lines` | (2026-09) Next-game projected lines, replaced each run — `projected_lines.py` |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
@@ -1257,13 +1306,14 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `pwhl_penalty_shots` | (Session 42) Penalty shots (makes + misses), no coordinates: game_id, season_id, team_id, player_id (shooter), goalie_id, period_id, time_seconds, is_goal. Sourced from `gameSummary.penaltyShots`, not PBP |
 | `pwhl_goal_on_ice` | (Session 42) On-ice skater roster per goal, one row per (game_goal_id, player_id): team_id, on_ice_for, is_power_play/is_short_handed/is_empty_net/is_penalty_shot. Sourced from `gameSummary`'s `plus_players[]`/`minus_players[]` |
 | `pwhl_salaries` | Player salary data from PWHLPA PDF (first_name, last_name, player_id, team_id, salary, season) |
-| `pwhl_game_summaries` | AI post-game summaries (PWHL) |
-| `pwhl_game_predictions` | AI pre-game predictions (PWHL) |
-| `pwhl_player_scouting` | AI scouting blurbs (PWHL) |
-| `pwhl_power_rankings_narratives` | PWHL nightly power rankings + AI narrative history |
+| `pwhl_game_summaries` | AI post-game summaries (PWHL) (no current writer in this repo or the Worker — legacy/empty) |
+| `pwhl_game_predictions` | AI pre-game predictions (PWHL) (no current writer in this repo or the Worker — legacy/empty) |
+| `pwhl_player_scouting` | AI scouting blurbs (PWHL) (no current writer in this repo or the Worker — legacy/empty) |
+| `pwhl_power_rankings_narratives` | PWHL power rankings + AI narrative history, written by `hockeytech_power_rankings.py --narratives` since 2026-10, alongside `pwhl_power_rankings` |
+| `pwhl_team_elo_ratings` / `pwhl_game_win_probs` / `pwhl_playoff_odds` / `pwhl_power_rankings` | (2026-09/10) Same shape as the AHL tables — `hockeytech_elo.py` / `hockeytech_playoff_odds.py` / `hockeytech_power_rankings.py` |
 | `pwhl_seasons` | PWHL season metadata |
-| `pwhl_teams` | PWHL team master. **`pwhl_players.team_id` has a foreign key constraint against this table** — a new team_id (e.g. an expansion team) must be seeded here first, or `fetch_roster()`'s upsert fails with a `23503` FK violation. Not automated; see `seed_expansion_teams.py` pattern from the 2026-07 expansion backfill if this comes up again. |
-| `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; WAR blocked until Oct 2026) |
+| `pwhl_teams` | PWHL team master. **`pwhl_players.team_id` has a foreign key constraint against this table** — a new team_id (e.g. an expansion team) must be seeded here first, or `fetch_roster()`'s upsert fails with a `23503` FK violation. Not automated: insert the `pwhl_teams` row by hand (SQL editor) before the first roster fetch for a new team_id. |
+| `pwhl_shift_events` | PWHL shift events (sparse — no player_change in HockeyTech PBP; see [Known Limitations](#known-limitations)) (no current writer in this repo or the Worker — legacy/empty) |
 | `pwhl_skipped_games` | Games skipped per PWHL pipeline module |
 
 ### AHL Tables
@@ -1282,6 +1332,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `ahl_player_xg` | (2026-10) Shot-location xG proxy per (player, team, season): attempts, goals, `xg_for`, `finishing` — `hockeytech_shot_xg.py` |
 | `ahl_player_percentiles` | (2026-10) Skater percentiles per game played (`pct_goals`/`pct_a1`/`pct_penalties`/`pct_finishing`, `rate_basis_per_gp`) — `hockeytech_percentiles.py` |
 | `ahl_goalie_percentiles` | (2026-10) Goalie GSAx, HD/MD SV% and percentiles per game played — `hockeytech_goalie_percentiles.py` |
+| `ahl_team_elo_ratings` / `ahl_game_win_probs` / `ahl_playoff_odds` / `ahl_power_rankings` / `ahl_power_rankings_narratives` | (2026-09/10) Elo ratings, pre-game win probabilities, playoff odds, power rankings and EyeWall AI narratives — `hockeytech_elo.py` / `hockeytech_playoff_odds.py` / `hockeytech_power_rankings.py` (PWHL and ECHL have the same five) |
 | `ahl_skipped_games` | Games skipped per AHL pipeline module (mirrors `pwhl_skipped_games`) |
 
 ### ECHL Tables
@@ -1298,15 +1349,19 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `echl_skater_game_box` | Same shape as `ahl_skater_game_box`, same confirmed hits/faceoff/TOI-always-zero gap |
 | `echl_goalie_game_box` | Same shape as `ahl_goalie_game_box` |
 | `echl_player_xg` / `echl_player_percentiles` / `echl_goalie_percentiles` | (2026-10) Same shape as the AHL tables |
+| `echl_team_elo_ratings` / `echl_game_win_probs` / `echl_playoff_odds` / `echl_power_rankings` / `echl_power_rankings_narratives` | (2026-09/10) Same shape as the AHL tables |
 | `echl_skipped_games` | Games skipped per ECHL pipeline module |
 
-### Shared Tables (both leagues, one table)
+### Shared Tables (all leagues, one table)
 
 | Table | Description |
 |-------|-------------|
+| `milestones` | Every league's milestones; NHL/PWHL by `is_pwhl`, AHL/ECHL by `sport` + `season` (`docs/2026-10-07_milestones_sport.sql`) |
+| `social_posts` | One row per platform per post (`platform, post_key`); a post already published to a platform is never re-published |
+| `social_post_facts` | Cherry Picked facts already posted, for the 28-day rotation — `cherry_picked.py` |
 | `trivia_questions` | (Session 92) Daily trivia — one row per `(question_date, tier, sport, team)`, `team` defaults to `'ALL'` for easy/hard so the unique constraint enforces one question per exact scope per day. Public-read, no owner (same RLS posture as `player_narratives`) — see [Daily Trivia](#daily-trivia). `tier='easy'`/`'medium'` written nightly by `trivia_questions.py`; `tier='hard'` is hand-inserted directly in the Supabase SQL editor. |
 | `trivia_answers` | (Session 92) Signed-in users' trivia answers — `auth.uid()`-scoped RLS, same posture as `user_preferences` below. **Not written by this pipeline** — the frontend writes directly via the Supabase JS client (the one deliberate exception to "the frontend never talks to Supabase directly," same as `user_preferences`). Documented here because its DDL lives in this repo's `docs/` folder alongside every other schema reference. |
-| `user_preferences` | (Session 90-91) One row per signed-in user — `favorite_team`/`favorite_sport`, synced from the frontend's Settings. **Not written by this pipeline** — same Supabase-Auth-direct exception as `trivia_answers` above. DDL: `docs/session90_user_preferences_table.sql` + `docs/session91_favorite_sport_column.sql` (`favorite_sport` widened to the AHL/ECHL by `docs/favorite_sport_all_leagues.sql`). |
+| `user_preferences` | (Session 90-91) One row per signed-in user — `favorite_team`/`favorite_sport`, `followed_teams`, `preferred_locale`, synced from the frontend's Settings. **Not written by this pipeline** — same Supabase-Auth-direct exception as `trivia_answers` above. DDL: `docs/session90_user_preferences_table.sql` + `docs/session91_favorite_sport_column.sql` (`favorite_sport` widened to the AHL/ECHL by `docs/favorite_sport_all_leagues.sql`), `docs/followed_teams_column.sql`, `docs/session101_preferred_locale_column.sql`; account deletion RPC: `docs/delete_own_account_rpc.sql`. |
 
 ---
 
@@ -1318,7 +1373,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `pwhl-nightly.yml` | Worker dispatch 07:20 UTC; cron fallback | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia, power rankings, Elo, playoff odds, upcoming schedules (order below). `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow. `workflow_dispatch` accepts an optional `season_id` (2026-10), passed to every per-season step, so a playoff round can be backfilled from GitHub (`gh workflow run pwhl-nightly.yml -f season_id=<id>`) |
 | `ahl-nightly.yml` | Worker dispatch 07:40 UTC; cron fallback | AHL news, stats/rosters/standings, per-game box scores, goal on-ice, shot events, penalty shots, xG + percentiles, Elo, playoff odds, milestones, trivia, power rankings (order below). `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
 | `echl-nightly.yml` | Worker dispatch 08:00 UTC; cron fallback | Same step order and `season_id` input as `ahl-nightly.yml` (order below) |
-| `moneypuck-ingest.yml` | Worker dispatch 10:00 UTC; cron fallback | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
+| `moneypuck-ingest.yml` | Worker dispatch 10:00 UTC; cron fallback | MoneyPuck CSV fetch via GH runner (CF IPs blocked). Separate from `moneypuck.py`'s own fetch — feeds `eyewall-poller`'s `moneypuck:raw`/`moneypuck:skaters:{abbr}` KV cache, not Supabase. Tries a hardcoded `PRIMARY_YEAR`, falls back to `PRIMARY_YEAR - 1` on a non-200 (2026-07-20 fix — the primary year had been bumped ahead of MoneyPuck actually publishing that season, with no fallback, breaking the ingest for 4 days), or on a 200 with only the header row (2026-09-28). Safe to bump `PRIMARY_YEAR` early each summer now; it just serves last season's data until MoneyPuck catches up. |
 | `ai_pipeline.yml` | Worker dispatch 14:00 UTC; cron fallback | Morning job: `ai_predictions.py`. A bare dispatch (the Worker's) runs the morning job only (`job` input defaults to `morning`). The night job (summaries, scouting, results-vs-process) has no schedule, since `run.py` already runs those every night; run it by hand with `-f job=night` or `-f job=all` |
 | `live-score-refresh.yml` | Manual only (2026-10) | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py`. The Worker now writes live state and finals to `{league}_game_log` itself (see `ahl_live_refresh.py` above); this is a manual backfill for a game it missed. Its old `*/5` cron fired every 3–10 hours in practice |
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
@@ -1328,7 +1383,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `draft-ingest.yml` | Jun 26 + Jun 27 | Live NHL draft pick polling loop |
 | `ci.yml` | Every PR | Ruff check + format check + pytest; `pip-audit -r requirements.txt` (runtime dependencies only, fails on any known advisory); `dependency-review` job (PRs only) fails a PR whose added or changed dependencies, actions included, carry a high or critical advisory |
 
-Every action is pinned to a full commit SHA with its version in a comment (`uses: actions/checkout@<sha> # v7.0.1`); Dependabot's `github-actions` entry in `.github/dependabot.yml` opens the weekly bump PRs. Workflow inputs, step outputs and secrets reach `run:` scripts through `env:` (`"$SEASON_ID"`, `$POLL_SECRET`), never as `${{ }}` inside the script, so a value can't be read as shell. Logs of this public repo are public: don't echo API responses that list account resources (`draft-ingest.yml` prints only whether its KV namespace lookup worked).
+Every action is pinned to a full commit SHA with its version in a comment (`uses: actions/checkout@<sha> # v7.0.1`); Dependabot's `github-actions` entry in `.github/dependabot.yml` opens the weekly bump PRs. Workflow inputs, step outputs and secrets reach `run:` scripts through `env:` (`"$SEASON_ID"`, `$POLL_SECRET`), never as `${{ }}` inside the script, so a value can't be read as shell. Every workflow declares a top-level `permissions:` block for `GITHUB_TOKEN` (`contents: read`, plus `actions: read` in the six that need it; #226). Logs of this public repo are public: don't echo API responses that list account resources (`draft-ingest.yml` prints only whether its KV namespace lookup worked).
 
 ### HockeyTech nightly step order (AHL / ECHL / PWHL)
 
@@ -1404,17 +1459,17 @@ Every writer workflow has `concurrency: { group: <workflow>, cancel-in-progress:
 7. **New for future expansion waves:** if HockeyTech assigns a new team_id mid-cycle again, remember the `fetch_roster()` season-mismatch gotcha above — roster data needs the literal current/preseason season_id, not `PWHL_SEASON`, and `pwhl_teams` needs the new team_id seeded before `fetch_roster()` can succeed at all (FK constraint). Also bust the Worker's KV cache for the new team+season combos *after* confirming the backfill actually succeeded, not before — busting first just repopulates the same stale/empty entry if the data isn't there yet.
 
 ### AHL / ECHL
-Neither league is wired into `season_lookup.py`'s live Worker-based season resolution — each pipeline resolves its own current season directly from HockeyTech's `seasons` feed (`ahl_stats.py`/`echl_stats.py`'s own `resolve_current_season()`). No manual `AHL_SEASON`/`ECHL_SEASON` secret update is needed for the normal case — both are fallback-only, same as `NHL_SEASON`/`PWHL_SEASON` — but a manual `workflow_dispatch -f season_id=<id>` backfill is still needed to ingest a specific season the live resolver wouldn't pick on its own (e.g. the most recently COMPLETED regular season, once the live resolver has moved on to that season's playoffs or the next regular season) — see `ahl_stats.py`'s "2025-26 regular season never ingested" writeup above for why this matters in practice, not just in theory. AHL's 2026-27 regular season starts 2026-10-02; ECHL's 2026-27 regular season (season_id 78) also had not started as of this writing. No salary source, no shift/Corsi/WAR data exists for either league — see [Known Limitations](#known-limitations).
+Both leagues resolve through the Worker (`season_lookup.get_hockeytech_season()` / `get_hockeytech_seasons()`); `AHL_SEASON`/`ECHL_SEASON` are fallback-only, same as `NHL_SEASON`/`PWHL_SEASON`. The nightly run also writes the next regular season's game log (`--upcoming-game-logs`, 2026-10). A `workflow_dispatch -f season_id=<id>` backfill is still needed for a season the resolver has moved past (e.g. a just-finished regular season once playoffs are current) — see `ahl_stats.py`'s "2025-26 regular season never ingested" writeup above for why this matters in practice. AHL 2026-27 (94) opened 2026-10-02; ECHL 2026-27 is season 78. No salary source, no shift/Corsi/WAR data for either league — see [Known Limitations](#known-limitations).
 
 ---
 
 ## RAPM Methodology
 
 True RAPM via ridge regression (alpha=2500):
-- **Pool:** 3-year rolling window (~420k 5v5 shot attempts, all 32 teams)
+- **Pool:** 3-year rolling window (~420k 5v5 shot attempts, all 32 teams), regular-season games only (playoff RAPM is a separate fit, 60-minute floor, shrunk toward the regular season)
 - **Formulation:** Signed xG differential; zone-start adjusted
 - **Minimum sample:** 150 min EV ice time
-- **Validation:** r ≥ 0.85 vs Evolving Hockey; YoY stability r=0.90
+- **Validation:** r ≥ 0.85 vs Evolving Hockey; YoY stability r=0.90 (measured before the #168 sign fix — re-run `validate_rapm.py` and update)
 
 **Known limitations:**
 - Draisaitl/Makar rank anomalously low due to dominant linemate collinearity — documented artifact
@@ -1426,12 +1481,10 @@ True RAPM via ridge regression (alpha=2500):
 
 - **PWHL news:** CF datacenter IPs blocked by some RSS sources; `pwhl_news.py` (GH Actions) fetches successfully every night. Session: news ingestion investigation found the real gap wasn't the sources — `/pwhl/news/ingest`'s KV write used a 30min TTL for a once-nightly job, so the real articles it found were only ever visible for 30 minutes a day. Fixed to 25hr, and the Worker's own on-demand `fetchPWHLNews()` now merges with (rather than overwrites) whatever this nightly job already wrote. Also swapped the broken `espn-pwhl` source (ESPN has no working hockey/PWHL RSS category at all) for The Athletic's dedicated women's-hockey feed.
 - **PWHL Corsi/Fenwick:** No missed shots in HockeyTech — FF% is SOG-based proxy only.
-- **`nhl_stats.py` fragile loop:** `for game_type in [2, 3]` body references `game_type` as if a parameter — works via Python scoping but fragile. Fix before next major pipeline work.
-- **UTA missing from `team_seasons`:** Excluded from power rankings until their row appears.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
-- **Transactions/Injuries:** No reliable free NHL API. Deferred pending PuckPedia.
+- **Transactions/Injuries:** the NHL API has neither; both come from ESPN's unofficial site API (`injuries.py`, `transactions.py`), which has no player ids (name matching), can carry stale injury entries, and blocks custom User-Agents. See those modules above.
 - **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Re-confirmed live (Session: news ingestion investigation) with a real GH Actions runner — still a 403 bot-block page. The per-team `TEAM_NEWS_SOURCES` reddit-* entries and the now-permanently-no-op `/reddit/ingest` route (both in `eyewall-poller`) were removed in the same session; 25 teams had reddit as their *only* team-specific source, and 21 of those 25 got a real replacement blog instead (see `sbnation-ingest.yml`'s comment for the list). MIN/STL/SEA/UTA still have no team-specific blog source at all (28 of 32 teams now do). Revisit Reddit only if a workaround surfaces; not planned for October 2026.
-- **PWHL WAR/RAPM:** Blocked — HockeyTech PBP has no `player_change` shift events across all 3 seasons (confirmed June 2026). Revisit October 2026.
+- **PWHL WAR/RAPM:** not built. HockeyTech PBP has no `player_change` events (checked June 2026), but `modulekit&view=gameshifts` returned populated shifts for a PWHL control game during the 2026-08 AHL/ECHL investigation (next bullet). Nothing ingests that view yet; check its coverage across PWHL seasons before scoping shift-based RAPM.
 - **AHL/ECHL WAR/RAPM/Corsi: not buildable, a harder wall than PWHL's own shift-data gap, no revisit date set.** Confirmed live (2026-08-28/29: 4 AHL games across 3 seasons including the 2025 Calder Cup Finals G5, and 5 ECHL games) that `modulekit&view=gameshifts` returns `{"home":[],"visitor":[]}` for every real game tested — verified against a real PWHL control game (which DOES return populated shifts through the identical request shape), so this isn't a request-shape mistake on this pipeline's part. AHL/ECHL's PBP also has no `hit`/`blocked_shot`/`faceoff` event types at all (only `goal`/`shot`/`penalty`/`goalie_change`/`penaltyshot` confirmed present across 16+ games each) — the box-score schema even carries `faceoff_wins`/`faceoff_attempts`/`hits` fields per player, but they're hardcoded `"0"` in every game checked for both leagues, confirming it's genuinely not charted, not a PBP-only omission. Consequence: not even attempts-based Corsi/Fenwick is computable for either league, only shots-on-goal + goals — parity with a plain box score, not an advanced stat. Unlike PWHL's shift gap, there's no known future HockeyTech data source that would unblock this, so no revisit date is set.
 - **No AHL/ECHL salary data source exists anywhere** — no PWHLPA-equivalent salary guide has been found for either league.
 - **AHL/ECHL `_modulekit_get()` JSONP-unwrap bug ("the roster-fetch mystery"), RESOLVED 2026-08-30:** the unwrap logic treated the first `"("` anywhere in a `modulekit` response as a JSONP wrapper's open-paren and the last `")"` as its close, but `modulekit/roster` responses are plain JSON and routinely contain literal parentheses in real field values (e.g. a `draft_status` string like `"Prince George Cougars (WHL) (College) 2019"`), corrupting otherwise-valid JSON. Silently broke ~23 of 32 AHL teams' roster fetches per nightly run for weeks; three earlier diagnostic PRs (#91/#92/#93) each guessed the wrong failure shape before this was found while building `echl_stats.py`. Fixed in both `ahl_stats.py` and `echl_stats.py` by only stripping parens when the response actually starts/ends with them (PR #98). See `ahl_stats.py`'s README writeup above for the full history.
@@ -1441,7 +1494,8 @@ True RAPM via ridge regression (alpha=2500):
 - ~~`pwhl_milestones.py` undocumented~~ — resolved 2026-08-13: both `milestones.py` (NHL) and `pwhl_milestones.py` (PWHL) now have their own README sections. Same session found and fixed a real bug this gap likely helped hide: PWHL wrote shorthanded goals as `milestone_type: "shorthanded_goal"` while NHL wrote `"sh_goal"` — the one unintentional divergence out of every shared milestone type — which silently broke the frontend's icon/label lookup and detail-line rendering for every PWHL shorthanded goal. Also added current-season filtering to the Worker's `/milestones` and `/milestones/latest` routes (see `eyewall-poller`'s README) after a stale prior-season milestone sat as the *only* NHL row in the table for over a month with nothing newer to push it off.
 - **Cache-busting order matters (learned 2026-07):** busting the Worker's KV cache *before* confirming the underlying data fix has actually landed just repopulates the same stale/empty entry on the next request. Always confirm the data is correct first (direct Supabase query, or hit the Worker endpoint with a fresh/never-cached key), then bust. This bit us twice during the expansion-team rollout — once for the season-resolution fix, once for the roster backfill.
 - **HockeyTech `bootstrap` feed type:** it's `feed=statviewfeed`, not `feed=modulekit` — the latter returns a 200 OK with no real payload (`{"SiteKit":{"Undefined":"Undefined Tab bootstrap"}}`), which silently masqueraded as a fallback-triggering failure for a while before being caught. If a URL for this endpoint looks like it's built from a written description rather than a captured real request, verify it against actual DevTools traffic before trusting it.
-- **One-off scripts in this repo:** `seed_expansion_teams.py` and `diagnose_roster_fetch.py` were one-time tools for the 2026-07 expansion backfill — safe to delete once no longer needed, not part of the regular pipeline. `test_season_lookup.py` is a real, permanent pytest suite — keep it. `backfill_pp_stats.py` (thin driver around `nhl_stats.enrich_game_log(..., force_all=True)`, kept as the reusable pattern for re-running the PP/PK enrichment against an arbitrary past season) and `diagnose_narrative_impact.py`/`regenerate_affected_narratives.py` (one-time tools for the 2026-07 PP-goals-bug narrative regeneration — the latter reads `narrative_impact_result.json`, a scratch data file from the former, not checked in) were built for that same session — safe to delete once no longer needed.
+- **Supabase caps a read at 1,000 rows silently;** page any multi-row read with `pipeline_common.select_all()`.
+- **One-off scripts in this repo:** `test_season_lookup.py` is a real, permanent pytest suite — keep it. `backfill_pp_stats.py` (thin driver around `nhl_stats.enrich_game_log(..., force_all=True)`, kept as the reusable pattern for re-running the PP/PK enrichment against an arbitrary past season) and `diagnose_narrative_impact.py`/`regenerate_affected_narratives.py` (one-time tools for the 2026-07 PP-goals-bug narrative regeneration — the latter reads `narrative_impact_result.json`, a scratch data file from the former, not checked in) were built in 2026-07 — safe to delete once no longer needed.
 
 ---
 
