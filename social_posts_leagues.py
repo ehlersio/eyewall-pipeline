@@ -24,6 +24,13 @@ that's already published). The posts:
                 confident hit and miss, and the week's top scorer. A
                 league with no graded games (not started yet) is left off;
                 with neither, nothing posts
+  pwhl-rankings Mondays: the PWHL's power rankings (hockeytech_power_
+                rankings.py's pwhl_power_rankings) with each team's record
+                and movement vs. the latest ranking a week or more earlier
+  minor-rankings Mondays: the same for the AHL and ECHL, each league's
+                slides in turn (two each). A league not ranked yet (every
+                team needs MIN_GAMES_TO_RANK games) is left off; with
+                neither, nothing posts
 
 Same rules as social_posts.py: neutral probability language only, the AI
 is never named, a genuinely empty day exits 0 and missing/stale data exits
@@ -33,18 +40,20 @@ Usage:
   python social_posts_leagues.py pwhl-winners --dry-run
   python social_posts_leagues.py minor-winners --dry-run
   python social_posts_leagues.py minor-recap --date 2026-10-21 --dry-run
+  python social_posts_leagues.py minor-rankings --date 2026-10-26 --dry-run
 
 Schedule: .github/workflows/social-posts.yml.
 """
 
 import argparse
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import social_posts as sp
 from db import get_client
 from hockeytech_elo import PWHL, fetch_schedule, league_seasons, replay_seasons
 from hockeytech_leagues import AHL, ECHL
+from hockeytech_power_rankings import load_team_rows
 from pipeline_common import select_all
 from season_lookup import get_pwhl_season
 
@@ -99,7 +108,18 @@ HASHTAGS = {
     "pwhl-leaders": "#PWHL #WomensHockey #PWHLStats #HockeyAnalytics",
     "minor-winners": "#AHL #ECHL #HockeyAnalytics #Hockey",
     "minor-recap": "#AHL #ECHL #HockeyAnalytics #Hockey",
+    "pwhl-rankings": "#PWHL #WomensHockey #PowerRankings #HockeyAnalytics",
+    "minor-rankings": "#AHL #ECHL #PowerRankings #HockeyAnalytics",
 }
+RANKINGS_NOTES = {
+    "pwhl": "Points, form, goal diff, Corsi, special teams",
+    "ahl": "Points, form, goal diff, special teams",
+    "echl": "Points, form, goal diff, special teams",
+}
+RANKINGS_PER_SLIDE = 16
+# A league's latest ranking is this week's while it's at most this many
+# days old (league_rankings).
+RANKING_MAX_AGE_DAYS = 6
 MINOR_LEAGUES = (("ahl", AHL), ("echl", ECHL))
 PWHL_NOTE = "Regular season · stats: PWHL"
 PWHL_XG_NOTE = "Expected goals: EyeWall's PWHL xG model"
@@ -749,12 +769,194 @@ def post_minor_recap(client, today, dry_run):
     )
 
 
+# ── Weekly power rankings: PWHL; AHL + ECHL ────────────────────────────
+
+
+def league_rankings(client, key, league, today):
+    """One league's latest power rankings (hockeytech_power_rankings.py) in
+    social_posts.ranking_movement's shape -- team codes, each row's record
+    as its "detail" -- with movement vs. the latest ranking 7+ days before
+    it. [] when the league has no ranking from the last RANKING_MAX_AGE_DAYS
+    days (not every team has MIN_GAMES_TO_RANK games yet, or a long break):
+    left off, not an error. None when the numbers aren't usable yet -- games
+    played since the latest ranking but no ranking for today, or a ranking that doesn't cover every team in the
+    season -- so the caller exits 1 and the backup run retries.
+
+    The nightly re-ranks only after games, so a league that hasn't played
+    since its latest ranking (a few days off) keeps it, and that ranking is
+    still this week's."""
+    table = f"{key}_power_rankings"
+    latest = (
+        client.table(table)
+        .select("run_date,season_id")
+        .gte("run_date", (today - timedelta(days=RANKING_MAX_AGE_DAYS)).isoformat())
+        .lte("run_date", today.isoformat())
+        .order("run_date", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not latest:
+        print(
+            f"  No {league.label} power rankings since {today - timedelta(days=RANKING_MAX_AGE_DAYS)}"
+        )
+        return []
+    run_date = date.fromisoformat(latest[0]["run_date"][:10])
+    season_id = latest[0]["season_id"]
+    if run_date < today:
+        # The nightly after a game day re-ranks (before that day's games, so
+        # the ranking dated run_date predates games played that day). Any
+        # game dated run_date..yesterday means a newer ranking is due; the
+        # game log carries scheduled games too, so a nightly that hasn't run
+        # yet still shows them.
+        played = (
+            client.table(f"{key}_game_log")
+            .select("game_id")
+            .eq("season_id", season_id)
+            .gte("game_date", run_date.isoformat())
+            .lt("game_date", today.isoformat())
+            .limit(1)
+            .execute()
+            .data
+        )
+        if played:
+            print(
+                f"  {league.label} played since its {run_date} ranking but none for {today} "
+                "-- nightly not done yet?"
+            )
+            return None
+    rows = (
+        client.table(table)
+        .select("team_id,rank,components")
+        .eq("season_id", season_id)
+        .eq("run_date", run_date.isoformat())
+        .execute()
+        .data
+        or []
+    )
+    teams = len(load_team_rows(client, key, season_id))
+    if len(rows) < teams:
+        print(f"  Only {len(rows)} of {teams} {league.label} teams ranked for {run_date}")
+        return None
+    earlier = (
+        client.table(table)
+        .select("team_id,rank,run_date")
+        .eq("season_id", season_id)
+        .lte("run_date", (run_date - timedelta(days=7)).isoformat())
+        .gte("run_date", (run_date - timedelta(days=21)).isoformat())
+        .order("run_date", desc=True)
+        .limit(200)
+        .execute()
+        .data
+        or []
+    )
+    week_ago = sp.latest_ranks(
+        [{"team": code(league, r["team_id"]), "rank": r["rank"]} for r in earlier]
+    )
+    out = sp.ranking_movement({code(league, r["team_id"]): r["rank"] for r in rows}, week_ago)
+    records = {code(league, r["team_id"]): (r.get("components") or {}).get("record") for r in rows}
+    for r in out:
+        r["detail"] = records[r["team"]]
+    print(
+        f"  {league.label}: {len(out)} teams ranked {run_date}, {len(week_ago)} with a rank a week earlier"
+    )
+    return out
+
+
+def rankings_slides(rows):
+    """A league's ranked rows split into slides of at most RANKINGS_PER_SLIDE,
+    evenly (AHL 32 -> 16 + 16, ECHL 30 -> 15 + 15, PWHL 12 -> one)."""
+    n = -(-len(rows) // RANKINGS_PER_SLIDE)
+    size = -(-len(rows) // n)
+    return [rows[i : i + size] for i in range(0, len(rows), size)]
+
+
+def render_league_rankings(sections, week_label):
+    """sections: [(league, rows)] -> every league's slides, numbered across
+    the whole post."""
+    parts = [(league, chunk) for league, rows in sections for chunk in rankings_slides(rows)]
+    return [
+        sp.render_rankings_slide(
+            chunk,
+            i,
+            len(parts),
+            week_label,
+            title=f"{league.label} Power Rankings",
+            note=RANKINGS_NOTES[league.key],
+            teams=league_teams(league),
+        )
+        for i, (league, chunk) in enumerate(parts, 1)
+    ]
+
+
+def league_teams(league):
+    return PWHL_TEAMS if league.key == "pwhl" else MINOR_TEAMS[league.key]
+
+
+def caption_league_rankings(sections, week_label, kind):
+    """sections: [(league, rows)] in the slides' order."""
+    labels = " & ".join(league.label for league, _ in sections)
+    lines = [f"{labels} Power Rankings \u2014 week of {week_label}"]
+    for league, rows in sections:
+        teams = league_teams(league)
+        top3 = " \u00b7 ".join(f"{r['rank']}. {sp.team_name(r['team'], teams)}" for r in rows[:3])
+        lines += ["", f"{league.label}: {top3}" if len(sections) > 1 else top3]
+        move = sp.movement_line(rows, teams)
+        if move:
+            lines.append(move)
+    corsi = any(league.key == "pwhl" for league, _ in sections)
+    lines += [
+        "",
+        "Blends points %, last-10 form, goal differential"
+        + (", Corsi (shot attempts)" if corsi else "")
+        + " and special teams. Full rankings and team-by-team breakdowns: link in bio.",
+        "",
+        HASHTAGS[kind],
+    ]
+    return "\n".join(lines)
+
+
+def post_league_rankings(client, today, dry_run, kind, leagues):
+    """One post, each league's slides in turn. A league not ranked this
+    week is left off; any league's ranking missing or partial fails the run
+    (exit 1) so the backup posts them all once the nightlies are in."""
+    sections = []
+    for key, league in leagues:
+        rows = league_rankings(client, key, league, today)
+        if rows is None:
+            return 1
+        if rows:
+            sections.append((league, rows))
+    if not sections:
+        print("  No power rankings to post this week -- not posting")
+        return 0
+    week_label = f"{today.strftime('%b')} {today.day}"
+    return sp.ship(
+        client,
+        kind,
+        f"{kind}-{today.isoformat()}",
+        render_league_rankings(sections, week_label),
+        caption_league_rankings(sections, week_label, kind),
+        dry_run,
+    )
+
+
+def post_pwhl_rankings(client, today, dry_run):
+    return post_league_rankings(client, today, dry_run, "pwhl-rankings", (("pwhl", PWHL),))
+
+
+def post_minor_rankings(client, today, dry_run):
+    return post_league_rankings(client, today, dry_run, "minor-rankings", MINOR_LEAGUES)
+
+
 POSTS = {
     "pwhl-winners": post_pwhl_winners,
     "pwhl-recap": post_pwhl_recap,
     "pwhl-leaders": post_pwhl_leaders,
     "minor-winners": post_minor_winners,
     "minor-recap": post_minor_recap,
+    "pwhl-rankings": post_pwhl_rankings,
+    "minor-rankings": post_minor_rankings,
 }
 
 

@@ -632,18 +632,25 @@ def row_box(d, top, h, accent):
     d.rounded_rectangle([64, top, 72, top + h], radius=4, fill=accent)
 
 
-def render_rankings_slide(rows, slide, slides, week_label):
-    img, d, top, bottom = new_card(
-        f"{slide}/{slides}", "NHL Power Rankings", f"Week of {week_label}", RANKINGS_NOTE
-    )
+def render_rankings_slide(
+    rows, slide, slides, week_label, title="NHL Power Rankings", note=RANKINGS_NOTE, teams=None
+):
+    """rows: ranking_movement() output. teams/title/note for another league
+    (social_posts_leagues.py); a row's optional "detail" (its record) is
+    drawn muted after the team's name."""
+    img, d, top, bottom = new_card(f"{slide}/{slides}", title, f"Week of {week_label}", note)
     gap = 6
     h = min(92, (bottom - top - gap * (len(rows) - 1)) // max(len(rows), 1))
     for i, r in enumerate(rows):
         y = top + i * (h + gap)
         mid = y + h // 2
-        row_box(d, y, h, team_color(r["team"]))
+        row_box(d, y, h, team_color(r["team"], teams))
         d.text((140, mid), str(r["rank"]), font=display(int(h * 0.62)), fill=TEXT, anchor="mm")
-        d.text((196, mid), team_name(r["team"]), font=body(int(h * 0.5)), fill=TEXT, anchor="lm")
+        name = team_name(r["team"], teams)
+        d.text((196, mid), name, font=body(int(h * 0.5)), fill=TEXT, anchor="lm")
+        if r.get("detail"):
+            x = 196 + d.textlength(name, font=body(int(h * 0.5))) + 24
+            d.text((x, mid), r["detail"], font=body(int(h * 0.4)), fill=MUTED, anchor="lm")
         change = r["change"]
         if change is None:
             continue
@@ -862,7 +869,7 @@ def to_jpeg(img):
 # ── Captions ────────────────────────────────────────────────────────────
 
 
-def movement_line(rows):
+def movement_line(rows, teams=None):
     moved = [r for r in rows if r["change"]]
     if not moved:
         return ""
@@ -870,10 +877,12 @@ def movement_line(rows):
     down = min(moved, key=lambda r: r["change"])
     parts = []
     if up["change"] > 0:
-        parts.append(f"Biggest climb: {team_name(up['team'])} (+{up['change']}, now #{up['rank']})")
+        parts.append(
+            f"Biggest climb: {team_name(up['team'], teams)} (+{up['change']}, now #{up['rank']})"
+        )
     if down["change"] < 0:
         parts.append(
-            f"Biggest drop: {team_name(down['team'])} ({down['change']}, now #{down['rank']})"
+            f"Biggest drop: {team_name(down['team'], teams)} ({down['change']}, now #{down['rank']})"
         )
     return "\n".join(parts)
 
