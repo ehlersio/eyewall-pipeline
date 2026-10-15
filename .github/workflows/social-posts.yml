@@ -12,6 +12,9 @@ name: Social Posts
 #   minor-recap   Wednesdays -- AHL + ECHL: last week graded + top scorer
 #   pwhl-leaders  Thursdays  -- last week's + season PWHL leaders
 #   minor-leaders Thursdays  -- the same for the AHL + ECHL, slides per league
+#   minor-rankings Mondays   -- AHL + ECHL power rankings, two slides per
+#                              league, a league not ranked yet left off
+#   pwhl-rankings  Mondays   -- PWHL power rankings
 #   milk-carton   Mondays    -- the week's roughest NHL week, on a milk carton
 #                              (milk_carton.py)
 #   goal-of-week  Fridays    -- last Mon-Sun's Goal of the Week, a Reel redrawn
@@ -50,6 +53,9 @@ name: Social Posts
 #   minor-recap   17:00 / 18:00 Wed
 #   pwhl-leaders  17:00 / 18:00 Thu
 #   minor-leaders 21:00 / 22:00 Thu
+#   minor-rankings 17:30 / 18:30 Mon (1:30pm ET) -- hockeytech_power_rankings.py
+#                 runs in the ahl-/echl-nightly, done by ~08:10 UTC
+#   pwhl-rankings  19:30 / 20:30 Mon -- same, in the pwhl-nightly (07:20 UTC)
 #   milk-carton   21:00 / 22:00 Mon (5pm / 6pm EDT) -- NHL stats API and
 #                 MoneyPuck, which has Sunday's games by Monday afternoon
 #   goal-of-week  17:00 / 18:00 Fri (1pm / 2pm EDT) -- NHL game center and
@@ -96,13 +102,17 @@ on:
     - cron: '0 23 * * 5'
     - cron: '0 15 * * 0'
     - cron: '0 16 * * 0'
+    - cron: '30 17 * * 1'
+    - cron: '30 18 * * 1'
+    - cron: '30 19 * * 1'
+    - cron: '30 20 * * 1'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-winners, minor-recap, pwhl-leaders, minor-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-winners, minor-recap, pwhl-leaders, minor-rankings, pwhl-rankings, minor-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
       dry_run:
         description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
@@ -151,6 +161,8 @@ jobs:
             '0 20 * * 5'|'0 21 * * 5')  kind=pwhl-trends ;;
             '0 22 * * 5'|'0 23 * * 5')  kind=minor-trends ;;
             '0 15 * * 0'|'0 16 * * 0')  kind=cherry-picked ;;
+            '30 17 * * 1'|'30 18 * * 1') kind=minor-rankings ;;
+            '30 19 * * 1'|'30 20 * * 1') kind=pwhl-rankings ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac

@@ -614,3 +614,238 @@ class TestMinorLeaders:
     def test_registered(self):
         assert sl.HASHTAGS["minor-leaders"].startswith("#AHL #ECHL")
         assert "minor-leaders" in sl.POSTS
+
+
+# ── Weekly power rankings ───────────────────────────────────────────────
+
+
+class FakeQuery:
+    """Just enough of the Supabase query builder to filter, sort and limit
+    in-memory rows, so league_rankings' date windows are really applied."""
+
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def select(self, *_a, **_k):
+        return self
+
+    def _where(self, pred):
+        self.rows = [r for r in self.rows if pred(r)]
+        return self
+
+    def eq(self, col, v):
+        return self._where(lambda r: r.get(col) == v)
+
+    def gte(self, col, v):
+        return self._where(lambda r: r.get(col) >= v)
+
+    def lte(self, col, v):
+        return self._where(lambda r: r.get(col) <= v)
+
+    def lt(self, col, v):
+        return self._where(lambda r: r.get(col) < v)
+
+    def order(self, col, desc=False):
+        self.rows.sort(key=lambda r: r[col], reverse=desc)
+        return self
+
+    def limit(self, n):
+        self.rows = self.rows[:n]
+        return self
+
+    def execute(self):
+        return MagicMock(data=self.rows)
+
+
+def fake_client(tables):
+    client = MagicMock()
+    client.table.side_effect = lambda name: FakeQuery(tables.get(name, []))
+    return client
+
+
+MONDAY = date(2026, 11, 2)
+SEASONS = {"pwhl": 11, "ahl": 94, "echl": 78}
+
+
+def team_ids(league, teams):
+    """The league's current team ids (those with a color), in code order."""
+    by_code = {c: int(t) for t, c in league.team_id_map.items()}
+    return [by_code[c] for c in sorted(teams)]
+
+
+IDS = {
+    "pwhl": team_ids(sl.PWHL, sl.PWHL_TEAMS),
+    "ahl": team_ids(AHL, sl.MINOR_TEAMS["ahl"]),
+    "echl": team_ids(ECHL, sl.MINOR_TEAMS["echl"]),
+}
+
+
+def ranking(key, day, order=None, n=None):
+    """{key}_power_rankings rows for one run: team ids in `order` (default:
+    code order) ranked 1..n."""
+    ids = (order or IDS[key])[:n]
+    return [
+        {
+            "season_id": SEASONS[key],
+            "run_date": day.isoformat(),
+            "team_id": t,
+            "rank": i,
+            "components": {"record": f"{10 - i % 10}-{i % 10}-0"},
+        }
+        for i, t in enumerate(ids, 1)
+    ]
+
+
+def tables(key, rankings=(), games=()):
+    """One league's tables: its current season's team_seasons, the given
+    ranking rows and game_log rows (game dates)."""
+    return {
+        f"{key}_team_seasons": [
+            {"season_id": SEASONS[key], "season_type": "regular", "team_id": t} for t in IDS[key]
+        ],
+        f"{key}_power_rankings": list(rankings),
+        f"{key}_game_log": [
+            {"season_id": SEASONS[key], "game_id": i, "game_date": d.isoformat()}
+            for i, d in enumerate(games, 1)
+        ],
+    }
+
+
+class TestLeagueRankings:
+    def test_not_ranked_yet_is_quiet(self):
+        """Before every team has MIN_GAMES_TO_RANK games the tables are empty."""
+        client = fake_client(
+            tables("ahl", games=[MONDAY - timedelta(days=1)])
+            | tables("echl", games=[MONDAY - timedelta(days=1)])
+            | tables("pwhl")
+        )
+        with patch.object(sp, "ship") as ship:
+            assert sl.post_minor_rankings(client, MONDAY, False) == 0
+            assert sl.post_pwhl_rankings(client, MONDAY, False) == 0
+        ship.assert_not_called()
+
+    def test_partial_table_fails(self):
+        client = fake_client(tables("pwhl", ranking("pwhl", MONDAY, n=11)))
+        with patch.object(sp, "ship") as ship:
+            assert sl.post_pwhl_rankings(client, MONDAY, False) == 1
+        ship.assert_not_called()
+
+    def test_ranking_due_but_missing_fails(self):
+        """Ranked Saturday, played Sunday, nothing for Monday yet: the
+        nightly hasn't run -- exit 1 so the backup retries."""
+        sat, sun = MONDAY - timedelta(days=2), MONDAY - timedelta(days=1)
+        client = fake_client(tables("pwhl", ranking("pwhl", sat), games=[sun]))
+        assert sl.league_rankings(client, "pwhl", sl.PWHL, MONDAY) is None
+
+    def test_no_games_since_keeps_the_latest_ranking(self):
+        """Ranked Friday, no games since (a weekend off): Friday's ranking is
+        still this week's."""
+        fri = MONDAY - timedelta(days=3)
+        client = fake_client(
+            tables("pwhl", ranking("pwhl", fri), games=[fri - timedelta(days=1), MONDAY])
+        )
+        rows = sl.league_rankings(client, "pwhl", sl.PWHL, MONDAY)
+        assert [r["rank"] for r in rows] == list(range(1, 13))
+
+    def test_ranking_older_than_a_week_is_left_off(self):
+        old = MONDAY - timedelta(days=sl.RANKING_MAX_AGE_DAYS + 1)
+        client = fake_client(tables("pwhl", ranking("pwhl", old)))
+        assert sl.league_rankings(client, "pwhl", sl.PWHL, MONDAY) == []
+
+    def test_movement_is_vs_the_latest_ranking_seven_plus_days_earlier(self):
+        ids = IDS["pwhl"]
+        moved = [ids[2], ids[0], ids[1], *ids[3:]]  # 3rd -> 1st, 1st -> 2nd, 2nd -> 3rd
+        three_days = list(reversed(ids))  # inside the week: ignored
+        client = fake_client(
+            tables(
+                "pwhl",
+                [
+                    *ranking("pwhl", MONDAY - timedelta(days=30)),  # older than 21 days
+                    *ranking("pwhl", MONDAY - timedelta(days=8)),
+                    *ranking("pwhl", MONDAY - timedelta(days=3), three_days),
+                    *ranking("pwhl", MONDAY, moved),
+                ],
+            )
+        )
+        rows = sl.league_rankings(client, "pwhl", sl.PWHL, MONDAY)
+        codes = [sl.code(sl.PWHL, t) for t in ids]
+        assert [(r["team"], r["change"]) for r in rows[:4]] == [
+            (codes[2], 2),
+            (codes[0], -1),
+            (codes[1], -1),
+            (codes[3], 0),
+        ]
+        assert rows[0]["detail"] == "9-1-0"  # rank 1's record from components
+        cap = sl.caption_league_rankings([(sl.PWHL, rows)], "Nov 2", "pwhl-rankings")
+        climb = sp.team_name(codes[2], sl.PWHL_TEAMS)
+        assert f"Biggest climb: {climb} (+2, now #1)" in cap
+        assert "Corsi" in cap
+
+    def test_first_ranking_has_no_movement(self):
+        client = fake_client(tables("pwhl", ranking("pwhl", MONDAY)))
+        rows = sl.league_rankings(client, "pwhl", sl.PWHL, MONDAY)
+        assert all(r["change"] is None for r in rows)
+        assert "Biggest" not in sl.caption_league_rankings(
+            [(sl.PWHL, rows)], "Nov 2", "pwhl-rankings"
+        )
+
+    def test_pwhl_post_is_one_slide(self):
+        client = fake_client(tables("pwhl", ranking("pwhl", MONDAY)))
+        with patch.object(sp, "ship", return_value=0) as ship:
+            assert sl.post_pwhl_rankings(client, MONDAY, False) == 0
+        _, kind, key, images, caption, _ = ship.call_args.args
+        assert (kind, key, len(images)) == ("pwhl-rankings", "pwhl-rankings-2026-11-02", 1)
+        assert images[0].size == (1080, 1350)
+        assert caption.startswith("PWHL Power Rankings — week of Nov 2")
+        assert_neutral(caption)
+
+    def test_one_minor_league_only(self):
+        client = fake_client(tables("ahl", ranking("ahl", MONDAY)) | tables("echl"))
+        with patch.object(sp, "ship", return_value=0) as ship:
+            assert sl.post_minor_rankings(client, MONDAY, False) == 0
+        _, kind, key, images, caption, _ = ship.call_args.args
+        assert (kind, key, len(images)) == ("minor-rankings", "minor-rankings-2026-11-02", 2)
+        assert caption.startswith("AHL Power Rankings") and "ECHL" not in caption.split("\n")[0]
+        # AHL codes stay codes: TOR is the Marlies, not the NHL's Maple Leafs.
+        assert "Maple Leafs" not in caption and "Corsi" not in caption
+        assert_neutral(caption)
+
+    def test_both_minor_leagues_slide_per_half(self):
+        client = fake_client(
+            tables("ahl", ranking("ahl", MONDAY)) | tables("echl", ranking("echl", MONDAY))
+        )
+        with (
+            patch.object(sp, "render_rankings_slide", wraps=sp.render_rankings_slide) as render,
+            patch.object(sp, "ship", return_value=0) as ship,
+        ):
+            assert sl.post_minor_rankings(client, MONDAY, False) == 0
+        images, caption = ship.call_args.args[3], ship.call_args.args[4]
+        assert len(images) == 4
+        slides = [
+            (c.kwargs["title"], len(c.args[0]), c.args[1], c.args[2]) for c in render.call_args_list
+        ]
+        assert slides == [
+            ("AHL Power Rankings", 16, 1, 4),
+            ("AHL Power Rankings", 16, 2, 4),
+            ("ECHL Power Rankings", 15, 3, 4),
+            ("ECHL Power Rankings", 15, 4, 4),
+        ]
+        assert caption.startswith("AHL & ECHL Power Rankings")
+        assert "\nAHL: 1. " in caption and "\nECHL: 1. " in caption
+        assert_neutral(caption)
+
+    def test_one_minor_league_stale_fails_the_run(self):
+        sun = MONDAY - timedelta(days=1)
+        client = fake_client(
+            tables("ahl", ranking("ahl", MONDAY))
+            | tables("echl", ranking("echl", sun - timedelta(days=1)), games=[sun])
+        )
+        with patch.object(sp, "ship") as ship:
+            assert sl.post_minor_rankings(client, MONDAY, False) == 1
+        ship.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("n", "sizes"), [(32, [16, 16]), (30, [15, 15]), (12, [12]), (17, [9, 8]), (16, [16])]
+    )
+    def test_rankings_slides_split_evenly(self, n, sizes):
+        assert [len(s) for s in sl.rankings_slides(list(range(n)))] == sizes
