@@ -24,6 +24,14 @@ that's already published). The posts:
                 confident hit and miss, and the week's top scorer. A
                 league with no graded games (not started yet) is left off;
                 with neither, nothing posts
+  minor-leaders Thursdays: pwhl-leaders for the AHL and ECHL -- each
+                league's week, season and goals (saved) above expected
+                slides, in one post. Season save % qualifies on saves and
+                shots against (their tables have both, PWHL's has only
+                sv_pct); xG and GSAx come from {ahl,echl}_player_xg and
+                {ahl,echl}_goalie_percentiles. A league with no
+                regular-season games that week is left off; with neither,
+                nothing posts
   pwhl-rankings Mondays: the PWHL's power rankings (hockeytech_power_
                 rankings.py's pwhl_power_rankings) with each team's record
                 and movement vs. the latest ranking a week or more earlier
@@ -40,6 +48,7 @@ Usage:
   python social_posts_leagues.py pwhl-winners --dry-run
   python social_posts_leagues.py minor-winners --dry-run
   python social_posts_leagues.py minor-recap --date 2026-10-21 --dry-run
+  python social_posts_leagues.py minor-leaders --date 2026-10-15 --dry-run
   python social_posts_leagues.py minor-rankings --date 2026-10-26 --dry-run
 
 Schedule: .github/workflows/social-posts.yml.
@@ -108,6 +117,7 @@ HASHTAGS = {
     "pwhl-leaders": "#PWHL #WomensHockey #PWHLStats #HockeyAnalytics",
     "minor-winners": "#AHL #ECHL #HockeyAnalytics #Hockey",
     "minor-recap": "#AHL #ECHL #HockeyAnalytics #Hockey",
+    "minor-leaders": "#AHL #ECHL #HockeyStats #HockeyAnalytics",
     "pwhl-rankings": "#PWHL #WomensHockey #PowerRankings #HockeyAnalytics",
     "minor-rankings": "#AHL #ECHL #PowerRankings #HockeyAnalytics",
 }
@@ -121,8 +131,6 @@ RANKINGS_PER_SLIDE = 16
 # days old (league_rankings).
 RANKING_MAX_AGE_DAYS = 6
 MINOR_LEAGUES = (("ahl", AHL), ("echl", ECHL))
-PWHL_NOTE = "Regular season · stats: PWHL"
-PWHL_XG_NOTE = "Expected goals: EyeWall's PWHL xG model"
 LEADERS, GOALIE_LEADERS = sp.LEADERS, sp.GOALIE_LEADERS
 
 
@@ -210,16 +218,35 @@ def week_and_season(graded, start, end):
     return week, [g for g in graded if g["season_id"] == season_id]
 
 
+PLAYER_ID_CHUNK = 200  # ids per in_() read: a season's 1,000+ ids would overflow the URL
+
+
+def players(client, key, ids):
+    """{player_id: {"name", "team_id"}} from {key}_players; team_id is the
+    team the stats sweep last saw the player with."""
+    ids = sorted(ids)
+    rows = []
+    for i in range(0, len(ids), PLAYER_ID_CHUNK):
+        chunk = ids[i : i + PLAYER_ID_CHUNK]
+        rows += select_all(
+            lambda chunk=chunk: (
+                client.table(f"{key}_players")
+                .select("player_id,first_name,last_name,team_id")
+                .in_("player_id", chunk)
+            ),
+            order="player_id",
+        )
+    return {
+        r["player_id"]: {
+            "name": f"{r['first_name']} {r['last_name']}".strip(),
+            "team_id": r.get("team_id"),
+        }
+        for r in rows
+    }
+
+
 def player_names(client, key, ids):
-    rows = select_all(
-        lambda: (
-            client.table(f"{key}_players")
-            .select("player_id,first_name,last_name")
-            .in_("player_id", list(ids))
-        ),
-        order="player_id",
-    )
-    return {r["player_id"]: f"{r['first_name']} {r['last_name']}".strip() for r in rows}
+    return {pid: p["name"] for pid, p in players(client, key, ids).items()}
 
 
 def week_box(client, key, table, start, end, cols):
@@ -243,7 +270,9 @@ def week_box(client, key, table, start, end, cols):
             .in_("game_id", ids)
             .eq("season_type", "regular")
         ),
-        order="game_id",
+        # (game_id, player_id) is the key: a week's 2,000+ AHL rows span
+        # pages, and paging on game_id alone could repeat or drop ties.
+        order="game_id,player_id",
     )
 
 
@@ -280,53 +309,6 @@ def week_goalies(box, names, league):
         if (r.get("shots_against") or 0) > 0
     ]
     return sp.week_goalies(rows)
-
-
-def season_goalies_by_sv_pct(rows, names):
-    """pwhl_goalie_seasons rows -> goalie_rows-shaped leaders by the table's
-    sv_pct (its shots_against column isn't populated), qualified the same
-    way as social_posts.season_goalies: SEASON_GOALIE_GP_SHARE of the
-    busiest goalie's games, at least WEEK_MIN_GOALIE_GP."""
-    rows = [r for r in rows if r.get("sv_pct") is not None and r.get("gp")]
-    if not rows:
-        return []
-    busiest = max(r["gp"] for r in rows)
-    min_gp = max(sp.WEEK_MIN_GOALIE_GP, round(busiest * sp.SEASON_GOALIE_GP_SHARE))
-    out = [
-        {
-            "name": names.get(r["player_id"], str(r["player_id"])),
-            "team": code(PWHL, r["team_id"]),
-            "gp": r["gp"],
-            "sv_pct": r["sv_pct"],
-        }
-        for r in rows
-        if r["gp"] >= min_gp
-    ]
-    return sorted(out, key=lambda g: (-g["sv_pct"], -g["gp"], g["name"]))
-
-
-def caption_pwhl_leaders(week, season_pts, span, gax=None):
-    lines = [f"PWHL Leaders \u2014 week of {span}", ""]
-    if week:
-        p = week[0]
-        games = f"{p['gp']} game{'s' if p['gp'] != 1 else ''}"
-        lines.append(
-            f"Top scorer this week: {p['name']} ({p['team']}), {p['points']} points in {games}"
-        )
-    if season_pts:
-        p = season_pts[0]
-        lines.append(f"Season points leader: {p['name']} ({p['team']}), {p['points']}")
-    if gax:
-        p = gax[0]
-        lines.append(f"Most goals above expected: {p['name']} ({p['team']}), {sp.signed(p['gax'])}")
-    lines.append("")
-    if gax:
-        lines.append(
-            "Goals above expected compares a player\u2019s goals with the goals their shots "
-            "would typically produce."
-        )
-    lines += ["Full stats and player breakdowns: link in bio.", "", HASHTAGS["pwhl-leaders"]]
-    return "\n".join(lines)
 
 
 # ── PWHL posts ──────────────────────────────────────────────────────────
@@ -427,129 +409,211 @@ def latest_final_date(client, key, season_id, today):
     return date.fromisoformat(rows[0]["game_date"][:10]) if rows else None
 
 
-def post_pwhl_leaders(client, today, dry_run, season_id=None):
+# ── Weekly leaders: PWHL, AHL, ECHL ─────────────────────────────────────
+
+SKATER_SEASON_COLS = "player_id,team_id,gp,goals,assists,points"
+
+
+def season_rows(client, key, season_id):
+    """One league's regular-season rows, one per (player, team) ->
+    (skaters, goalies, xg, gsax). PWHL keeps xG and GSAx on its season
+    tables, and its goalie table has sv_pct but no shots_against; AHL/ECHL
+    have saves/shots_against, and xG/GSAx in their own tables
+    ({key}_player_xg: goals and xg_for from located attempts;
+    {key}_goalie_percentiles.gsax), so their gp comes from the season row."""
+
+    def season(table, cols):
+        return select_all(
+            lambda: (
+                client.table(f"{key}_{table}")
+                .select(cols)
+                .eq("season_id", season_id)
+                .eq("season_type", "regular")
+            ),
+            order="player_id,team_id",
+        )
+
+    if key == "pwhl":
+        skaters = season("player_seasons", f"{SKATER_SEASON_COLS},xg_for")
+        goalies = season("goalie_seasons", "player_id,team_id,gp,sv_pct,gsax")
+        xg = [r for r in skaters if r.get("xg_for") is not None]
+        gsax = [r for r in goalies if r.get("gsax") is not None]
+        return skaters, goalies, xg, gsax
+    skaters = season("player_seasons", SKATER_SEASON_COLS)
+    goalies = season("goalie_seasons", "player_id,team_id,gp,saves,shots_against")
+    gp = {(r["player_id"], r["team_id"]): r["gp"] or 0 for r in skaters}
+    xg = [
+        {**r, "gp": gp.get((r["player_id"], r["team_id"]), 0)}
+        for r in season("player_xg", "player_id,team_id,goals,xg_for")
+        if r.get("xg_for") is not None
+    ]
+    gsax = [
+        r
+        for r in season("goalie_percentiles", "player_id,team_id,gp,gsax")
+        if r.get("gsax") is not None
+    ]
+    return skaters, goalies, xg, gsax
+
+
+def by_player(rows, fields, info, league):
+    """Per-(player, team) season rows -> one row per player with `fields`
+    summed (a traded player's teams added up), named from `info` (players()),
+    under the player's current team if there's a row for it, else the team
+    with the most games."""
+    out = {}
+    for r in sorted(rows, key=lambda r: -(r.get("gp") or 0)):
+        p = out.setdefault(
+            r["player_id"], {"player_id": r["player_id"], "teams": [], **dict.fromkeys(fields, 0)}
+        )
+        p["teams"].append(r["team_id"])
+        for f in fields:
+            p[f] += r[f] or 0
+    for pid, p in out.items():
+        teams, known = p.pop("teams"), info.get(pid, {})
+        p["team"] = code(league, known["team_id"] if known.get("team_id") in teams else teams[0])
+        p["name"] = known.get("name", str(pid))
+    return list(out.values())
+
+
+def season_goalies_by_sv_pct(rows, names, league=PWHL):
+    """pwhl_goalie_seasons rows -> goalie_rows-shaped leaders by the table's
+    sv_pct (its shots_against column isn't populated), qualified the same
+    way as social_posts.season_goalies: SEASON_GOALIE_GP_SHARE of the
+    busiest goalie's games, at least WEEK_MIN_GOALIE_GP."""
+    rows = [r for r in rows if r.get("sv_pct") is not None and r.get("gp")]
+    if not rows:
+        return []
+    busiest = max(r["gp"] for r in rows)
+    min_gp = max(sp.WEEK_MIN_GOALIE_GP, round(busiest * sp.SEASON_GOALIE_GP_SHARE))
+    out = [
+        {
+            "name": names.get(r["player_id"], str(r["player_id"])),
+            "team": code(league, r["team_id"]),
+            "gp": r["gp"],
+            "sv_pct": r["sv_pct"],
+        }
+        for r in rows
+        if r["gp"] >= min_gp
+    ]
+    return sorted(out, key=lambda g: (-g["sv_pct"], -g["gp"], g["name"]))
+
+
+def league_leaders(client, key, league, today, season_id=None):
+    """One league's leaders for the Mon-Sun before `today`, or None if it
+    had no regular-season games that week. season_id: the season tables to
+    read; default the season of that week's games."""
     start, end = sp.last_week(today)
-    season_id = season_id or get_pwhl_season()["season_id"]
     sk_box = week_box(
         client,
-        "pwhl",
+        key,
         "skater_game_box",
         start,
         end,
-        "game_id,player_id,team_id,goals,assists,points",
+        "game_id,player_id,team_id,season_id,goals,assists,points",
     )
     if not sk_box:
-        print(f"  No PWHL regular-season games {start}..{end} -- not posting")
-        return 0
+        print(f"  No {league.label} regular-season games {start}..{end}")
+        return None
+    season_id = season_id or max(r["season_id"] for r in sk_box)
     g_box = week_box(
         client,
-        "pwhl",
+        key,
         "goalie_game_box",
         start,
         end,
         "game_id,player_id,team_id,saves,shots_against",
     )
-    sk_season = select_all(
-        lambda: (
-            client.table("pwhl_player_seasons")
-            .select("player_id,team_id,gp,goals,assists,points,xg_for")
-            .eq("season_id", season_id)
-            .eq("season_type", "regular")
-        ),
-        order="player_id",
-    )
-    g_season = select_all(
-        lambda: (
-            client.table("pwhl_goalie_seasons")
-            .select("player_id,team_id,gp,sv_pct,gsax")
-            .eq("season_id", season_id)
-            .eq("season_type", "regular")
-        ),
-        order="player_id",
-    )
-    ids = {r["player_id"] for r in (*sk_box, *g_box, *sk_season, *g_season)}
-    names = player_names(client, "pwhl", ids)
+    sk_season, g_season, xg, gsax_rows = season_rows(client, key, season_id)
+    ids = {r["player_id"] for r in (*sk_box, *g_box, *sk_season, *g_season, *xg, *gsax_rows)}
+    info = players(client, key, ids)
+    names = {pid: p["name"] for pid, p in info.items()}
 
-    week_sk = week_scorers(sk_box, names, PWHL)
-    week_g = week_goalies(g_box, names, PWHL)
     season_pts = sorted(
-        (
-            {
-                "name": names.get(r["player_id"], str(r["player_id"])),
-                "team": code(PWHL, r["team_id"]),
-                "gp": r["gp"] or 0,
-                "goals": r["goals"] or 0,
-                "assists": r["assists"] or 0,
-                "points": r["points"] or 0,
-            }
-            for r in sk_season
-        ),
+        by_player(sk_season, ("gp", "goals", "assists", "points"), info, league),
         key=lambda p: (-p["points"], -p["goals"], p["gp"], p["name"]),
     )
-    season_g = season_goalies_by_sv_pct(g_season, names)
-    span = sp.fmt_span(start, end)
-    # The season slides come from pwhl_player_seasons/pwhl_goalie_seasons,
-    # HockeyTech's running totals, which can't be cut off at Sunday: label
-    # them with the last game they include, not the week's Sunday (they
-    # used to read "Through Sun" with Mon-Wed's games in them).
-    through = latest_final_date(client, "pwhl", season_id, today) or end
-    season_sub = f"Through {sp.fmt_day(through)}"
-    week_sections = [("Points", sp.skater_points_rows(week_sk))]
-    if week_g:
-        week_sections.append((f"Save % (min {sp.WEEK_MIN_GOALIE_GP} GP)", sp.goalie_rows(week_g)))
-    season_sections = [
-        ("Points", sp.skater_points_rows(season_pts)),
-        ("Goals", sp.skater_goals_rows(season_pts)),
-    ]
-    if season_g:
-        season_sections.append(("Save %", sp.goalie_rows(season_g)))
-    images = [
-        sp.render_leaders(
-            f"PWHL · {span}", "This Week\u2019s Leaders", "Top scorers and goalies, Monday to Sunday",
-            week_sections, PWHL_NOTE, teams=PWHL_TEAMS,
-        ),
-        sp.render_leaders(
-            "PWHL · Season", "Season Leaders", season_sub,
-            season_sections, PWHL_NOTE, teams=PWHL_TEAMS,
-        ),
-    ]  # fmt: skip
-    # Goals (saved) above expected, from pwhl_shot_xg.py / pwhl_goalie_
-    # percentiles.py. Skipped if either side has nothing yet (early season).
+    if key == "pwhl":
+        season_g = season_goalies_by_sv_pct(g_season, names, league)
+    else:
+        # social_posts.season_goalies sums saves / shots and qualifies at
+        # SEASON_GOALIE_GP_SHARE of the busiest goalie's games.
+        season_g = sp.season_goalies(
+            {
+                "playerId": g["player_id"],
+                "goalieFullName": g["name"],
+                "teamAbbrevs": g["team"],
+                "gamesPlayed": g["gp"],
+                "saves": g["saves"],
+                "shotsAgainst": g["shots_against"],
+            }
+            for g in by_player(g_season, ("gp", "saves", "shots_against"), info, league)
+        )
+    # Goals (saved) above expected from EyeWall's xG model; a league's slide
+    # is skipped while either side has nothing yet (early season).
     gax = sorted(
         (
-            {
-                "name": names.get(r["player_id"], str(r["player_id"])),
-                "team": code(PWHL, r["team_id"]),
-                "gp": r["gp"] or 0,
-                "goals": r["goals"] or 0,
-                "gax": (r["goals"] or 0) - r["xg_for"],
-            }
-            for r in sk_season
-            if r.get("xg_for") is not None
+            {**p, "gax": p["goals"] - p["xg_for"]}
+            for p in by_player(xg, ("gp", "goals", "xg_for"), info, league)
         ),
         key=lambda p: (-p["gax"], p["name"]),
     )
     gsax = sorted(
-        (
-            {
-                "name": names.get(r["player_id"], str(r["player_id"])),
-                "team": code(PWHL, r["team_id"]),
-                "gp": r["gp"] or 0,
-                "gsax": r["gsax"],
-            }
-            for r in g_season
-            if r.get("gsax") is not None
-        ),
-        key=lambda g: (-g["gsax"], g["name"]),
+        by_player(gsax_rows, ("gp", "gsax"), info, league), key=lambda g: (-g["gsax"], g["name"])
     )
-    if gax and gsax:
+    # The season slides come from the {key}_*_seasons tables, HockeyTech's
+    # running totals, which can't be cut off at Sunday: label them with the
+    # last game they include, not the week's Sunday (they used to read
+    # "Through Sun" with Mon-Wed's games in them).
+    through = latest_final_date(client, key, season_id, today) or end
+    return {
+        "league": league,
+        "key": key,
+        "span": sp.fmt_span(start, end),
+        "week": week_scorers(sk_box, names, league),
+        "week_goalies": week_goalies(g_box, names, league),
+        "season_pts": season_pts,
+        "season_goalies": season_g,
+        "xg": (gax, gsax) if gax and gsax else None,
+        "through": through,
+    }
+
+
+def render_league_leaders(sec, teams):
+    """A league's slides: the week, the season, and Beyond the Box Score
+    when it has xG for both skaters and goalies."""
+    label = sec["league"].label
+    note = f"Regular season · stats: {label}"
+    season_sub = f"Through {sp.fmt_day(sec['through'])}"
+    week_sections = [("Points", sp.skater_points_rows(sec["week"]))]
+    if sec["week_goalies"]:
+        week_sections.append(
+            (f"Save % (min {sp.WEEK_MIN_GOALIE_GP} GP)", sp.goalie_rows(sec["week_goalies"]))
+        )
+    season_sections = [
+        ("Points", sp.skater_points_rows(sec["season_pts"])),
+        ("Goals", sp.skater_goals_rows(sec["season_pts"])),
+    ]
+    if sec["season_goalies"]:
+        season_sections.append(("Save %", sp.goalie_rows(sec["season_goalies"])))
+    images = [
+        sp.render_leaders(
+            f"{label} · {sec['span']}", "This Week\u2019s Leaders",
+            "Top scorers and goalies, Monday to Sunday", week_sections, note, teams=teams,
+        ),
+        sp.render_leaders(
+            f"{label} · Season", "Season Leaders", season_sub,
+            season_sections, note, teams=teams,
+        ),
+    ]  # fmt: skip
+    if sec["xg"]:
+        gax, gsax = sec["xg"]
         images.append(
             sp.render_leaders(
-                "PWHL \u00b7 Season", "Beyond the Box Score", season_sub,
+                f"{label} · Season", "Beyond the Box Score", season_sub,
                 [
                     ("Goals above expected", [
                         {"name": p["name"], "team": p["team"], "value": sp.signed(p["gax"]),
-                         "detail": f"{p['goals']} G \u00b7 {p['gp']} GP"}
+                         "detail": f"{p['goals']} G · {p['gp']} GP"}
                         for p in gax[:LEADERS]
                     ]),
                     ("Goals saved above expected", [
@@ -558,12 +622,95 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
                         for g in gsax[:LEADERS]
                     ]),
                 ],
-                PWHL_XG_NOTE, teams=PWHL_TEAMS,
+                f"Expected goals: EyeWall's {label} xG model", teams=teams,
             )
         )  # fmt: skip
-    caption = caption_pwhl_leaders(week_sk, season_pts, span, gax if (gax and gsax) else None)
+    return images
+
+
+def leader_lines(week, season_pts, gax=None):
+    lines = []
+    if week:
+        p = week[0]
+        games = f"{p['gp']} game{'s' if p['gp'] != 1 else ''}"
+        lines.append(
+            f"Top scorer this week: {p['name']} ({p['team']}), {p['points']} points in {games}"
+        )
+    if season_pts:
+        p = season_pts[0]
+        lines.append(f"Season points leader: {p['name']} ({p['team']}), {p['points']}")
+    if gax:
+        p = gax[0]
+        lines.append(f"Most goals above expected: {p['name']} ({p['team']}), {sp.signed(p['gax'])}")
+    return lines
+
+
+GAX_EXPLAINER = (
+    "Goals above expected compares a player\u2019s goals with the goals their shots "
+    "would typically produce."
+)
+
+
+def caption_pwhl_leaders(week, season_pts, span, gax=None):
+    lines = [f"PWHL Leaders — week of {span}", "", *leader_lines(week, season_pts, gax), ""]
+    if gax:
+        lines.append(GAX_EXPLAINER)
+    lines += ["Full stats and player breakdowns: link in bio.", "", HASHTAGS["pwhl-leaders"]]
+    return "\n".join(lines)
+
+
+def caption_minor_leaders(sections):
+    """sections: league_leaders() dicts in the slides' order. One league
+    reads like the PWHL caption; two get a heading per league."""
+    labels = " & ".join(sec["league"].label for sec in sections)
+    lines = [f"{labels} Leaders — week of {sections[0]['span']}"]
+    for sec in sections:
+        lines.append("")
+        if len(sections) > 1:
+            lines.append(sec["league"].label)
+        gax = sec["xg"][0] if sec["xg"] else None
+        lines += leader_lines(sec["week"], sec["season_pts"], gax)
+    lines.append("")
+    if any(sec["xg"] for sec in sections):
+        lines.append(GAX_EXPLAINER)
+    lines += ["Full stats and player breakdowns: link in bio.", "", HASHTAGS["minor-leaders"]]
+    return "\n".join(lines)
+
+
+def post_pwhl_leaders(client, today, dry_run, season_id=None):
+    season_id = season_id or get_pwhl_season()["season_id"]
+    sec = league_leaders(client, "pwhl", PWHL, today, season_id)
+    if not sec:
+        print("  Nothing to post")
+        return 0
+    images = render_league_leaders(sec, PWHL_TEAMS)
+    gax = sec["xg"][0] if sec["xg"] else None
+    caption = caption_pwhl_leaders(sec["week"], sec["season_pts"], sec["span"], gax)
     return sp.ship(
         client, "pwhl-leaders", f"pwhl-leaders-{today.isoformat()}", images, caption, dry_run
+    )
+
+
+def post_minor_leaders(client, today, dry_run):
+    """One post: each AHL/ECHL league with regular-season games last
+    Mon-Sun gets its week, season and (when there's xG) Beyond the Box
+    Score slides; a league without games is left off, neither exits 0."""
+    sections = [
+        sec for sec in (league_leaders(client, k, lg, today) for k, lg in MINOR_LEAGUES) if sec
+    ]
+    if not sections:
+        print("  No AHL/ECHL regular-season games last week -- not posting")
+        return 0
+    images = [
+        img for sec in sections for img in render_league_leaders(sec, MINOR_TEAMS[sec["key"]])
+    ]
+    return sp.ship(
+        client,
+        "minor-leaders",
+        f"minor-leaders-{today.isoformat()}",
+        images,
+        caption_minor_leaders(sections),
+        dry_run,
     )
 
 
@@ -955,6 +1102,7 @@ POSTS = {
     "pwhl-leaders": post_pwhl_leaders,
     "minor-winners": post_minor_winners,
     "minor-recap": post_minor_recap,
+    "minor-leaders": post_minor_leaders,
     "pwhl-rankings": post_pwhl_rankings,
     "minor-rankings": post_minor_rankings,
 }

@@ -356,7 +356,7 @@ class TestPwhlLeaders:
         with (
             patch.object(sl, "week_box", side_effect=[box, []]),
             patch.object(sl, "select_all", side_effect=[season, []]),
-            patch.object(sl, "player_names", return_value={23: "A B"}),
+            patch.object(sl, "players", return_value={23: {"name": "A B", "team_id": 2}}),
             patch.object(sp, "render_leaders", wraps=sp.render_leaders) as render,
             patch.object(sp, "ship", return_value=0),
         ):
@@ -406,6 +406,214 @@ class TestPwhlLeaders:
         assert_neutral(with_xg)
         assert cap.startswith("PWHL Leaders")
         assert_neutral(cap)
+
+
+def box_row(game_id, pid, team_id, season_id=94, **stats):
+    return {"game_id": game_id, "player_id": pid, "team_id": team_id, "season_id": season_id,
+            **stats}  # fmt: skip
+
+
+# AHL team ids (hockeytech_leagues): 307 HFD, 309 PRO, 335 TOR.
+LEADERS_SKATER_BOX = [
+    box_row(1001, 1, 335, goals=2, assists=1, points=3),
+    box_row(1002, 1, 335, goals=0, assists=2, points=2),
+    box_row(1001, 2, 307, goals=1, assists=0, points=1),
+]
+LEADERS_GOALIE_BOX = [
+    box_row(1001, 9, 307, saves=28, shots_against=30),
+    box_row(1003, 9, 307, saves=30, shots_against=31),
+]
+LEADERS_INFO = {
+    1: {"name": "Skater One", "team_id": 335},
+    2: {"name": "Skater Two", "team_id": 309},
+    9: {"name": "Goalie Nine", "team_id": 307},
+    10: {"name": "Goalie Ten", "team_id": 335},
+}
+LEADERS_SKATERS = [
+    {"player_id": 1, "team_id": 335, "gp": 6, "goals": 4, "assists": 5, "points": 9},
+    # Traded: HFD then PRO -- one row per team, summed under PRO (current).
+    {"player_id": 2, "team_id": 307, "gp": 4, "goals": 3, "assists": 2, "points": 5},
+    {"player_id": 2, "team_id": 309, "gp": 2, "goals": 1, "assists": 3, "points": 4},
+]
+LEADERS_GOALIES = [
+    {"player_id": 9, "team_id": 307, "gp": 5, "saves": 140, "shots_against": 150},
+    {"player_id": 10, "team_id": 335, "gp": 1, "saves": 30, "shots_against": 30},  # < 30%
+]
+LEADERS_XG = [{"player_id": 1, "team_id": 335, "gp": 6, "goals": 4, "xg_for": 2.5}]
+LEADERS_GSAX = [{"player_id": 9, "team_id": 307, "gp": 5, "gsax": 3.2}]
+
+
+class TestMinorLeaders:
+    today = date(2026, 10, 22)  # Thursday: covers Mon Oct 12 - Sun Oct 18
+
+    skater_box = LEADERS_SKATER_BOX
+    goalie_box = LEADERS_GOALIE_BOX
+    info = LEADERS_INFO
+    skaters = LEADERS_SKATERS
+    goalies = LEADERS_GOALIES
+    xg = LEADERS_XG
+    gsax = LEADERS_GSAX
+
+    def leaders(self, key="ahl", league=AHL, skater_box=None, gsax=None):
+        boxes = {
+            "skater_game_box": self.skater_box if skater_box is None else skater_box,
+            "goalie_game_box": self.goalie_box,
+        }
+        rows = (self.skaters, self.goalies, self.xg, self.gsax if gsax is None else gsax)
+        with (
+            patch.object(sl, "week_box", side_effect=lambda c, k, t, s, e, cols: boxes[t]),
+            patch.object(sl, "season_rows", return_value=rows) as season_rows,
+            patch.object(sl, "players", return_value=self.info),
+            patch.object(sl, "latest_final_date", return_value=date(2026, 10, 21)),
+        ):
+            sec = sl.league_leaders(MagicMock(), key, league, self.today)
+        return sec, season_rows
+
+    def test_league_without_games_is_none(self):
+        sec, season_rows = self.leaders(skater_box=[])
+        assert sec is None
+        season_rows.assert_not_called()
+
+    def test_week_and_season_leaders(self):
+        sec, season_rows = self.leaders()
+        # The season tables read are the week's games' season.
+        assert season_rows.call_args.args[1:] == ("ahl", 94)
+        assert [(p["name"], p["team"], p["points"], p["gp"]) for p in sec["week"]] == [
+            ("Skater One", "TOR", 5, 2),
+            ("Skater Two", "HFD", 1, 1),
+        ]
+        assert [(g["name"], g["gp"]) for g in sec["week_goalies"]] == [("Goalie Nine", 2)]
+        assert [(p["name"], p["team"], p["points"], p["gp"]) for p in sec["season_pts"]] == [
+            ("Skater One", "TOR", 9, 6),
+            ("Skater Two", "PRO", 9, 6),
+        ]
+        # Save % from saves / shots against, qualified at 30% of the busiest
+        # goalie's games (at least 2): Goalie Ten's one game is left off.
+        assert [(g["name"], g["team"]) for g in sec["season_goalies"]] == [("Goalie Nine", "HFD")]
+        assert sec["season_goalies"][0]["sv_pct"] == pytest.approx(140 / 150)
+        gax, gsax = sec["xg"]
+        assert (gax[0]["name"], gax[0]["gax"]) == ("Skater One", pytest.approx(1.5))
+        assert (gsax[0]["name"], gsax[0]["gsax"]) == ("Goalie Nine", 3.2)
+        assert sec["through"] == date(2026, 10, 21)
+
+    @pytest.mark.parametrize("has_gsax", [True, False])
+    def test_beyond_the_box_score_needs_both_sides(self, has_gsax):
+        sec, _ = self.leaders(gsax=None if has_gsax else [])
+        assert (sec["xg"] is not None) == has_gsax
+        with patch.object(sp, "render_leaders", wraps=sp.render_leaders) as render:
+            images = sl.render_league_leaders(sec, sl.MINOR_TEAMS["ahl"])
+        titles = [c.args[1] for c in render.call_args_list]
+        expected = ["This Week\u2019s Leaders", "Season Leaders"]
+        assert titles == expected + (["Beyond the Box Score"] if has_gsax else [])
+        assert len(images) == len(titles)
+        assert all(img.size == (1080, 1350) for img in images)
+        kickers = [c.args[0] for c in render.call_args_list]
+        assert kickers[0] == "AHL \u00b7 Oct 12\u201318"
+        assert render.call_args_list[1].args[2] == "Through Wed, Oct 21"
+        if has_gsax:
+            assert render.call_args_list[2].args[4] == "Expected goals: EyeWall's AHL xG model"
+
+    def post(self, sections):
+        with (
+            patch.object(sl, "league_leaders", side_effect=lambda c, k, lg, d: sections[k]),
+            patch.object(sp, "ship", return_value=0) as ship,
+        ):
+            code = sl.post_minor_leaders(MagicMock(), self.today, False)
+        return code, ship
+
+    def test_no_games_in_either_league_is_quiet(self):
+        code, ship = self.post({"ahl": None, "echl": None})
+        assert code == 0
+        ship.assert_not_called()
+
+    def test_one_league_only(self):
+        ahl, _ = self.leaders()
+        code, ship = self.post({"ahl": ahl, "echl": None})
+        assert code == 0
+        _, kind, key, images, caption, _ = ship.call_args.args
+        assert (kind, key, len(images)) == ("minor-leaders", "minor-leaders-2026-10-22", 3)
+        assert caption.startswith("AHL Leaders \u2014 week of Oct 12\u201318\n\nTop scorer")
+        assert "ECHL\n" not in caption
+        assert "Most goals above expected: Skater One (TOR), +1.5" in caption
+        assert_neutral(caption)
+
+    def test_both_leagues_in_slide_order(self):
+        ahl, _ = self.leaders()
+        echl, _ = self.leaders("echl", ECHL, gsax=[])
+        code, ship = self.post({"ahl": ahl, "echl": echl})
+        assert code == 0
+        _, _, _, images, caption, _ = ship.call_args.args
+        assert len(images) == 3 + 2  # ECHL has no GSAx yet: no xG slide
+        assert caption.startswith("AHL & ECHL Leaders")
+        assert caption.index("\nAHL\n") < caption.index("\nECHL\n")
+        assert caption.count("Most goals above expected") == 1
+        assert "Goals above expected compares" in caption
+        assert_neutral(caption)
+
+    def test_by_player_sums_teams_under_the_current_one(self):
+        rows = [
+            {"player_id": 5, "team_id": 307, "gp": 3, "goals": 1},
+            {"player_id": 5, "team_id": 309, "gp": 8, "goals": 2},
+        ]
+        info = {5: {"name": "Five", "team_id": 307}}
+        [p] = sl.by_player(rows, ("gp", "goals"), info, AHL)
+        assert (p["name"], p["team"], p["gp"], p["goals"]) == ("Five", "HFD", 11, 3)
+        # Current team unknown (or no row for it): the team with the most games.
+        [p] = sl.by_player(rows, ("gp", "goals"), {}, AHL)
+        assert (p["name"], p["team"]) == ("5", "PRO")
+
+    def test_season_rows_reads_the_minor_xg_tables(self):
+        tables = {
+            "ahl_player_seasons": self.skaters,
+            "ahl_goalie_seasons": self.goalies,
+            "ahl_player_xg": [
+                {"player_id": 1, "team_id": 335, "goals": 4, "xg_for": 2.5},
+                {"player_id": 2, "team_id": 307, "goals": 3, "xg_for": None},
+            ],
+            "ahl_goalie_percentiles": [
+                {"player_id": 9, "team_id": 307, "gp": 5, "gsax": 3.2},
+                {"player_id": 10, "team_id": 335, "gp": 1, "gsax": None},
+            ],
+        }
+        orders = []
+        client = MagicMock()
+
+        def select_all(build, order):
+            build()
+            orders.append(order)
+            return tables[client.table.call_args.args[0]]
+
+        with patch.object(sl, "select_all", side_effect=select_all):
+            skaters, goalies, xg, gsax = sl.season_rows(client, "ahl", 94)
+        assert [c.args[0] for c in client.table.call_args_list] == list(tables)
+        assert set(orders) == {"player_id,team_id"}
+        assert (skaters, goalies) == (self.skaters, self.goalies)
+        assert xg == [{"player_id": 1, "team_id": 335, "goals": 4, "xg_for": 2.5, "gp": 6}]
+        assert gsax == [{"player_id": 9, "team_id": 307, "gp": 5, "gsax": 3.2}]
+
+    def test_players_reads_ids_in_chunks(self):
+        client = MagicMock()
+        q = client.table.return_value
+        for m in ("select", "in_", "order", "range"):
+            getattr(q, m).return_value = q
+        ids = range(1, 451)
+        pages = []
+        for i in range(0, 450, sl.PLAYER_ID_CHUNK):
+            chunk = list(ids)[i : i + sl.PLAYER_ID_CHUNK]
+            pages += [
+                MagicMock(data=[{"player_id": p, "first_name": "F", "last_name": str(p),
+                                 "team_id": 335} for p in chunk]),
+                MagicMock(data=[]),
+            ]  # fmt: skip
+        q.execute.side_effect = pages
+        out = sl.players(client, "ahl", set(ids))
+        # select_all builds the query once per page (a full one, then an empty one).
+        assert [len(c.args[1]) for c in q.in_.call_args_list[::2]] == [200, 200, 50]
+        assert out[450] == {"name": "F 450", "team_id": 335}
+
+    def test_registered(self):
+        assert sl.HASHTAGS["minor-leaders"].startswith("#AHL #ECHL")
+        assert "minor-leaders" in sl.POSTS
 
 
 # ── Weekly power rankings ───────────────────────────────────────────────
