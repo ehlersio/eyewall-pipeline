@@ -14,6 +14,11 @@ that's already published). The posts:
   pwhl-leaders  Thursdays: last Mon-Sun's top scorers and goalies, and
                 season leaders, and goals (saved) above expected from
                 EyeWall's PWHL xG model -- from the PWHL tables, not an API
+  minor-winners daily on AHL/ECHL game days: one slide per league with
+                each game's projected winner from {ahl,echl}_game_win_probs
+                (hockeytech_elo.py, logged that morning), games already
+                under way left off. A league with no games left is left
+                off; with neither, nothing posts
   minor-recap   Wednesdays: one card for the AHL and ECHL -- each league's
                 projected winners graded for last Mon-Sun, its most
                 confident hit and miss, and the week's top scorer. A
@@ -26,6 +31,7 @@ is never named, a genuinely empty day exits 0 and missing/stale data exits
 
 Usage:
   python social_posts_leagues.py pwhl-winners --dry-run
+  python social_posts_leagues.py minor-winners --dry-run
   python social_posts_leagues.py minor-recap --date 2026-10-21 --dry-run
 
 Schedule: .github/workflows/social-posts.yml.
@@ -57,12 +63,44 @@ PWHL_TEAMS = {
     "LV": ("PWHL Las Vegas", "#818916"),
     "SJS": ("PWHL San Jose", "#0083ED"),
 }
+# AHL/ECHL on-dark display colors, from eyewall-poller's LA_TEAM_COLORS
+# (src/liveActivity.js, itself a copy of eyewall-analytics' ahlConfig.js /
+# echlConfig.js) -- KEEP IN SYNC. Current teams only; the pipeline stores no
+# team names, so the cards show codes (hockeytech_leagues team_id_map).
+MINOR_TEAM_COLORS = {
+    "ahl": {
+        "HFD": "#0084E0", "PRO": "#FBB337", "LV": "#F58220", "WBS": "#FEC23D",
+        "HER": "#AC7374", "CLT": "#FF0A34", "SPR": "#EB3E59", "ROC": "#E44861",
+        "SYR": "#4D82D5", "TOR": "#0A7EFF", "CLE": "#1B87D4", "UTC": "#E44857",
+        "BEL": "#F13159", "LAV": "#3080F2", "HAM": "#0081F2", "MB": "#297FF2",
+        "MIL": "#4280E1", "GR": "#EC3D58", "CHI": "#FF0927", "RFD": "#E94358",
+        "TEX": "#1F9747", "IA": "#00965B", "BAK": "#327AFF", "ONT": "#A4A9AD",
+        "SD": "#FF4C00", "SJ": "#2C909C", "TUC": "#C96081", "COL": "#4E7CE8",
+        "HSK": "#C3C7C9", "ABB": "#009841", "CGY": "#F13755", "CV": "#0082F1",
+    },
+    "echl": {
+        "ADK": "#F13352", "GSO": "#966EC6", "MNE": "#0088CA", "NOR": "#4278FF",
+        "REA": "#916FC9", "TRE": "#508EC8", "TR": "#D0D2CE", "WOR": "#0A7CFF",
+        "ATL": "#CA5F62", "FLA": "#00944F", "GVL": "#147DFB", "JAX": "#597ED0",
+        "ORL": "#926ED1", "SAV": "#57BA47", "SC": "#007DFB", "BLM": "#EA3E58",
+        "CIN": "#E24860", "FW": "#FF7800", "IND": "#D95358", "KAL": "#E24A4E",
+        "TOL": "#6799C8", "WHL": "#FCB514", "ALN": "#E5455B", "IDH": "#4381D3",
+        "KC": "#F15F22", "NM": "#DD4F57", "RC": "#DF4C5C", "TAH": "#5395CE",
+        "TUL": "#5181CC", "WIC": "#0B7CFF",
+    },
+}  # fmt: skip
+# social_posts.team_color's shape ({code: (name, color)}), one map per league key.
+MINOR_TEAMS = {
+    key: {c: (c, color) for c, color in colors.items()} for key, colors in MINOR_TEAM_COLORS.items()
+}
 HASHTAGS = {
     "pwhl-winners": "#PWHL #WomensHockey #HockeyAnalytics #Hockey",
     "pwhl-recap": "#PWHL #WomensHockey #HockeyAnalytics #Hockey",
     "pwhl-leaders": "#PWHL #WomensHockey #PWHLStats #HockeyAnalytics",
+    "minor-winners": "#AHL #ECHL #HockeyAnalytics #Hockey",
     "minor-recap": "#AHL #ECHL #HockeyAnalytics #Hockey",
 }
+MINOR_LEAGUES = (("ahl", AHL), ("echl", ECHL))
 PWHL_NOTE = "Regular season · stats: PWHL"
 PWHL_XG_NOTE = "Expected goals: EyeWall's PWHL xG model"
 LEADERS, GOALIE_LEADERS = sp.LEADERS, sp.GOALIE_LEADERS
@@ -75,13 +113,14 @@ def code(league, team_id):
 # ── Data ────────────────────────────────────────────────────────────────
 
 
-def todays_start_times(today):
-    """{game_id: start datetime (UTC)} for every PWHL game dated today in
-    the latest regular season or later (its playoffs) -- from HockeyTech's
-    schedule, whose GameDateISO8601 carries the local start time. Empty if
-    the feed or season list is unreachable (callers then keep every game,
-    same as social_posts.upcoming_winners with an unknown start)."""
-    seasons = league_seasons("pwhl")
+def todays_start_times(today, key="pwhl", league=PWHL):
+    """{game_id: start datetime (UTC)} for every game of the league dated
+    today in the latest regular season or later (its playoffs) -- from
+    HockeyTech's schedule, whose GameDateISO8601 carries the local start
+    time. Empty if the feed or season list is unreachable (callers then
+    keep every game, same as social_posts.upcoming_winners with an unknown
+    start). key/league: hockeytech_elo.LEAGUES' key and config."""
+    seasons = league_seasons(key)
     if not seasons:
         return {}
     replay = replay_seasons(seasons, today)
@@ -91,9 +130,9 @@ def todays_start_times(today):
     out = {}
     for s in replay[regular[-1] :]:
         try:
-            rows = fetch_schedule(PWHL, s["seasonId"])
+            rows = fetch_schedule(league, s["seasonId"])
         except Exception as e:  # start times are best-effort
-            print(f"  PWHL schedule fetch failed: {e}")
+            print(f"  {league.label} schedule fetch failed: {e}")
             continue
         for r in rows:
             if r.get("date_played") == today.isoformat() and r.get("GameDateISO8601"):
@@ -273,40 +312,56 @@ def caption_pwhl_leaders(week, season_pts, span, gax=None):
 # ── PWHL posts ──────────────────────────────────────────────────────────
 
 
-def post_pwhl_winners(client, today, dry_run):
-    post_key = f"pwhl-winners-{today.isoformat()}"
+def todays_winners(client, key, league, today, now):
+    """One league's games still to come today, in social_posts.
+    upcoming_winners' shape (team codes, start order), from
+    {key}_game_win_probs. [] when the league has no games today or every
+    game has started (nothing to post, not an error). None when the day's
+    numbers aren't usable yet -- games on the schedule but no rows logged,
+    or rows not refreshed today -- so the caller exits 1 and the backup
+    run retries."""
     probs = (
-        client.table("pwhl_game_win_probs")
+        client.table(f"{key}_game_win_probs")
         .select("game_id,home_team_id,away_team_id,home_win_prob,run_date")
         .eq("game_date", today.isoformat())
         .execute()
         .data
         or []
     )
-    starts = todays_start_times(today)
+    starts = todays_start_times(today, key, league)
     if not probs:
         if starts:
-            print(f"  {len(starts)} PWHL games today but no win probabilities logged")
-            return 1
-        print(f"  No PWHL games on {today} -- not posting")
-        return 0
+            print(f"  {len(starts)} {league.label} games today but no win probabilities logged")
+            return None
+        print(f"  No {league.label} games on {today}")
+        return []
     # hockeytech_elo.py rewrites each row every night until the game starts;
     # only post this morning's numbers so the card matches what's graded.
     if any(p["run_date"] != today.isoformat() for p in probs):
-        print("  PWHL win probabilities not refreshed today yet")
-        return 1
+        print(f"  {league.label} win probabilities not refreshed today yet")
+        return None
     rows = [
         {
             "game_id": p["game_id"],
-            "home_team": code(PWHL, p["home_team_id"]),
-            "away_team": code(PWHL, p["away_team_id"]),
+            "home_team": code(league, p["home_team_id"]),
+            "away_team": code(league, p["away_team_id"]),
             "home_win_prob": p["home_win_prob"],
         }
         for p in probs
     ]
-    games = sp.upcoming_winners(rows, starts, datetime.now(UTC))
+    games = sp.upcoming_winners(rows, starts, now)
     if not games:
-        print("  Every PWHL game has already started -- not posting")
+        print(f"  Every {league.label} game has already started")
+    return games
+
+
+def post_pwhl_winners(client, today, dry_run):
+    post_key = f"pwhl-winners-{today.isoformat()}"
+    games = todays_winners(client, "pwhl", PWHL, today, datetime.now(UTC))
+    if games is None:
+        return 1
+    if not games:
+        print("  Nothing to post")
         return 0
     img = sp.render_winners(games, today, league="PWHL", teams=PWHL_TEAMS)
     caption = sp.caption_winners(
@@ -492,6 +547,70 @@ def post_pwhl_leaders(client, today, dry_run, season_id=None):
     )
 
 
+# ── AHL + ECHL daily winners ────────────────────────────────────────────
+
+
+def caption_minor_winners(sections, today):
+    """sections: [(league, games)] in the slides' order. One league reads
+    like social_posts.caption_winners; two get a heading per league."""
+    if len(sections) == 1:
+        league, games = sections[0]
+        return sp.caption_winners(
+            games,
+            today,
+            league=league.label,
+            recap_day="Wednesday",
+            hashtags=HASHTAGS["minor-winners"],
+        )
+    labels = " & ".join(lg.label for lg, _ in sections)
+    lines = [f"{labels} projected winners for {sp.fmt_day(today)}"]
+    for league, games in sections:
+        lines += ["", league.label]
+        for g in games:
+            home_p = g["home_win_prob"]
+            fav = g["home"] if home_p >= 0.5 else g["away"]
+            lines.append(
+                f"{g['away']} @ {g['home']} \u2014 {fav} {sp.pct(max(home_p, 1 - home_p))}"
+            )
+    lines += [
+        "",
+        "Pre-game win probabilities from our Elo model, posted before puck drop. "
+        "Every call gets graded in Wednesday's recap.",
+        "",
+        HASHTAGS["minor-winners"],
+    ]
+    return "\n".join(lines)
+
+
+def post_minor_winners(client, today, dry_run):
+    """One post, a slide per league with games still to come today. A
+    league with none is left off; either league's numbers missing or stale
+    fails the run (exit 1) so the backup posts both once they're in."""
+    now = datetime.now(UTC)
+    sections = []
+    for key, league in MINOR_LEAGUES:
+        games = todays_winners(client, key, league, today, now)
+        if games is None:
+            return 1
+        if games:
+            sections.append((league, games))
+    if not sections:
+        print("  No AHL/ECHL games left to post today -- not posting")
+        return 0
+    images = [
+        sp.render_winners(games, today, league=league.label, teams=MINOR_TEAMS[league.key])
+        for league, games in sections
+    ]
+    return sp.ship(
+        client,
+        "minor-winners",
+        f"minor-winners-{today.isoformat()}",
+        images,
+        caption_minor_winners(sections, today),
+        dry_run,
+    )
+
+
 # ── AHL + ECHL weekly card ──────────────────────────────────────────────
 
 
@@ -613,11 +732,7 @@ def caption_minor_recap(sections, span):
 def post_minor_recap(client, today, dry_run):
     start, end = sp.last_week(today)
     sections = [
-        s
-        for s in (
-            minor_league_week(client, k, lg, start, end) for k, lg in (("ahl", AHL), ("echl", ECHL))
-        )
-        if s
+        s for s in (minor_league_week(client, k, lg, start, end) for k, lg in MINOR_LEAGUES) if s
     ]
     if not sections:
         print(f"  No graded AHL/ECHL games {start}..{end} -- not posting")
@@ -638,6 +753,7 @@ POSTS = {
     "pwhl-winners": post_pwhl_winners,
     "pwhl-recap": post_pwhl_recap,
     "pwhl-leaders": post_pwhl_leaders,
+    "minor-winners": post_minor_winners,
     "minor-recap": post_minor_recap,
 }
 
