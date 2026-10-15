@@ -35,6 +35,15 @@ name: Social Posts
 # found stale data (exit 1) the backup tries again, and if the first run
 # already published, the backup sees it in social_posts and does nothing
 # (a platform that failed is retried on its own).
+#
+# Since 2026-10-15 the Worker's minute cron dispatches each first run and
+# backup at the times below (eyewall-poller src/dispatch.js, SOCIAL_SLOTS,
+# with inputs kind and dry_run=false), because GitHub's own schedule has
+# been starting these 4-5 hours late. The crons under `on: schedule` stay as
+# the fallback: a scheduled run that comes after the Worker's dispatch finds
+# the post already published in social_posts and exits ("Already published
+# everywhere"), so no skip step is needed. Adding or moving a post here
+# means adding or moving its slot in SOCIAL_SLOTS too.
 #   rankings  15:00 / 16:00 Mon  (11am / noon EDT; 10am / 11am EST)
 #   winners   15:30 / 16:30 daily (before the earliest matinee puck drops;
 #             games already under way are left off the card anyway)
