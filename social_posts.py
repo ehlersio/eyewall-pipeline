@@ -31,7 +31,9 @@ How a post goes out (Graph API, one Facebook Login Page token for both):
   2. upload to the public Supabase Storage bucket `social` (both platforms
      fetch the image from a public URL)
   3. Instagram: POST /{ig-user-id}/media per image (+ a CAROUSEL container
-     for several), wait for FINISHED, then POST /{ig-user-id}/media_publish.
+     for several), wait for FINISHED, then POST /{ig-user-id}/media_publish
+     (retried for about a minute while Instagram still answers "Media ID is
+     not available", code 9007 / subcode 2207027, after FINISHED).
      Facebook: POST /{page-id}/photos for one image; for several, upload
      each unpublished and attach them all to one POST /{page-id}/feed.
   4. record each platform in `social_posts` -- a (platform, post_key) that's
@@ -101,6 +103,13 @@ APP_LINE = {
 BUCKET = "social"
 CONTAINER_POLL_SECONDS = 3
 CONTAINER_POLL_TRIES = 40
+# media_publish can say "Media ID is not available" (code 9007, subcode
+# 2207027) for a moment after the container reports FINISHED; Meta's advice
+# is to wait and retry. 12 tries 5s apart is about a minute.
+PUBLISH_RETRY_SECONDS = 5
+PUBLISH_RETRY_TRIES = 12
+MEDIA_NOT_READY_CODE = 9007
+MEDIA_NOT_READY_SUBCODE = 2207027
 GRAPH_VIDEO = "https://graph-video.facebook.com/v25.0"
 VIDEO_POLL_SECONDS = 10
 VIDEO_POLL_TRIES = 60
@@ -986,6 +995,23 @@ def redact(text):
     return text.replace(token, "[redacted]") if token else text
 
 
+class GraphError(RuntimeError):
+    """A Graph API call answered >= 400. .code and .subcode come from the
+    body's `error` object, None when the body isn't JSON or has none."""
+
+    def __init__(self, path, res):
+        super().__init__(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
+        self.status = res.status_code
+        try:
+            body = res.json()
+        except ValueError:
+            body = None
+        err = body.get("error") if isinstance(body, dict) else None
+        err = err if isinstance(err, dict) else {}
+        self.code = err.get("code")
+        self.subcode = err.get("error_subcode")
+
+
 def graph_get(path, token, **params):
     res = httpx.get(
         f"{GRAPH}/{path}",
@@ -994,14 +1020,14 @@ def graph_get(path, token, **params):
         timeout=30,
     )
     if res.status_code >= 400:
-        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
+        raise GraphError(path, res)
     return res.json()
 
 
 def graph_post(path, token, **params):
     res = httpx.post(f"{GRAPH}/{path}", data={**params, "access_token": token}, timeout=60)
     if res.status_code >= 400:
-        raise RuntimeError(f"Graph API {path} failed ({res.status_code}): {res.text[:300]}")
+        raise GraphError(path, res)
     return res.json()
 
 
@@ -1016,6 +1042,23 @@ def wait_for_container(
             raise RuntimeError(f"Instagram container {container_id} {status}")
         time.sleep(seconds)
     raise RuntimeError(f"Instagram container {container_id} not ready after polling")
+
+
+def publish_container(
+    user_id, token, creation_id, tries=PUBLISH_RETRY_TRIES, seconds=PUBLISH_RETRY_SECONDS
+):
+    """POST media_publish for a FINISHED container -> media id. Retries only
+    Instagram's "Media ID is not available" (9007 / 2207027), which it can
+    still answer for a moment after the container reports FINISHED."""
+    for attempt in range(1, tries + 1):
+        try:
+            return graph_post(f"{user_id}/media_publish", token, creation_id=creation_id)["id"]
+        except GraphError as e:
+            not_ready = e.code == MEDIA_NOT_READY_CODE or e.subcode == MEDIA_NOT_READY_SUBCODE
+            if not not_ready or attempt == tries:
+                raise
+            print(f"  instagram: container not ready for publishing, retry {attempt + 1}/{tries}")
+            time.sleep(seconds)
 
 
 def publish_instagram(user_id, token, image_urls, caption):
@@ -1037,7 +1080,7 @@ def publish_instagram(user_id, token, image_urls, caption):
             caption=caption,
         )
     wait_for_container(creation["id"], token)
-    return graph_post(f"{user_id}/media_publish", token, creation_id=creation["id"])["id"]
+    return publish_container(user_id, token, creation["id"])
 
 
 def publish_facebook(page_id, token, image_urls, caption):
@@ -1063,7 +1106,7 @@ def publish_instagram_reel(user_id, token, video_urls, caption, thumb_offset_ms=
         params["thumb_offset"] = str(int(thumb_offset_ms))
     creation = graph_post(f"{user_id}/media", token, **params)
     wait_for_container(creation["id"], token, tries=VIDEO_POLL_TRIES, seconds=VIDEO_POLL_SECONDS)
-    return graph_post(f"{user_id}/media_publish", token, creation_id=creation["id"])["id"]
+    return publish_container(user_id, token, creation["id"])
 
 
 def publish_facebook_video(page_id, token, video_urls, caption, thumb_offset_ms=None):
