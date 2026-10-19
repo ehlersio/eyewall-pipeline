@@ -1,11 +1,11 @@
 requests==2.34.2
 python-dotenv==1.2.4
 httpx==0.28.1
-supabase==2.32.0
+supabase==2.33.0
 gotrue==2.12.4
-postgrest==2.32.0
-storage3==2.32.0
-realtime==2.32.0
+postgrest==2.33.0
+storage3==2.33.0
+realtime==2.33.0
 supafunc==0.10.2
 # Pinned 2026-10 to the versions the test suite passes against (the local
 # .venv). numpy was only a transitive dependency, though imported directly by
