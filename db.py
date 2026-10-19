@@ -20,8 +20,11 @@ from season_lookup import get_nhl_season
 
 load_dotenv()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+# Checked in get_client(), not at import: modules that import this only for
+# NHL_SEASON or helpers (goal_of_week.py --game renders a clip locally) run
+# without Supabase credentials.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 NHL_SEASON = get_nhl_season()  # live-resolved via Worker; falls back to NHL_SEASON env var
 PRIMARY_TEAM_ABBR = os.environ.get("PRIMARY_TEAM_ABBR", "CAR")
 
@@ -32,6 +35,8 @@ def get_client() -> Client:
     # SyncPostgrestClient(timeout=...) constructor arg internally (confirmed via
     # 2.31.0's supabase/_sync/client.py:_init_postgrest_client); passing a
     # pre-built httpx client bypasses that path entirely, timeout still applies.
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
     return create_client(
         SUPABASE_URL, SUPABASE_KEY, options=ClientOptions(httpx_client=httpx.Client(timeout=120))
     )

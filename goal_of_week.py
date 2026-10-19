@@ -43,10 +43,22 @@ Neutral wording only: what happened and when, no betting language. Regular
 season and playoffs; a week with no such games (offseason, preseason) exits
 0 without posting.
 
+One named goal
+--------------
+--game/--event render one goal instead of the week's pick -- for the
+website's landing page and ad-hoc posts: the same clip, drawn by the same
+code, from that game's `landing` feed and the goal's tracking replay. It
+only writes an MP4 (social_out/ or --out), never posts and needs no Supabase
+credentials. --landscape draws it 1920 x 1080 instead: the rink a quarter
+turn clockwise so the attacked net is on the right, at the same scale and
+with the same length of ice in view, and the header, legend and footer
+stacked in a column on the left. The weekly post is always portrait.
+
 Usage:
   python goal_of_week.py goal-of-week
   python goal_of_week.py goal-of-week --dry-run            # render to social_out/
   python goal_of_week.py goal-of-week --date 2026-10-16    # as if run that Friday
+  python goal_of_week.py goal-of-week --game 2025021237 --event 1113 [--landscape] [--out x.mp4]
 """
 
 import argparse
@@ -100,6 +112,17 @@ VP_TOP, VP_BOTTOM = 370, 1700  # the rink viewport
 VP_FT = (VP_BOTTOM - VP_TOP) / PX_PER_FT
 VP_HEADROOM_FT = 4  # ice shown past the end boards at the net end
 RINK_X0 = (VW - RINK_W * PX_PER_FT) / 2
+
+# Landscape layout (1920 x 1080, --landscape): the rink a quarter turn
+# clockwise, attacked net on the right, at PX_PER_FT with the same VP_FT of
+# ice in view as the portrait clip; header, legend and footer in a column on
+# the left.
+LW, LH = 1920, 1080
+L_COL = 540  # the left column
+L_PAD = 56  # its text inset
+L_VP_LEFT, L_VP_RIGHT = L_COL, L_COL + (VP_BOTTOM - VP_TOP)
+L_VP_TOP = (LH - int(RINK_W * PX_PER_FT)) // 2
+TRACKING_CREDIT = "Player & puck tracking: NHL EDGE"
 
 ICE = "#0e1522"
 BOARD = "#2c3a55"
@@ -472,9 +495,14 @@ def game_day(goal):
     return sp.fmt_day(date.fromisoformat(goal["game_date"]))
 
 
+def subtitle_parts(goal):
+    """What the clip's subtitle says: headline, matchup, day."""
+    return [headline(goal), f"{goal['team']} vs {goal['opp']}", game_day(goal)]
+
+
 def clip_header(d, goal):
     title = f"{goal['first']} {goal['last']}"
-    subtitle = f"{headline(goal)}  ·  {goal['team']} vs {goal['opp']}  ·  {game_day(goal)}"
+    subtitle = "  ·  ".join(subtitle_parts(goal))
     d.rectangle([0, 0, VW, 10], fill=sp.RED)
     d.text((64, 84), "EYEWALL ANALYTICS", font=sp.label(30), fill=sp.TEXT, anchor="lm")
     d.text((VW - 64, 84), "GOAL OF THE WEEK", font=sp.label(28), fill=sp.RED_BRIGHT, anchor="rm")
@@ -492,19 +520,47 @@ def clip_footer(d):
     d.text((64, VH - 96), sp.SITE_URL, font=sp.label(32), fill=sp.TEXT, anchor="lm")
     d.text(
         (VW - 64, VH - 96),
-        "Player & puck tracking: NHL EDGE",
+        TRACKING_CREDIT,
         font=sp.body(26),
         fill=sp.MUTED,
         anchor="rm",
     )
 
 
-def legend(d, colours):
-    x = RINK_X0
+def legend(d, colours, x=RINK_X0, y=VP_TOP - 30):
     for team, colour in colours.items():
-        d.ellipse([x, VP_TOP - 40, x + 20, VP_TOP - 20], fill=colour)
-        d.text((x + 30, VP_TOP - 30), team, font=sp.label(26), fill=sp.TEXT, anchor="lm")
+        d.ellipse([x, y - 10, x + 20, y + 10], fill=colour)
+        d.text((x + 30, y), team, font=sp.label(26), fill=sp.TEXT, anchor="lm")
         x += 130
+
+
+def landscape_column(d, goal, colours=None):
+    """The landscape header, legend and footer, stacked down the left column:
+    the portrait header's content with the name over two lines and the
+    subtitle one part per line."""
+    w = L_COL - 2 * L_PAD
+    d.rectangle([0, 0, LW, 10], fill=sp.RED)
+    d.text((L_PAD, 70), "EYEWALL ANALYTICS", font=sp.label(30), fill=sp.TEXT, anchor="lm")
+    d.text((L_PAD, 112), "GOAL OF THE WEEK", font=sp.label(28), fill=sp.RED_BRIGHT, anchor="lm")
+    y = 150
+    for name in (goal["first"], goal["last"]):
+        d.text((L_PAD, y), name, font=sp.fit(d, name, sp.display, 104, w), fill=sp.TEXT)
+        y += 112
+    y += 34
+    for part in subtitle_parts(goal):
+        d.text((L_PAD, y), part, font=sp.fit(d, part, sp.body, 32, w, min_size=22), fill=sp.MUTED)
+        y += 48
+    if colours:
+        legend(d, colours, x=L_PAD, y=y + 50)
+    d.line([L_PAD, LH - 150, L_COL - L_PAD, LH - 150], fill=sp.BG3, width=2)
+    d.text((L_PAD, LH - 108), sp.SITE_URL, font=sp.label(32), fill=sp.TEXT, anchor="lm")
+    d.text((L_PAD, LH - 64), TRACKING_CREDIT, font=sp.body(26), fill=sp.MUTED, anchor="lm")
+
+
+def turned(img):
+    """A portrait (attacked net at the top) image a quarter turn clockwise:
+    attacked net on the right, attack coordinate a along x, b down y."""
+    return img.transpose(Image.Transpose.ROTATE_270)
 
 
 def positions(frame, high):
@@ -529,17 +585,109 @@ def interpolated(frames, high, start, end):
     yield end, positions(frames[end], high)
 
 
-def replay_frames(goal):
-    """The clip's frames, in order (a generator; ~15 s at 30 fps)."""
+class Portrait:
+    """The weekly clip's 1080 x 1920 frame: attacked net at the top, the
+    camera (cam = attack coordinate at the viewport's near edge) sliding up
+    the ice."""
+
+    size = (VW, VH)
+
+    def rink(self):
+        # The rink on a background with headroom past the attacked end boards,
+        # so the camera's top stop shows a strip of dark, not a crop edge.
+        rink_only = draw_rink()
+        head_px = int(VP_HEADROOM_FT * PX_PER_FT)
+        rink = Image.new("RGB", (rink_only.width, rink_only.height + head_px), sp.BG0)
+        rink.paste(rink_only, (0, head_px))
+        return rink
+
+    def view(self, rink, cam):
+        frame = Image.new("RGB", self.size, sp.BG0)
+        # Viewport top, in px below the top of the padded rink image.
+        src_top = int((RINK_L + VP_HEADROOM_FT - (cam + VP_FT)) * PX_PER_FT)
+        crop = rink.crop((0, src_top, rink.width, src_top + VP_BOTTOM - VP_TOP))
+        frame.paste(crop, (int(RINK_X0), VP_TOP))
+        return frame
+
+    def screen(self, a, b, cam):
+        return RINK_X0 + b * PX_PER_FT, VP_BOTTOM - (a - cam) * PX_PER_FT
+
+    def in_view(self, x, y):
+        return VP_TOP < y < VP_BOTTOM
+
+    def overlay(self, d, goal, colours, scored):
+        # Clip dots straddling the viewport edges; keep the header clean.
+        d.rectangle([0, 0, VW, VP_TOP], fill=sp.BG0)
+        d.rectangle([0, VP_BOTTOM, VW, VH], fill=sp.BG0)
+        clip_header(d, goal)
+        legend(d, colours)
+        if scored:
+            d.text(
+                (VW / 2, VP_BOTTOM - 230),  # neutral zone: clear of the net-front crowd
+                "GOAL",
+                font=sp.display(200),
+                fill=sp.RED_BRIGHT,
+                anchor="mm",
+            )
+        clip_footer(d)
+
+    def card(self, goal):
+        return closing_card(goal)
+
+
+class Landscape(Portrait):
+    """--landscape: 1920 x 1080, the portrait rink a quarter turn clockwise
+    (attacked net on the right) at the same scale, the camera sliding right."""
+
+    size = (LW, LH)
+
+    def rink(self):
+        return turned(super().rink())  # the headroom ends up past the right boards
+
+    def view(self, rink, cam):
+        frame = Image.new("RGB", self.size, sp.BG0)
+        src_left = int(cam * PX_PER_FT)
+        crop = rink.crop((src_left, 0, src_left + L_VP_RIGHT - L_VP_LEFT, rink.height))
+        frame.paste(crop, (L_VP_LEFT, L_VP_TOP))
+        return frame
+
+    def screen(self, a, b, cam):
+        return L_VP_LEFT + (a - cam) * PX_PER_FT, L_VP_TOP + b * PX_PER_FT
+
+    def in_view(self, x, y):
+        return L_VP_LEFT < x < L_VP_RIGHT
+
+    def overlay(self, d, goal, colours, scored):
+        d.rectangle([0, 0, L_VP_LEFT, LH], fill=sp.BG0)
+        d.rectangle([L_VP_RIGHT, 0, LW, LH], fill=sp.BG0)
+        landscape_column(d, goal, colours)
+        if scored:
+            d.text(
+                (
+                    L_VP_LEFT + 230,
+                    L_VP_TOP + RINK_W * PX_PER_FT / 2,
+                ),  # neutral zone, as in portrait
+                "GOAL",
+                font=sp.display(200),
+                fill=sp.RED_BRIGHT,
+                anchor="mm",
+            )
+
+    def card(self, goal):
+        return closing_card_landscape(goal)
+
+
+PORTRAIT, LANDSCAPE = Portrait(), Landscape()
+
+
+def replay_frames(goal, landscape=False):
+    """The clip's frames, in order (a generator; ~15 s at 30 fps), 1080 x 1920
+    or with landscape=True 1920 x 1080."""
+    layout = LANDSCAPE if landscape else PORTRAIT
     frames, high, gf = goal["frames"], goal["high"], goal["goal_frame"]
     start = max(0, gf - LEAD_SECONDS * TRACK_HZ)
     end = min(len(frames) - 1, gf + int(TAIL_SECONDS * TRACK_HZ))
-    # The rink on a background with headroom past the attacked end boards,
-    # so the camera's top stop shows a strip of dark, not a crop edge.
-    rink_only = draw_rink()
-    head_px = int(VP_HEADROOM_FT * PX_PER_FT)
-    rink = Image.new("RGB", (rink_only.width, rink_only.height + head_px), sp.BG0)
-    rink.paste(rink_only, (0, head_px))
+    rink = layout.rink()
     colours = team_colours(goal["team"], goal["opp"])
     trail, cam = [], None
     cam_max = RINK_L + VP_HEADROOM_FT - VP_FT
@@ -552,21 +700,17 @@ def replay_frames(goal):
             trail = ([*trail, puck])[-40:]
         cam = cam or 0
 
-        frame = Image.new("RGB", (VW, VH), sp.BG0)
-        # Viewport top, in px below the top of the padded rink image.
-        src_top = int((RINK_L + VP_HEADROOM_FT - (cam + VP_FT)) * PX_PER_FT)
-        crop = rink.crop((0, src_top, rink.width, src_top + VP_BOTTOM - VP_TOP))
-        frame.paste(crop, (int(RINK_X0), VP_TOP))
+        frame = layout.view(rink, cam)
         d = ImageDraw.Draw(frame)
 
         def screen(a, b, cam=cam):
-            return RINK_X0 + b * PX_PER_FT, VP_BOTTOM - (a - cam) * PX_PER_FT
+            return layout.screen(a, b, cam)
 
         for (a, b), o in pos.values():
             if not o.get("playerId"):
                 continue
             x, y = screen(a, b)
-            if not VP_TOP < y < VP_BOTTOM:
+            if not layout.in_view(x, y):
                 continue
             colour = colours.get(o.get("teamAbbrev"), NEUTRAL_DOT)
             r = 20
@@ -593,25 +737,51 @@ def replay_frames(goal):
             x, y = screen(*puck)
             d.ellipse([x - 9, y - 9, x + 9, y + 9], fill="#ffffff", outline=sp.BG0, width=2)
 
-        # Clip dots straddling the viewport edges; keep the header clean.
-        d.rectangle([0, 0, VW, VP_TOP], fill=sp.BG0)
-        d.rectangle([0, VP_BOTTOM, VW, VH], fill=sp.BG0)
-        clip_header(d, goal)
-        legend(d, colours)
-        if idx >= gf:
-            d.text(
-                (VW / 2, VP_BOTTOM - 230),  # neutral zone: clear of the net-front crowd
-                "GOAL",
-                font=sp.display(200),
-                fill=sp.RED_BRIGHT,
-                anchor="mm",
-            )
-        clip_footer(d)
+        layout.overlay(d, goal, colours, scored=idx >= gf)
         yield frame
 
-    card = closing_card(goal)
+    card = layout.card(goal)
     for _ in range(int(CARD_SECONDS * FPS)):
         yield card
+
+
+def attacking_half(scale):
+    """The attacked half of the rink (plus 4 ft past centre), net at the top."""
+    return draw_rink(scale).crop((0, 0, int(RINK_W * scale), int((RINK_L / 2 + 4) * scale)))
+
+
+def rush_path(goal):
+    """The puck's tracked path over the rush, in attack coordinates, where it
+    is on the attacking_half()."""
+    frames, high, gf = goal["frames"], goal["high"], goal["goal_frame"]
+    pts = []
+    for i in range(max(0, gf - RUSH_SECONDS * TRACK_HZ), gf + 1):
+        p = puck_of(frames[i])
+        if p:
+            a, b = to_attack(p, high)
+            if a >= RINK_L / 2 - 4:
+                pts.append((a, b))
+    return pts
+
+
+def draw_rush_path(d, pts, goal):
+    if len(pts) > 1:
+        d.line(pts, fill=sp.team_color(goal["team"]), width=6, joint="curve")
+        x, y = pts[-1]
+        d.ellipse([x - 10, y - 10, x + 10, y + 10], fill="#ffffff")
+
+
+def card_lines(goal):
+    """The closing card's text: score, when/strength/shot, assists, rush."""
+    score = f"{goal['away']} {goal['away_score']} \u2013 {goal['home_score']} {goal['home']}"
+    line = (
+        f"{fmt_period(goal)} {goal['time']}  ·  {goal['strength']}  ·  {goal['shot_type']}".strip(
+            " ·"
+        )
+    )
+    assists = f"Assists: {', '.join(goal['assists']) or 'Unassisted'}"
+    rush = f"Puck travelled {goal['rush_ft']:.0f} ft in the last {RUSH_SECONDS} seconds"
+    return score, line, assists, rush
 
 
 def closing_card(goal):
@@ -622,52 +792,56 @@ def closing_card(goal):
 
     # The puck's path over the rush, on the attacking half of the rink.
     scale = 9.0
-    half = draw_rink(scale).crop((0, 0, int(RINK_W * scale), int((RINK_L / 2 + 4) * scale)))
+    half = attacking_half(scale)
     x0, y0 = (VW - half.width) // 2, 400
     img.paste(half, (x0, y0))
-    frames, high, gf = goal["frames"], goal["high"], goal["goal_frame"]
-    pts = []
-    for i in range(max(0, gf - RUSH_SECONDS * TRACK_HZ), gf + 1):
-        p = puck_of(frames[i])
-        if p:
-            a, b = to_attack(p, high)
-            if a >= RINK_L / 2 - 4:
-                pts.append((x0 + b * scale, y0 + (RINK_L - a) * scale))
-    if len(pts) > 1:
-        d.line(pts, fill=sp.team_color(goal["team"]), width=6, joint="curve")
-        x, y = pts[-1]
-        d.ellipse([x - 10, y - 10, x + 10, y + 10], fill="#ffffff")
+    draw_rush_path(
+        d, [(x0 + b * scale, y0 + (RINK_L - a) * scale) for a, b in rush_path(goal)], goal
+    )
 
+    score, line, assists, rush = card_lines(goal)
     y = y0 + half.height + 50
-    score = f"{goal['away']} {goal['away_score']} \u2013 {goal['home_score']} {goal['home']}"
     d.text((64, y), score, font=sp.display(110), fill=sp.TEXT)
     y += 140
-    line = (
-        f"{fmt_period(goal)} {goal['time']}  ·  {goal['strength']}  ·  {goal['shot_type']}".strip(
-            " ·"
-        )
-    )
     d.text((64, y), line, font=sp.body(36), fill=sp.MUTED)
     y += 64
-    assists = ", ".join(goal["assists"]) or "Unassisted"
-    d.text(
-        (64, y),
-        f"Assists: {assists}",
-        font=sp.fit(d, f"Assists: {assists}", sp.body, 36, VW - 128),
-        fill=sp.TEXT,
-    )
+    d.text((64, y), assists, font=sp.fit(d, assists, sp.body, 36, VW - 128), fill=sp.TEXT)
     y += 64
-    d.text(
-        (64, y),
-        f"Puck travelled {goal['rush_ft']:.0f} ft in the last {RUSH_SECONDS} seconds",
-        font=sp.body(36),
-        fill=sp.TEXT,
-    )
+    d.text((64, y), rush, font=sp.body(36), fill=sp.TEXT)
     return img
 
 
-def encode_mp4(frames):
-    """Frames (PIL images, VW x VH) -> H.264/AAC MP4 bytes via ffmpeg."""
+def closing_card_landscape(goal):
+    """closing_card() for --landscape: the column on the left; the attacking
+    half turned (net on the right) with the rush, and the card's text, on the
+    right."""
+    img = Image.new("RGB", (LW, LH), sp.BG0)
+    d = ImageDraw.Draw(img)
+    landscape_column(d, goal)
+
+    scale = 7.5
+    half = turned(attacking_half(scale))
+    x0, y0 = L_VP_LEFT + (L_VP_RIGHT - L_VP_LEFT - half.width) // 2, 56
+    img.paste(half, (x0, y0))
+    a0 = RINK_L / 2 - 4  # the half's left edge
+    draw_rush_path(d, [(x0 + (a - a0) * scale, y0 + b * scale) for a, b in rush_path(goal)], goal)
+
+    score, line, assists, rush = card_lines(goal)
+    w = L_VP_RIGHT - x0
+    y = y0 + half.height + 30
+    d.text((x0, y), score, font=sp.display(96), fill=sp.TEXT)
+    y += 122
+    d.text((x0, y), line, font=sp.fit(d, line, sp.body, 34, w), fill=sp.MUTED)
+    y += 56
+    d.text((x0, y), assists, font=sp.fit(d, assists, sp.body, 34, w), fill=sp.TEXT)
+    y += 56
+    d.text((x0, y), rush, font=sp.body(34), fill=sp.TEXT)
+    return img
+
+
+def encode_mp4(frames, size=(VW, VH)):
+    """Frames (PIL images, size = (width, height)) -> H.264/AAC MP4 bytes via
+    ffmpeg."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError(
@@ -677,7 +851,7 @@ def encode_mp4(frames):
         out = Path(tmp) / "clip.mp4"
         cmd = [
             ffmpeg, "-y", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{VW}x{VH}", "-r", str(FPS), "-i", "-",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{size[0]}x{size[1]}", "-r", str(FPS), "-i", "-",
             "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
             "-shortest", "-map", "0:v", "-map", "1:a",
             "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-crf", "20",
@@ -742,7 +916,7 @@ def render_still(goal, location):
         note="Shot location: NHL play-by-play",
     )
     scale = 8.0
-    half = draw_rink(scale).crop((0, 0, int(RINK_W * scale), int((RINK_L / 2 + 4) * scale)))
+    half = attacking_half(scale)
     x0 = (sp.W - half.width) // 2
     img.paste(half, (x0, top + 10))
     if location:
@@ -876,10 +1050,110 @@ def run(day=None, dry_run=False):
     return post_goal_of_week(client, day, dry_run)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="EyeWall weekly Goal of the Week post")
+# ── One named goal ──────────────────────────────────────────────────────
+
+
+def find_goal(landing, event_id):
+    """The goal with this play-by-play event id in a game center `landing`
+    payload, or None (shootout goals aren't in goals_in_game())."""
+    return next((g for g in goals_in_game(landing) if g["event_id"] == event_id), None)
+
+
+def default_out(game_id, event_id, landscape=False):
+    return sp.OUT_DIR / f"goal-{game_id}-{event_id}{'-landscape' if landscape else ''}.mp4"
+
+
+def fail(message):
+    sys.stdout.flush()  # after the progress lines, not before them
+    print(f"  ERROR: {message}", file=sys.stderr)
+    return 1
+
+
+def render_one(game_id, event_id, landscape=False, out=None):
+    """One named goal's clip, drawn exactly like the weekly one, written to
+    `out` (default: social_out/goal-<game>-<event>[-landscape].mp4). Local
+    only: never uploads or posts, and needs no Supabase client. -> exit code."""
+    shape = "landscape" if landscape else "portrait"
+    print(f"\n--- {KIND}: game {game_id}, event {event_id} ({shape}) ---")
+    with httpx.Client(timeout=30) as http:
+        try:
+            res = http.get(f"{NHL_WEB}/gamecenter/{game_id}/landing")
+            res.raise_for_status()
+            landing = res.json()
+        except (httpx.HTTPError, ValueError) as e:
+            return fail(f"game {game_id} fetch failed: {e}")
+        goal = find_goal(landing, event_id)
+        if not goal:
+            found = ", ".join(f"{g['event_id']} ({g['last']})" for g in goals_in_game(landing))
+            return fail(
+                f"game {game_id} has no goal with event id {event_id}; its goals: {found or 'none'}"
+            )
+        if not goal["replay_url"]:
+            return fail(
+                f"{goal['first']} {goal['last']}'s goal (event {event_id}) has no tracking replay "
+                "(no pptReplayUrl in the game center feed)"
+            )
+        frames = fetch_replay(goal["replay_url"], http)
+    if not frames:
+        return fail(f"the tracking replay couldn't be fetched: {goal['replay_url']}")
+    goal = analyse(goal, frames)
+    if not goal:
+        return fail("the goal frame couldn't be found in the tracking replay")
+    print(
+        f"  {goal['first']} {goal['last']} ({goal['team']}), {headline(goal)}, "
+        f"{fmt_period(goal)} {goal['time']}, rush {goal['rush_ft']:.0f} ft"
+    )
+    layout = LANDSCAPE if landscape else PORTRAIT
+    try:
+        mp4 = encode_mp4(replay_frames(goal, landscape=landscape), size=layout.size)
+    except RuntimeError as e:
+        return fail(str(e))
+    path = Path(out) if out else default_out(game_id, event_id, landscape)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(mp4)
+    print(
+        f"  Wrote {path} ({len(mp4) // 1024} KB, {layout.size[0]}x{layout.size[1]}); "
+        f"GOAL at {goal_moment_ms(goal) / 1000:.1f} s"
+    )
+    return 0
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="EyeWall weekly Goal of the Week post, or one named goal's clip"
+    )
     parser.add_argument("kind", choices=[KIND])
     parser.add_argument("--date", type=date.fromisoformat, default=None, help="ET date to run as")
     parser.add_argument("--dry-run", action="store_true", help="Render locally; no upload/post")
-    args = parser.parse_args()
-    sys.exit(run(day=args.date, dry_run=args.dry_run))
+    one = parser.add_argument_group(
+        "one named goal", "render one goal locally instead of the week's pick (never posts)"
+    )
+    one.add_argument("--game", type=int, help="NHL game id, e.g. 2025021237")
+    one.add_argument("--event", type=int, help="the goal's event id in that game")
+    one.add_argument("--landscape", action="store_true", help="1920x1080 instead of 1080x1920")
+    one.add_argument(
+        "--out",
+        type=Path,
+        help="MP4 path (default: social_out/goal-<game>-<event>[-landscape].mp4)",
+    )
+    args = parser.parse_args(argv)
+    if (args.game is None) != (args.event is None):
+        parser.error("--game and --event go together")
+    if args.game is None and (args.landscape or args.out):
+        parser.error("--landscape and --out need --game and --event (the weekly post is portrait)")
+    if args.game is not None and args.date:
+        parser.error("--date picks the week's goal; it can't be combined with --game/--event")
+    if args.game is not None:
+        args.dry_run = True  # a named goal is only ever rendered, never posted
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.game is not None:
+        return render_one(args.game, args.event, landscape=args.landscape, out=args.out)
+    return run(day=args.date, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

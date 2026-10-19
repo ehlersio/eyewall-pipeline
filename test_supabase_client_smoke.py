@@ -19,6 +19,8 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 import warnings
 
+import pytest
+
 import db
 import tankathon_ingest
 
@@ -36,3 +38,12 @@ def test_tankathon_get_supabase_constructs_without_deprecation_warning():
         # .table(...) forces lazy postgrest sub-client construction — the
         # deprecation only fires there, not at create_client() itself.
         assert client.table("draft_pick_order_2026") is not None
+
+
+def test_get_client_without_credentials_fails_clearly(monkeypatch):
+    # db reads the credentials at import without requiring them (so
+    # goal_of_week.py --game can render a clip without Supabase);
+    # get_client() is where a missing one surfaces.
+    monkeypatch.setattr(db, "SUPABASE_URL", "")
+    with pytest.raises(RuntimeError, match="SUPABASE_URL"):
+        db.get_client()
