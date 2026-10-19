@@ -219,6 +219,81 @@ class TestPublish:
         assert "apps.apple.com" not in ig.platform_caption("instagram", caption)
 
 
+def graph_error(status, body):
+    """A GraphError as graph_post raises it for a response with this body."""
+    req = ig.httpx.Request("POST", f"{ig.GRAPH}/u1/media_publish")
+    if isinstance(body, dict):
+        res = ig.httpx.Response(status, json=body, request=req)
+    else:
+        res = ig.httpx.Response(status, text=body, request=req)
+    return ig.GraphError("u1/media_publish", res)
+
+
+NOT_READY = {
+    "error": {
+        "message": "Media ID is not available",
+        "type": "OAuthException",
+        "code": 9007,
+        "error_subcode": 2207027,
+        "is_transient": False,
+    }
+}
+
+
+class TestPublishRetry:
+    def test_not_ready_is_retried_until_it_publishes(self):
+        answers = iter([graph_error(400, NOT_READY), graph_error(400, NOT_READY), {"id": "m1"}])
+
+        def post(*a, **k):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with (
+            patch.object(ig, "graph_post", side_effect=post) as gp,
+            patch.object(ig.time, "sleep") as sleep,
+        ):
+            assert ig.publish_container("u1", "tok", "car") == "m1"
+        assert gp.call_count == 3
+        assert all(c.args[0] == "u1/media_publish" for c in gp.call_args_list)
+        assert all(c.kwargs == {"creation_id": "car"} for c in gp.call_args_list)
+        assert sleep.call_count == 2
+
+    def test_other_graph_errors_are_not_retried(self):
+        err = graph_error(400, {"error": {"message": "Invalid parameter", "code": 100}})
+        with (
+            patch.object(ig, "graph_post", side_effect=err) as gp,
+            patch.object(ig.time, "sleep") as sleep,
+            pytest.raises(ig.GraphError) as exc,
+        ):
+            ig.publish_container("u1", "tok", "car")
+        assert exc.value is err
+        assert gp.call_count == 1
+        sleep.assert_not_called()
+
+    def test_not_ready_on_every_try_raises_after_the_last(self):
+        with (
+            patch.object(ig, "graph_post", side_effect=graph_error(400, NOT_READY)) as gp,
+            patch.object(ig.time, "sleep") as sleep,
+            pytest.raises(ig.GraphError, match="Media ID is not available"),
+        ):
+            ig.publish_container("u1", "tok", "car", tries=4, seconds=0)
+        assert gp.call_count == 4
+        assert sleep.call_count == 3
+
+    def test_graph_error_parses_code_and_subcode(self):
+        err = graph_error(400, NOT_READY)
+        assert (err.status, err.code, err.subcode) == (400, 9007, 2207027)
+        assert str(err).startswith("Graph API u1/media_publish failed (400): ")
+        assert isinstance(err, RuntimeError)
+
+    def test_graph_error_without_json_body_has_no_code(self):
+        err = graph_error(502, "<html>Bad Gateway</html>")
+        assert (err.status, err.code, err.subcode) == (502, None, None)
+        assert str(err) == "Graph API u1/media_publish failed (502): <html>Bad Gateway</html>"
+
+
 def fake_platforms(ig_result=None, fb_result=None):
     """PLATFORMS with mocked publishers; a result that's an exception raises."""
     ig_pub = MagicMock(side_effect=ig_result if isinstance(ig_result, Exception) else None)
