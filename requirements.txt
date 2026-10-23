@@ -13,4 +13,4 @@ supafunc==0.10.2
 numpy==2.4.6
 scikit-learn==1.9.1
 scipy==1.17.1
-pillow==12.3.0
+pillow==13.0.0
