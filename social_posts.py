@@ -80,6 +80,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
+from storage3.exceptions import StorageApiError
 
 import moneypuck
 from db import NHL_SEASON, get_client
@@ -108,6 +109,12 @@ CONTAINER_POLL_TRIES = 40
 # is to wait and retry. 12 tries 5s apart is about a minute.
 PUBLISH_RETRY_SECONDS = 5
 PUBLISH_RETRY_TRIES = 12
+# Supabase Storage answered one upload with a bare 504 Gateway Time-out
+# (2026-10-23, the winners card), a blip the hourly backup run had to cover.
+# A 5xx or a dropped connection is retried a few times, after a short wait;
+# a 4xx (bad key, missing bucket) is not, since retrying won't change it.
+UPLOAD_RETRY_SECONDS = 10
+UPLOAD_RETRY_TRIES = 3
 MEDIA_NOT_READY_CODE = 9007
 MEDIA_NOT_READY_SUBCODE = 2207027
 GRAPH_VIDEO = "https://graph-video.facebook.com/v25.0"
@@ -1145,12 +1152,42 @@ VIDEO_PLATFORMS = {
 }
 
 
+def _transient_upload_error(exc):
+    """A Storage 5xx (the gateway's own HTML 504 included: storage3 passes
+    its status through) or a connection that dropped or timed out."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, StorageApiError):
+        try:
+            return int(exc.status) >= 500
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def storage_upload(bucket, path, data, options):
+    """bucket.upload(path, data, options), tried up to UPLOAD_RETRY_TRIES
+    times on a transient error. Anything else, or the last failure, raises
+    as is."""
+    for attempt in range(1, UPLOAD_RETRY_TRIES + 1):
+        try:
+            return bucket.upload(path, data, options)
+        except Exception as exc:
+            if attempt == UPLOAD_RETRY_TRIES or not _transient_upload_error(exc):
+                raise
+            print(
+                f"  storage: upload of {path} failed ({type(exc).__name__}), "
+                f"retry {attempt}/{UPLOAD_RETRY_TRIES - 1} in {UPLOAD_RETRY_SECONDS}s"
+            )
+            time.sleep(UPLOAD_RETRY_SECONDS)
+
+
 def upload_images(client, kind, post_key, jpegs):
     urls = []
     bucket = client.storage.from_(BUCKET)
     for i, data in enumerate(jpegs, 1):
         path = f"{kind}/{post_key}-{i}.jpg"
-        bucket.upload(path, data, {"content-type": "image/jpeg", "upsert": "true"})
+        storage_upload(bucket, path, data, {"content-type": "image/jpeg", "upsert": "true"})
         urls.append(bucket.get_public_url(path).rstrip("?"))
     return urls
 
@@ -1250,7 +1287,7 @@ def ship_video(client, kind, post_key, mp4, caption, dry_run, thumb_offset_ms=No
     done = published_platforms(client, post_key)
     path = f"{kind}/{post_key}.mp4"
     bucket = client.storage.from_(BUCKET)
-    bucket.upload(path, mp4, {"content-type": "video/mp4", "upsert": "true"})
+    storage_upload(bucket, path, mp4, {"content-type": "video/mp4", "upsert": "true"})
     urls = [bucket.get_public_url(path).rstrip("?")]
     print(f"  Uploaded video ({len(mp4) // 1024} KB)")
     return publish_everywhere(

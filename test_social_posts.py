@@ -322,6 +322,71 @@ def creds(monkeypatch):
     monkeypatch.setenv("FB_PAGE_ID", "pg")
 
 
+def storage_error(status):
+    return ig.StorageApiError("Unable to parse error message: <html>", "InternalError", status)
+
+
+class TestUploadRetry:
+    """storage_upload: a Storage 5xx or a dropped connection is retried a few
+    times; a 4xx or the last failure raises as is."""
+
+    def upload(self, answers):
+        bucket = MagicMock()
+        answers = iter(answers)
+
+        def upload(*a, **k):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        bucket.upload.side_effect = upload
+        with patch.object(ig.time, "sleep") as sleep:
+            result = ig.storage_upload(bucket, "winners/k-1.jpg", b"jpeg", {"upsert": "true"})
+        return bucket, sleep, result
+
+    def test_504_is_retried_until_the_upload_lands(self):
+        bucket, sleep, result = self.upload([storage_error(504), storage_error(503), "ok"])
+        assert result == "ok"
+        assert bucket.upload.call_count == 3
+        assert bucket.upload.call_args.args == ("winners/k-1.jpg", b"jpeg", {"upsert": "true"})
+        assert sleep.call_args_list == [((ig.UPLOAD_RETRY_SECONDS,),)] * 2
+
+    def test_dropped_connection_is_retried(self):
+        bucket, _, result = self.upload([ig.httpx.ReadTimeout("slow"), "ok"])
+        assert result == "ok"
+        assert bucket.upload.call_count == 2
+
+    def test_4xx_raises_at_once(self):
+        with pytest.raises(ig.StorageApiError):
+            self.upload([storage_error(400), "ok"])
+
+    def test_string_status_is_still_read(self):
+        _, _, result = self.upload([storage_error("502"), "ok"])
+        assert result == "ok"
+        with pytest.raises(ig.StorageApiError):
+            self.upload([storage_error("not a number"), "ok"])
+
+    def test_other_errors_raise_at_once(self):
+        with pytest.raises(RuntimeError):
+            self.upload([RuntimeError("boom"), "ok"])
+
+    def test_last_failure_raises(self):
+        with pytest.raises(ig.StorageApiError) as err:
+            self.upload([storage_error(504)] * ig.UPLOAD_RETRY_TRIES + ["ok"])
+        assert err.value.status == 504
+
+    def test_upload_images_goes_through_the_retry(self):
+        client = MagicMock()
+        bucket = client.storage.from_.return_value
+        bucket.upload.side_effect = [storage_error(504), None, None]
+        bucket.get_public_url.side_effect = lambda path: f"https://x/{path}?"
+        with patch.object(ig.time, "sleep"):
+            urls = ig.upload_images(client, "winners", "k", [b"a", b"b"])
+        assert urls == ["https://x/winners/k-1.jpg", "https://x/winners/k-2.jpg"]
+        assert bucket.upload.call_count == 3
+
+
 class TestShip:
     def test_publishes_both_with_platform_captions(self, creds):
         platforms = fake_platforms("ig1", "fb1")
