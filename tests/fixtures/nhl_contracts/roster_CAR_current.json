@@ -1,0 +1,73 @@
+{
+ "forwards": [
+  {
+   "id": 8478427,
+   "firstName": {
+    "default": "Sebastian"
+   },
+   "lastName": {
+    "default": "Aho"
+   },
+   "positionCode": "C",
+   "birthDate": "1997-07-26"
+  },
+  {
+   "id": 8482809,
+   "firstName": {
+    "default": "Jackson"
+   },
+   "lastName": {
+    "default": "Blake"
+   },
+   "positionCode": "R",
+   "birthDate": "2003-08-03"
+  },
+  {
+   "id": 8480291,
+   "firstName": {
+    "default": "Skyler"
+   },
+   "lastName": {
+    "default": "Brind'Amour"
+   },
+   "positionCode": "C",
+   "birthDate": "1999-07-27"
+  },
+  {
+   "id": 8473533,
+   "firstName": {
+    "default": "Jordan"
+   },
+   "lastName": {
+    "default": "Staal"
+   },
+   "positionCode": "C",
+   "birthDate": "1988-09-10"
+  }
+ ],
+ "defensemen": [
+  {
+   "id": 8478970,
+   "firstName": {
+    "default": "Jalen"
+   },
+   "lastName": {
+    "default": "Chatfield"
+   },
+   "positionCode": "D",
+   "birthDate": "1996-05-15"
+  },
+  {
+   "id": 8476958,
+   "firstName": {
+    "default": "Jaccob"
+   },
+   "lastName": {
+    "default": "Slavin"
+   },
+   "positionCode": "D",
+   "birthDate": "1994-05-01"
+  }
+ ],
+ "goalies": []
+}

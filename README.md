@@ -48,6 +48,7 @@ python run.py starting_goalie  # Start probabilities for every team's next game
 python run.py transactions     # ESPN NHL transactions (second argument is a calendar year)
 python run.py draft_history    # Draft pick history, last 5 drafts (second argument is a first draft year)
 python run.py trade_trees      # Structured trades + where each asset went next
+python run.py contracts [--force]  # Open nhl-contracts dataset -> nhl_contracts* (skips when unchanged)
 python run.py win_probs        # Pre-game Elo win probabilities, games today/tomorrow
 python run.py playoff_odds     # Simulated playoff odds only
 python run.py prediction_scorecard [--backtest]  # Public scorecard (live rows; --backtest adds the three backtests)
@@ -156,7 +157,7 @@ python hockeytech_power_rankings.py echl --narratives
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → draft_history → trade_trees → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -441,6 +442,33 @@ python trade_trees.py --dry-run
 ```
 
 Run order: after `transactions` and `draft_history`. Requires `docs/session_trade_trees.sql` to be run in Supabase first (creates both tables + RLS policies).
+
+### `nhl_contracts.py` (2026-10)
+Loads the open **nhl-contracts** dataset ([github.com/ehlersio/nhl-contracts](https://github.com/ehlersio/nhl-contracts), CC0) into Supabase: NHL player contracts (one row per contract), per-season cap hits and salary structure, no-trade/no-move clauses, and `gaps.json` (current roster players the dataset has no public figure for). The dataset is published on the repo's rolling GitHub release `contracts` (`releases/download/contracts/<file>.json`) and refreshed hourly by a Worker-dispatched workflow; this stage downloads `contracts.json`, `contract_seasons.json`, `clauses.json`, `gaps.json` and `timestamp.json` once a night. Tiers A–C are official sources (club release, NHL.com, ESPN wire); D (PuckPedia public posts, r/hockey quotes of insiders) and E (CapFriendly pages archived by the Internet Archive, to July 2024) are reported. Coverage of current rosters at launch: 92% of players have a contract row, 82% a cap hit, 63% per-season structure, 34% clauses.
+
+**Skip when unchanged:** `nhl_contracts_loads` keeps one row per successful load; the stage fetches only `timestamp.json` and stops when its `updated_at` and the current season both match the latest row (a season rollover on July 1 reloads an unchanged dataset, because `is_current`/`years_left` move). `--force` overrides.
+
+**Tables** (`docs/2026-10-23_nhl_contracts.sql`):
+- `nhl_contracts` — one row per `contract_key` with every dataset column, plus `is_current` (the span contains the season containing today, July 1 boundary), `years_left` (seasons after the current one; 0 once expired), `expiry_status` (the dataset's text as given), `expiry_type` (`UFA`/`RFA`: the stated status when it names one, else derived from the player's age on June 30 of the expiry year — 27 or older is UFA — when a birth date is known from the current rosters (`/roster/{team}/current`) or the `players` table) and `expiry_type_derived`. Only contracts with an NHL `player_id` are loaded (about half of the dataset's 6,980 rows; the rest are older contracts).
+- `nhl_contract_seasons` — one row per `(contract_key, season)`: `cap_hit_usd`, `aav_usd`, base/signing bonus/performance bonus/total salary, minors salary, `one_way`, clause label. `player_id` and `team` are copied from the contract so a team's cap hits per season can be summed without a join.
+- `nhl_contract_clauses` — one row per `(contract_key, kind, season_from)`: `NMC` / `NTC` / `M-NTC` / `M-NMC`, `season_from`/`season_to`, `list_size`/`list_type` for modified clauses.
+- `nhl_contract_gaps` — `gaps.json`: `gap` = `no_contract` / `no_money` / `no_structure`, with the dataset's latest matching ESPN / NHL.com / PuckPedia text as hints. A closed gap disappears on the next load.
+- `nhl_cap_limits` — `season`, `cap_ceiling`, `cap_floor`, `min_salary`, only for seasons the NHL has announced (2026-27: $104M / $77M / $850K, the figures the app's cap tab used). Add a season to `CAP_LIMITS` when published; later seasons are not projected.
+- `nhl_contracts_loads` — the load log (counts, `dataset_updated_at`, `season`).
+
+Every row carries `dataset_updated_at`; after a load, rows in the four dataset tables with an older stamp are deleted, so the tables mirror the release (a contract the dataset re-merges under a new key does not linger). Upserts: `contract_key` / `(contract_key, season)` / `(contract_key, kind, season_from)` (a `NULLS NOT DISTINCT` constraint, since some tier-D clauses have no seasons) / `player_id`.
+
+**Dataset quirks handled** (2026-10-23): `contract_key` is not unique in `contracts.json` (54 keys appear twice — franchise relocations ARI/UTA, or a PTO and the standard deal that followed in the same month); the fuller row wins (money known, then more sources, then better tier, then later signing date). A few rows say `UTAH`; stored as `UTA`. The clause key has 14 duplicates; the fuller row wins. **Not handled:** the same contract can appear under two keys (one by NHL id, one by normalized name) when the dataset could not join a name-only source — e.g. Jaccob Slavin's 2024 extension is both `8476958|CAR|2024-07` (tier B, from the club) and `jaccob slavin|CAR|2024-07` (tier E, archived CapFriendly) with slightly different figures. Both rows are stored; a reader should expect more than one `is_current` row per player and prefer the better `best_tier`. That merge belongs upstream.
+
+**Cap space is not computable from these tables yet:** retained salary, buyouts and LTIR are not in the dataset, and coverage is partial (`nhl_contract_gaps` says who is missing). Show cap hits and "no public figure", not a team's space.
+
+```bash
+python nhl_contracts.py            # load if the dataset changed since the last load
+python nhl_contracts.py --force    # reload regardless
+python nhl_contracts.py --dry-run  # fetch, map, print counts; write nothing
+```
+
+Requires `docs/2026-10-23_nhl_contracts.sql` to be run in Supabase first (six tables + RLS policies). Until then the nightly `nhl_contracts` stage fails on its first upsert and is recorded by `run.py`'s stage isolation; nothing else is affected.
 
 ### `playoff_odds.py` (2026-09)
 NHL playoff odds by simulating the rest of the regular season (default 10,000 times) → `playoff_odds` (one row per team per nightly run, history kept) and `playoff_odds_game_impacts`. Runs right after `playoff_race` in `run.py`.
@@ -1291,6 +1319,12 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `draft_pick_history` | (2026-09) Every NHL draft pick since 1963 with its chain of owners (`pick_chain`), one row per `(draft_year, overall_pick)` — see `draft_history.py` above |
 | `trades` | (2026-09) One row per NHL trade, paired from `nhl_transactions` entries — see `trade_trees.py` above |
 | `trade_assets` | (2026-09) Every player / pick / consideration in each trade, picks resolved to the drafted player, `next_trade_id` linking to where it went next — see `trade_trees.py` above |
+| `nhl_contracts` | (2026-10) One row per nhl-contracts dataset `contract_key` (players with an NHL id only), with `is_current`, `years_left`, `expiry_type` (+ `expiry_type_derived`) — see `nhl_contracts.py` above |
+| `nhl_contract_seasons` | (2026-10) Per-season cap hit / salary structure per contract, with `player_id` and `team` denormalized — see `nhl_contracts.py` above |
+| `nhl_contract_clauses` | (2026-10) NMC / NTC / M-NTC clauses per contract and season range — see `nhl_contracts.py` above |
+| `nhl_contract_gaps` | (2026-10) Current roster players the dataset has no public contract / money / structure for — see `nhl_contracts.py` above |
+| `nhl_cap_limits` | (2026-10) Cap ceiling / floor / minimum salary per announced season (2026-27 only today) — see `nhl_contracts.py` above |
+| `nhl_contracts_loads` | (2026-10) One row per successful dataset load; the latest row is the skip-check state — see `nhl_contracts.py` above |
 | `playoff_odds` | (2026-09) Simulated playoff/division odds and projected points, one row per `(season, run_date, team)`, with a `change` explanation — see `playoff_odds.py` above |
 | `playoff_odds_game_impacts` | (2026-09) Each team's playoff odds under each result of the next game-day's games (that game flipped in the same simulated seasons), one row per `(season, run_date, game_id, outcome, team)` — see `playoff_odds.py` above |
 | `team_elo_ratings` | (2026-09) NHL Elo per team, full nightly replay — `elo_ratings.py` |
@@ -1498,6 +1532,7 @@ True RAPM via ridge regression (alpha=2500):
 - **PWHL news:** CF datacenter IPs blocked by some RSS sources; `pwhl_news.py` (GH Actions) fetches successfully every night. Session: news ingestion investigation found the real gap wasn't the sources — `/pwhl/news/ingest`'s KV write used a 30min TTL for a once-nightly job, so the real articles it found were only ever visible for 30 minutes a day. Fixed to 25hr, and the Worker's own on-demand `fetchPWHLNews()` now merges with (rather than overwrites) whatever this nightly job already wrote. Also swapped the broken `espn-pwhl` source (ESPN has no working hockey/PWHL RSS category at all) for The Athletic's dedicated women's-hockey feed.
 - **PWHL Corsi/Fenwick:** No missed shots in HockeyTech — FF% is SOG-based proxy only.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
+- **Contracts / cap space:** contract figures come from the open nhl-contracts dataset (`nhl_contracts.py`), which covers 92% of current roster players (82% with a cap hit) and has no retained salary, buyouts or LTIR, so a team's cap space cannot be computed; the same contract can also appear under an id-keyed and a name-keyed row. See `nhl_contracts.py` above.
 - **Transactions/Injuries:** the NHL API has neither; both come from ESPN's unofficial site API (`injuries.py`, `transactions.py`), which has no player ids (name matching), can carry stale injury entries, and blocks custom User-Agents. See those modules above.
 - **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Re-confirmed live (Session: news ingestion investigation) with a real GH Actions runner — still a 403 bot-block page. The per-team `TEAM_NEWS_SOURCES` reddit-* entries and the now-permanently-no-op `/reddit/ingest` route (both in `eyewall-poller`) were removed in the same session; 25 teams had reddit as their *only* team-specific source, and 21 of those 25 got a real replacement blog instead (see `sbnation-ingest.yml`'s comment for the list). MIN/STL/SEA/UTA still have no team-specific blog source at all (28 of 32 teams now do). Revisit Reddit only if a workaround surfaces; not planned for October 2026.
 - **PWHL WAR/RAPM:** not built. HockeyTech PBP has no `player_change` events (checked June 2026), but `modulekit&view=gameshifts` returned populated shifts for a PWHL control game during the 2026-08 AHL/ECHL investigation (next bullet). Nothing ingests that view yet; check its coverage across PWHL seasons before scoping shift-based RAPM.

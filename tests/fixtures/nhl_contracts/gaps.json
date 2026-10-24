@@ -1,0 +1,50 @@
+[
+ {
+  "player_id": 8482809,
+  "player_name": "Jackson Blake",
+  "team": "CAR",
+  "gap": "no_structure",
+  "status": "has_contract",
+  "last_contract_end": "2033-34",
+  "espn_hint": "2026-07-02 Acquired F Blake Coleman and D Olli Määttä from Calgary in exchange for D Jake Middleton, a 2027 third-round draft pick,",
+  "forge_hint": "2026-07-28 Quinn Hughes, Wild to discuss contract this week: report",
+  "bsky_hint": "2026-06-23 The #SJSharks re-signed 23 y/o RFA LD Nolan Allan to 2 year $875K Cap Hit Deal  Year 1 $850K NHL, $300K Minors, $375k Gu",
+  "checked_season": "2026-27"
+ },
+ {
+  "player_id": 8482093,
+  "player_name": "Seth Jarvis",
+  "team": "CAR",
+  "gap": "no_money",
+  "status": "has_contract",
+  "last_contract_end": "2031-32",
+  "espn_hint": "2026-10-21 Activated F Seth Jarvis from injured reserve. Recalled F Skyler Brind'Amour from Chicago (AHL). Assigned F Bradly Nadeau",
+  "forge_hint": "2026-09-27 Canes To Assign Three Players To Chicago Wolves",
+  "bsky_hint": "",
+  "checked_season": "2026-27"
+ },
+ {
+  "player_id": 8480291,
+  "player_name": "Skyler Brind'Amour",
+  "team": "CAR",
+  "gap": "no_money",
+  "status": "has_contract",
+  "last_contract_end": "2026-27",
+  "espn_hint": "2026-10-21 Activated F Seth Jarvis from injured reserve. Recalled F Skyler Brind'Amour from Chicago (AHL). Assigned F Bradly Nadeau",
+  "forge_hint": "2025-12-31 Bold predictions for 2026 include Ovechkin re-signing, Sharks, Blackhawks in playoffs",
+  "bsky_hint": "2025-07-15 The #CauseChaos signed 25 y/o RFA F Skyler Brind'Amour to 1 year deal  NHL 775K Minors 90K Guaranteed 100K  Rep'd by Jas",
+  "checked_season": "2026-27"
+ },
+ {
+  "player_id": 8481721,
+  "player_name": "Arseny Gritsyuk",
+  "team": "NJD",
+  "gap": "no_structure",
+  "status": "has_contract",
+  "last_contract_end": "2029-30",
+  "espn_hint": "2026-06-30 Acquired Fs Evan Rodrigues, Jesper Boqvist, and Ben Steeves from Florida in exchange for G Jacob Markstrom and F Angus C",
+  "forge_hint": "2026-07-03 Gritsyuk signs 3-year, $9.75 million contract with Devils",
+  "bsky_hint": "2026-06-30 The #NJDevils signed 25 y/o F Arseny Gritsyuk to a 3 year $3.25M cap hit deal  Yr 1: $2.25M Yr 2: $2.75M  Yr 3: $4.75M  ",
+  "checked_season": "2026-27"
+ }
+]

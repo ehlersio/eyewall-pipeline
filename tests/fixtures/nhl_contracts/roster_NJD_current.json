@@ -1,0 +1,29 @@
+{
+ "forwards": [
+  {
+   "id": 8481721,
+   "firstName": {
+    "default": "Arseny"
+   },
+   "lastName": {
+    "default": "Gritsyuk"
+   },
+   "positionCode": "R",
+   "birthDate": "2001-03-15"
+  }
+ ],
+ "defensemen": [],
+ "goalies": [
+  {
+   "id": 8482465,
+   "firstName": {
+    "default": "Rémi"
+   },
+   "lastName": {
+    "default": "Poirier"
+   },
+   "positionCode": "G",
+   "birthDate": "2001-10-06"
+  }
+ ]
+}

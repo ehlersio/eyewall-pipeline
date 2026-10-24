@@ -1,0 +1,86 @@
+[
+ {
+  "contract_key": "8471215|PIT|2026-05",
+  "kind": "NMC",
+  "season_from": null,
+  "season_to": null,
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "D",
+  "source_ids": "bsky:3mmrmydr2kl2r"
+ },
+ {
+  "contract_key": "8478038|COL|2023-10",
+  "kind": "NMC",
+  "season_from": "2024-25",
+  "season_to": "2025-26",
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240609205154:/players/devon-toews"
+ },
+ {
+  "contract_key": "8478038|COL|2023-10",
+  "kind": "M-NTC",
+  "season_from": "2026-27",
+  "season_to": "2030-31",
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240609205154:/players/devon-toews"
+ },
+ {
+  "contract_key": "8478038|COL|2023-10",
+  "kind": "M-NTC",
+  "season_from": "2026-27",
+  "season_to": "2029-30",
+  "list_size": 12,
+  "list_type": "no-trade",
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240704221504:/teams/avalanche"
+ },
+ {
+  "contract_key": "jordan staal|CAR|2012-07",
+  "kind": "NMC",
+  "season_from": "2013-14",
+  "season_to": "2022-23",
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240609204329:/players/jordan-staal"
+ },
+ {
+  "contract_key": "sebastian aho|CAR|2023-07",
+  "kind": "NMC",
+  "season_from": "2024-25",
+  "season_to": "2031-32",
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240609204351:/players/sebastian-aho"
+ },
+ {
+  "contract_key": "sebastian aho|CAR|2023-07",
+  "kind": "M-NTC",
+  "season_from": "2031-32",
+  "season_to": "2031-32",
+  "list_size": null,
+  "list_type": null,
+  "conflicts": "",
+  "n_sources": 1,
+  "best_tier": "E",
+  "source_ids": "wayback:20240609204351:/players/sebastian-aho"
+ }
+]
