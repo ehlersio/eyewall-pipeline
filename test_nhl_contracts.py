@@ -23,6 +23,13 @@ Fixture contracts and why each is there:
   jaccob slavin|CAR|2015-07        expiry 'RFA (Arb)' -> 'RFA'
   8478038|COL|2023-10              two clause rows share (key, kind, season_from)
   8471215|PIT|2026-05              clause with null season_from
+
+dead_cap.json (nhl-contracts #2, real rows from a local normalize of the
+2026-10-24 raw store): Carlo's 15% retained by BOS for TOR (tier D, with a
+counterparty), Campbell's EDM buyout seasons (tier E), Vlasic's SJS buyout
+(tier D, no player_id -> name key), Petry retained by MTL (tier E), one
+charge the dataset could not attribute to a team (skipped) and one
+without a player_id.
 """
 
 import json
@@ -336,6 +343,7 @@ class TestRun:
             "nhl_contracts",
             "nhl_contract_seasons",
             "nhl_contract_clauses",
+            "nhl_dead_cap",
             "nhl_contract_gaps",
             "nhl_cap_limits",
             "nhl_contracts_loads",
@@ -371,6 +379,7 @@ class TestRun:
             "nhl_contract_clauses": "contract_key,kind,season_from",
             "nhl_contract_gaps": "player_id",
             "nhl_cap_limits": "season",
+            "nhl_dead_cap": "team,kind,player_key,season",
             "nhl_contracts_loads": "dataset_updated_at",
         }
         assert sb.deletes == [
@@ -378,6 +387,7 @@ class TestRun:
             ("nhl_contract_seasons", ("dataset_updated_at", STAMP)),
             ("nhl_contract_clauses", ("dataset_updated_at", STAMP)),
             ("nhl_contract_gaps", ("dataset_updated_at", STAMP)),
+            ("nhl_dead_cap", ("dataset_updated_at", STAMP)),
         ]
         [load] = sb.upserts["nhl_contracts_loads"]
         assert load["dataset_updated_at"] == STAMP and load["season"] == "2026-27"
@@ -401,3 +411,84 @@ class TestRun:
         monkeypatch.setattr(nc, "fetch_file", lambda name: {"version": "0.1.0"})
         with pytest.raises(FetchError):
             nc.run(today=TODAY)
+
+
+# ── Dead cap ──────────────────────────────────────────────────────────────────
+
+
+class TestDeadCap:
+    def _built(self, dead_cap="fixture"):
+        dataset = {
+            name: _fixture(f"{name}.json")
+            for name in ("timestamp", "contracts", "contract_seasons", "clauses", "gaps")
+        }
+        if dead_cap == "fixture":
+            dataset["dead_cap"] = _fixture("dead_cap.json")
+        elif dead_cap is not None:
+            dataset["dead_cap"] = dead_cap
+        return nc.build_rows(dataset, {}, "2026-27")
+
+    def test_rows_are_keyed_by_team_kind_player_season_with_a_stable_player_key(self):
+        rows = self._built()["nhl_dead_cap"]
+        by = {(r["team"], r["kind"], r["player_name"], r["season"]): r for r in rows}
+        carlo = next(r for k, r in by.items() if k[2] == "Brandon Carlo")
+        assert (carlo["team"], carlo["kind"], carlo["counterparty"], carlo["cap_hit_usd"]) == (
+            "BOS",
+            "retained",
+            "TOR",
+            615000,
+        )
+        assert carlo["pct"] == 15.0 and carlo["best_tier"] == "D"
+        assert carlo["player_key"] == str(carlo["player_id"]) and carlo["player_id"] is not None
+        vlasic = [r for r in rows if "Vlasic" in r["player_name"]]
+        assert len(vlasic) == 2 and {r["season"] for r in vlasic} == {"2025-26", "2026-27"}
+        assert vlasic[0]["player_id"] is None and vlasic[0]["player_key"] == "marc edouard vlasic"
+        assert all(
+            r["dataset_updated_at"] == _fixture("timestamp.json")["updated_at"] for r in rows
+        )
+        assert set(nc.DEAD_CAP_COLUMNS) | {"player_key", "dataset_updated_at"} == set(rows[0])
+
+    def test_unattributed_charges_are_not_loaded(self):
+        src = _fixture("dead_cap.json")
+        assert any(r["team"] is None for r in src)
+        rows = self._built()["nhl_dead_cap"]
+        assert all(r["team"] for r in rows)
+        assert len(rows) == len([r for r in src if r["team"]])
+
+    def test_team_codes_are_normalized(self):
+        rows = self._built(
+            [
+                {
+                    "team": "UTAH",
+                    "kind": "retained",
+                    "player_name": "X Y",
+                    "player_id": 1,
+                    "season": "2026-27",
+                }
+            ]
+        )["nhl_dead_cap"]
+        assert rows[0]["team"] == "UTA" and rows[0]["player_key"] == "1"
+
+    def test_a_release_without_dead_cap_json_leaves_the_table_alone(self, wired, monkeypatch):
+        real = nc.fetch_file
+
+        def fetch_file(name):
+            if name == "dead_cap.json":
+                raise FetchError("404")
+            return real(name)
+
+        monkeypatch.setattr(nc, "fetch_file", fetch_file)
+        out = nc.run(today=TODAY)
+        assert "nhl_dead_cap" not in out
+        sb = wired["sb"]
+        assert "nhl_dead_cap" not in sb.upserts
+        assert all(t != "nhl_dead_cap" for t, _ in sb.deletes)
+
+    def test_run_upserts_and_prunes_dead_cap(self, wired):
+        out = nc.run(today=TODAY)
+        sb = wired["sb"]
+        assert out["nhl_dead_cap"] == len(sb.upserts["nhl_dead_cap"]) > 0
+        assert sb.conflicts["nhl_dead_cap"] == "team,kind,player_key,season"
+        stamp = _fixture("timestamp.json")["updated_at"]
+        assert ("nhl_dead_cap", ("dataset_updated_at", stamp)) in sb.deletes
+        assert sb.upserts["nhl_contracts_loads"][0]["n_dead_cap"] == out["nhl_dead_cap"]
