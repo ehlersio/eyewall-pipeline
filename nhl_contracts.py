@@ -12,7 +12,14 @@ pages archived by the Internet Archive, to July 2024) are reported.
 
 Tables written (docs/2026-10-23_nhl_contracts.sql, run by hand):
   nhl_contracts          one row per contract_key, every dataset column plus
-                         is_current / years_left / expiry_type (below)
+                         is_current / years_left / expiry_type (below).
+                         bought_out / end_season_signed (2026-10-25,
+                         docs/2026-10-25_nhl_contracts_bought_out.sql): on a
+                         bought-out contract the dataset's end_season is the
+                         last paid season and end_season_signed the end it
+                         was signed to (null otherwise, and on releases
+                         before the dataset added the columns); the buyout
+                         charges themselves are in nhl_dead_cap
   nhl_contract_seasons   one row per (contract_key, season), with player_id
                          and team copied from the contract so the Worker can
                          sum a team's cap hits per season without a join
@@ -121,6 +128,8 @@ CONTRACT_COLUMNS = (
     "one_way",
     "start_season",
     "end_season",
+    "end_season_signed",
+    "bought_out",
     "expiry_status",
     "agent",
     "re_signed",
@@ -400,6 +409,7 @@ def build_contract_row(r: dict, current: str, birth_dates: dict, stamp: str) -> 
     row = {c: _clean(r.get(c)) for c in CONTRACT_COLUMNS}
     row["player_id"] = int(r["player_id"])
     row["team"] = normalize_team(r.get("team"))
+    row["bought_out"] = bool(r.get("bought_out"))
     expiry_type, derived = resolve_expiry(
         r.get("expiry_status"), birth_dates.get(row["player_id"]), r.get("end_season")
     )
@@ -501,6 +511,7 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             "n_duplicate_keys": dup_keys,
             "n_duplicate_clause_keys": dup_clauses,
             "n_current": sum(1 for r in contract_rows if r["is_current"]),
+            "n_bought_out": sum(1 for r in contract_rows if r["bought_out"]),
             "n_expiry_derived": sum(1 for r in contract_rows if r["expiry_type_derived"]),
             "n_expiry_unknown": sum(1 for r in contract_rows if r["expiry_type"] is None),
         },

@@ -282,6 +282,27 @@ class TestBuildRows:
         assert aho["aav_usd"] == 9_750_000 and aho["term_years"] == 8
         assert aho["conflicts"] is None  # '' -> null
 
+    def test_bought_out_contract_keeps_its_signed_end_and_is_not_current(self):
+        built = _built()
+        by_key = {r["contract_key"]: r for r in built["nhl_contracts"]}
+        buyout = by_key["8400001|SJS|2023-07"]
+        assert (buyout["bought_out"], buyout["end_season"], buyout["end_season_signed"]) == (
+            True,
+            "2024-25",
+            "2030-31",
+        )
+        # the span is the paid one, so it ended before 2026-27
+        assert (buyout["is_current"], buyout["years_left"]) == (False, 0)
+        assert built["stats"]["n_bought_out"] == 1
+
+    def test_rows_without_the_buyout_keys_load_as_not_bought_out(self):
+        raw = {r["contract_key"]: r for r in _fixture("contracts.json")}
+        assert "bought_out" not in raw["sebastian aho|CAR|2023-07"]
+        aho = next(
+            r for r in _built()["nhl_contracts"] if r["contract_key"] == "sebastian aho|CAR|2023-07"
+        )
+        assert (aho["bought_out"], aho["end_season_signed"]) == (False, None)
+
     def test_season_rows_carry_player_id_and_team(self):
         seasons = [
             r
