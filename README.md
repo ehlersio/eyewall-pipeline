@@ -48,7 +48,7 @@ python run.py starting_goalie  # Start probabilities for every team's next game
 python run.py transactions     # ESPN NHL transactions (second argument is a calendar year)
 python run.py draft_history    # Draft pick history, last 5 drafts (second argument is a first draft year)
 python run.py trade_trees      # Structured trades + where each asset went next
-python run.py contracts [--force]  # Open nhl-contracts dataset -> nhl_contracts* (skips when unchanged)
+python run.py contracts [--force]  # Open nhl-contracts dataset -> nhl_contracts*, nhl_dead_cap (skips when unchanged)
 python run.py win_probs        # Pre-game Elo win probabilities, games today/tomorrow
 python run.py playoff_odds     # Simulated playoff odds only
 python run.py prediction_scorecard [--backtest]  # Public scorecard (live rows; --backtest adds the three backtests)
@@ -454,9 +454,10 @@ Loads the open **nhl-contracts** dataset ([github.com/ehlersio/nhl-contracts](ht
 - `nhl_contract_clauses` — one row per `(contract_key, kind, season_from)`: `NMC` / `NTC` / `M-NTC` / `M-NMC`, `season_from`/`season_to`, `list_size`/`list_type` for modified clauses.
 - `nhl_contract_gaps` — `gaps.json`: `gap` = `no_contract` / `no_money` / `no_structure`, with the dataset's latest matching ESPN / NHL.com / PuckPedia text as hints. A closed gap disappears on the next load.
 - `nhl_cap_limits` — `season`, `cap_ceiling`, `cap_floor`, `min_salary`, only for seasons the NHL has announced (2026-27: $104M / $77M / $850K, the figures the app's cap tab used). Add a season to `CAP_LIMITS` when published; later seasons are not projected.
+- `nhl_dead_cap` (2026-10-25, `docs/2026-10-25_nhl_dead_cap.sql`) — `dead_cap.json`: one row per `(team, kind, player_key, season)` cap charge that is not a roster contract: `retained` salary on a traded player (with `pct` and the acquiring `counterparty` when the source names it) or a `buyout` charge, from PuckPedia's trade and buyout posts (tier D) and the archived CapFriendly team pages (tier E, every charge running in July 2024 with its remaining schedule). `player_key` is the NHL id as text or the dataset's normalized name, so a row without an id upserts onto itself. Rows the dataset could not attribute to a team are not loaded. A release without `dead_cap.json` leaves the table as it was.
 - `nhl_contracts_loads` — the load log (counts, `dataset_updated_at`, `season`).
 
-Every row carries `dataset_updated_at`; after a load, rows in the four dataset tables with an older stamp are deleted, so the tables mirror the release (a contract the dataset re-merges under a new key does not linger). Upserts: `contract_key` / `(contract_key, season)` / `(contract_key, kind, season_from)` (a `NULLS NOT DISTINCT` constraint, since some tier-D clauses have no seasons) / `player_id`.
+Every row carries `dataset_updated_at`; after a load, rows in the five dataset tables with an older stamp are deleted, so the tables mirror the release (a contract the dataset re-merges under a new key does not linger). Upserts: `contract_key` / `(contract_key, season)` / `(contract_key, kind, season_from)` (a `NULLS NOT DISTINCT` constraint, since some tier-D clauses have no seasons) / `player_id`.
 
 **Dataset quirks handled** (2026-10-23): `contract_key` is not unique in `contracts.json` (54 keys appear twice — franchise relocations ARI/UTA, or a PTO and the standard deal that followed in the same month); the fuller row wins (money known, then more sources, then better tier, then later signing date). A few rows say `UTAH`; stored as `UTA`. The clause key has 14 duplicates; the fuller row wins. **Not handled:** the same contract can appear under two keys (one by NHL id, one by normalized name) when the dataset could not join a name-only source — e.g. Jaccob Slavin's 2024 extension is both `8476958|CAR|2024-07` (tier B, from the club) and `jaccob slavin|CAR|2024-07` (tier E, archived CapFriendly) with slightly different figures. Both rows are stored; a reader should expect more than one `is_current` row per player and prefer the better `best_tier`. That merge belongs upstream.
 

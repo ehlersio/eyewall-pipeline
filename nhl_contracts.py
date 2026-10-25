@@ -20,6 +20,11 @@ Tables written (docs/2026-10-23_nhl_contracts.sql, run by hand):
   nhl_contract_gaps      gaps.json, one row per player_id
   nhl_cap_limits         season -> cap ceiling / floor / minimum salary
                          (CAP_LIMITS below; only seasons the NHL has announced)
+  nhl_dead_cap           dead_cap.json (2026-10-25): one row per (team, kind,
+                         player, season) cap charge that is not a roster
+                         contract -- 'retained' salary on a traded player or a
+                         'buyout' charge -- so a reader can subtract them from
+                         a roster cap hit (docs/2026-10-25_nhl_dead_cap.sql)
   nhl_contracts_loads    one row per successful load; its latest row is the
                          "last loaded" state the skip check reads
 
@@ -56,8 +61,12 @@ Rows no longer in the dataset are deleted after each load (anything whose
 dataset_updated_at is older than the load's), so the tables mirror the
 release.
 
-Not computable yet: cap space. Retained salary, buyouts and LTIR are not in
-the dataset, and roster coverage is partial (gaps.json says who is missing).
+Still not computable exactly: cap space. nhl_dead_cap carries retained
+salary and buyouts (from PuckPedia posts and the archived CapFriendly team
+pages, so not every charge), but LTIR, bonus overages and recapture are not
+in the dataset, and roster coverage is partial (gaps.json says who is
+missing). A reader can show ceiling - roster cap hit - dead cap as an
+estimate before LTIR, and should say so.
 
 Usage:
   python nhl_contracts.py            # load if updated_at changed since the last load
@@ -164,6 +173,23 @@ GAP_COLUMNS = (
     "bsky_hint",
     "checked_season",
 )
+DEAD_CAP_COLUMNS = (
+    "team",
+    "kind",
+    "player_name",
+    "player_id",
+    "counterparty",
+    "season",
+    "cap_hit_usd",
+    "pct",
+    "contract_key",
+    "event_date",
+    "conflicts",
+    "n_sources",
+    "best_tier",
+    "source_ids",
+    "flags",
+)
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -177,10 +203,19 @@ def fetch_file(name: str) -> dict | list:
 
 
 def fetch_dataset() -> dict:
-    return {
+    out = {
         name: fetch_file(f"{name}.json")
         for name in ("timestamp", "contracts", "contract_seasons", "clauses", "gaps")
     }
+    # dead_cap.json joined the release on 2026-10-25 (nhl-contracts #2); a
+    # release without it (an older run) loads the other tables and leaves
+    # nhl_dead_cap as it was.
+    try:
+        out["dead_cap"] = fetch_file("dead_cap.json")
+    except FetchError as e:
+        log.warning(f"dead_cap.json not in the release yet ({e}); nhl_dead_cap left unchanged")
+        out["dead_cap"] = None
+    return out
 
 
 def fetch_roster_birth_dates(teams=ALL_TEAMS) -> dict[int, str]:
@@ -301,6 +336,15 @@ def resolve_expiry(status, birth_date, end_season) -> tuple[str | None, bool]:
 
 
 # ── Mapping ───────────────────────────────────────────────────────────────────
+
+
+def _name_key(name) -> str:
+    """The dataset's normalized name (lowercase ASCII words), for a dead-cap
+    row with no NHL id: the upsert key must not change between loads."""
+    import unicodedata
+
+    ascii_name = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in ascii_name.lower()).split())
 
 
 def _clean(v):
@@ -424,12 +468,33 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
         for season, limits in sorted(CAP_LIMITS.items())
     ]
 
+    dead_cap_rows = {}
+    for r in dataset.get("dead_cap") or []:
+        if not (r.get("team") and r.get("kind") and r.get("season") and r.get("player_name")):
+            continue  # an unattributed charge (retainer_unknown) has no team to count it for
+        row = {c: _clean(r.get(c)) for c in DEAD_CAP_COLUMNS}
+        row["team"] = normalize_team(r.get("team"))
+        row["counterparty"] = (
+            normalize_team(r.get("counterparty")) if r.get("counterparty") else None
+        )
+        row["player_id"] = int(r["player_id"]) if r.get("player_id") is not None else None
+        row["player_key"] = (
+            str(row["player_id"]) if row["player_id"] is not None else _name_key(r["player_name"])
+        )
+        row["dataset_updated_at"] = stamp
+        dead_cap_rows[(row["team"], row["kind"], row["player_key"], row["season"])] = row
+
     return {
         "nhl_contracts": contract_rows,
         "nhl_contract_seasons": list(season_rows.values()),
         "nhl_contract_clauses": clause_rows,
         "nhl_contract_gaps": list(gap_rows.values()),
         "nhl_cap_limits": cap_rows,
+        **(
+            {"nhl_dead_cap": list(dead_cap_rows.values())}
+            if dataset.get("dead_cap") is not None
+            else {}
+        ),
         "stats": {
             "n_raw_contracts": len(contracts),
             "n_dropped_no_player_id": len(contracts) - len(with_id),
@@ -487,12 +552,14 @@ CONFLICT_KEYS = {
     "nhl_contract_clauses": "contract_key,kind,season_from",
     "nhl_contract_gaps": "player_id",
     "nhl_cap_limits": "season",
+    "nhl_dead_cap": "team,kind,player_key,season",
 }
 MIRRORED_TABLES = (
     "nhl_contracts",
     "nhl_contract_seasons",
     "nhl_contract_clauses",
     "nhl_contract_gaps",
+    "nhl_dead_cap",
 )
 
 
@@ -547,6 +614,8 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
     for table, rows in built.items():
         upsert(sb, table, rows, CONFLICT_KEYS[table])
     for table in MIRRORED_TABLES:
+        if table == "nhl_dead_cap" and "nhl_dead_cap" not in built:
+            continue  # the release had no dead_cap.json: keep the last load's rows
         delete_stale(sb, table, updated_at)
 
     upsert(
@@ -562,6 +631,7 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
                 "n_seasons": counts["nhl_contract_seasons"],
                 "n_clauses": counts["nhl_contract_clauses"],
                 "n_gaps": counts["nhl_contract_gaps"],
+                "n_dead_cap": counts.get("nhl_dead_cap"),
                 "n_dropped_no_player_id": stats["n_dropped_no_player_id"],
                 "n_duplicate_keys": stats["n_duplicate_keys"],
             }
