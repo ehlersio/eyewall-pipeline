@@ -1,9 +1,9 @@
 -- ECHL per-game player box score — new tables for echl_game_boxscore.py.
 -- Run this in the Supabase SQL editor before echl_game_boxscore.py's
 -- first run. This repo has no migration tooling — same direct-in-
--- Supabase convention as docs/echl_new_tables_ddl.sql.
+-- Supabase convention as docs/sql/echl_new_tables_ddl.sql.
 --
--- Straight mirror of docs/ahl_game_boxscore_ddl.sql (ahl_ -> echl_
+-- Straight mirror of docs/sql/ahl_game_boxscore_ddl.sql (ahl_ -> echl_
 -- renamed throughout). Same deliberate difference from PWHL: no
 -- hits/faceoff_attempts/faceoff_wins/blocked_shots/skater toi_seconds
 -- columns. Confirmed live 2026-08-30 (game 24296) that every skater's

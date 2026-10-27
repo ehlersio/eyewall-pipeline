@@ -8,7 +8,7 @@
 --   - "most wins in a season" updated to the 2022-23 Boston Bruins (65) --
 --     every source still said the 1995-96 Red Wings' 62, broken since.
 -- Run this in the Supabase SQL editor -- this repo has no migration
--- tooling, same convention as docs/session92_trivia_tables.sql.
+-- tooling, same convention as docs/sql/session92_trivia_tables.sql.
 --
 -- Dated sequentially starting 2026-08-13 (tomorrow) so today's existing
 -- fallback content (the two 2026-08-05 seed rows) rolls over cleanly once

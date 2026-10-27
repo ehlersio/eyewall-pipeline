@@ -33,7 +33,7 @@ create table if not exists public.team_elo_ratings (
 alter table public.team_elo_ratings enable row level security;
 
 -- Public read-only data (a number, not sensitive) -- same posture as
--- player_narratives' read policy (docs/player_narratives_rls_fix.sql).
+-- player_narratives' read policy (docs/sql/player_narratives_rls_fix.sql).
 -- Writes stay service-role-only; elo_ratings.py uses SUPABASE_SERVICE_KEY,
 -- which bypasses RLS -- no INSERT/UPDATE policy needed for anon.
 create policy "anon can read team_elo_ratings" on public.team_elo_ratings

@@ -4,7 +4,7 @@ counted into a season's regular-season (game_type 2) aggregates.
 
 shot_events, shift_events, zone_starts and game_xg hold a season's
 preseason and playoff games alongside its regular season. Until they got a
-game_type (a computed field on game_id, docs/game_type_column.sql),
+game_type (a computed field on game_id, docs/sql/game_type_column.sql),
 moneypuck.py's rollups read them by season alone, so on
 2026-09-29 -- Opening Night, before any 2026-27 regular-season game --
 team_seasons (game_type 2) already had Corsi from 61 preseason games: CAR

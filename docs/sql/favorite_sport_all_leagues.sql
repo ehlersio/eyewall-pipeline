@@ -1,7 +1,7 @@
 -- user_preferences.favorite_sport -- allow the AHL and ECHL.
 -- Run this in the Supabase SQL editor.
 --
--- docs/session91_favorite_sport_column.sql added the column with
+-- docs/sql/session91_favorite_sport_column.sql added the column with
 -- check (favorite_sport in ('nhl', 'pwhl')), from before the AHL/ECHL
 -- existed in the app. Every save of an AHL or ECHL primary team has failed
 -- that check since (eyewall-analytics' favoriteTeamSync.js logs it and

@@ -6,7 +6,7 @@
 
 ## Part B — `players.team` schema fix
 
-- `docs/combined_calibration_players_team_column.sql` — DDL to hand to Matt (`alter table public.players add column team text;`). This repo has no migration tooling; applied manually in the Supabase SQL editor, same convention as every other recent column addition.
+- `docs/sql/combined_calibration_players_team_column.sql` — DDL to hand to Matt (`alter table public.players add column team text;`). This repo has no migration tooling; applied manually in the Supabase SQL editor, same convention as every other recent column addition.
 - `nhl_stats.py::fetch_roster` now attaches `team` to every player row it returns (was fetched but discarded before the `players` upsert). No other code changes needed — rides the existing nightly `run()` cadence, no new job.
 - Confirmed PWHL doesn't need an equivalent fix — `pwhl_players` already writes `team_id` per row (`pwhl_stats.py:295-300`).
 - New regression test (`test_nhl_stats_roster.py`, 3 cases, mocked — no network calls) covers the specific bug this fixes: team field silently missing/discarded.

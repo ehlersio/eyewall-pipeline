@@ -23,7 +23,7 @@ USAGE
    (base URL(s), key, client_code, a known-good season_id and game_id).
 2. Adjust CANDIDATE_VIEWS / CANDIDATE_FEEDS if you want to try more names.
 3. Run: python hockeytech_endpoint_mapper.py
-4. Check ./hockeytech_mapping_results/ for:
+4. Check ./docs/research/hockeytech_mapping_results/ for:
    - raw/<feed>_<view>.json          (full raw response, for anything that hit)
    - mapping_summary.md              (pass/fail table + top-level key shapes)
 5. Paste mapping_summary.md into docs/hockeytech-api-notes.md, then hand-verify
@@ -132,7 +132,7 @@ CANDIDATE_VIEWS = [
     "gameSummaryExtended",
 ]
 
-OUTPUT_DIR = Path("./hockeytech_mapping_results")
+OUTPUT_DIR = Path("./docs/research/hockeytech_mapping_results")
 
 
 # ============================================================

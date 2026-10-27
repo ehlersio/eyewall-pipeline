@@ -20,7 +20,7 @@ short (the generic module's docstring has the method):
     for the goalie when a team other than the shooter's is shorthanded.
   - MIN_GP = 10, as the skater side; goalies below it get no percentiles.
   - pct_gsax replaced the never-populated gsax_percentile placeholder
-    (docs/pwhl_goalie_percentiles_ddl.sql).
+    (docs/sql/pwhl_goalie_percentiles_ddl.sql).
 
 Run modes:
     python pwhl_goalie_percentiles.py                  # current season (PWHL_SEASON)

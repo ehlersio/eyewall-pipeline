@@ -10,11 +10,11 @@ repo's README. Tiers A-C are official (club release, NHL.com, ESPN wire);
 D (PuckPedia public posts, r/hockey quotes of insiders) and E (CapFriendly
 pages archived by the Internet Archive, to July 2024) are reported.
 
-Tables written (docs/2026-10-23_nhl_contracts.sql, run by hand):
+Tables written (docs/sql/2026-10-23_nhl_contracts.sql, run by hand):
   nhl_contracts          one row per contract_key, every dataset column plus
                          is_current / years_left / expiry_type (below).
                          bought_out / end_season_signed (2026-10-25,
-                         docs/2026-10-25_nhl_contracts_bought_out.sql): on a
+                         docs/sql/2026-10-25_nhl_contracts_bought_out.sql): on a
                          bought-out contract the dataset's end_season is the
                          last paid season and end_season_signed the end it
                          was signed to (null otherwise, and on releases
@@ -31,7 +31,7 @@ Tables written (docs/2026-10-23_nhl_contracts.sql, run by hand):
                          player, season) cap charge that is not a roster
                          contract -- 'retained' salary on a traded player or a
                          'buyout' charge -- so a reader can subtract them from
-                         a roster cap hit (docs/2026-10-25_nhl_dead_cap.sql)
+                         a roster cap hit (docs/sql/2026-10-25_nhl_dead_cap.sql)
   nhl_contracts_loads    one row per successful load; its latest row is the
                          "last loaded" state the skip check reads
 
@@ -533,7 +533,9 @@ def last_load(sb) -> dict | None:
             .execute()
         )
     except Exception as e:
-        log.warning(f"nhl_contracts_loads unreadable (run docs/2026-10-23_nhl_contracts.sql?): {e}")
+        log.warning(
+            f"nhl_contracts_loads unreadable (run docs/sql/2026-10-23_nhl_contracts.sql?): {e}"
+        )
         return None
     rows = res.data or []
     return rows[0] if rows else None

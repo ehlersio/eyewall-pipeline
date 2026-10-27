@@ -727,7 +727,7 @@ def run(season: int = NHL_SEASON):
         # That mismatch silently forked a traded player into two rows --
         # one with real box-score stats, one with WAR/percentiles -- 338
         # such pairs found and merged in production before this fix
-        # landed. See docs/session81_new_columns.sql for the matching
+        # landed. See docs/sql/session81_new_columns.sql for the matching
         # unique-constraint migration this requires.
         upsert(client, "player_seasons", rows, "player_id,season,game_type")
     print("\n[3/5] Fetching goalie stats...")

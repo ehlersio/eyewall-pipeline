@@ -9,7 +9,7 @@ the season-to-season carryover that matters most right now -- 2026-27
 opens with every team on last season's regressed rating. HockeyTech's
 modulekit `schedule` view has every past season, and its game_status
 ("Final" / "Final OT" / "Final SO") also supplies the overtime flag
-{league}_game_log deliberately left out (see docs/ahl_new_tables_ddl.sql),
+{league}_game_log deliberately left out (see docs/sql/ahl_new_tables_ddl.sql),
 which elo.update_ratings() needs to damp OT/SO swings.
 
 Models, each scored on every game with a point-in-time prediction (only

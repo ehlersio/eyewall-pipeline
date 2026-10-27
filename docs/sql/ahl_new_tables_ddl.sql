@@ -3,7 +3,7 @@
 -- (or a manual `python ahl_stats.py` / `python ahl_shot_events.py` /
 -- `python ahl_penalty_shots.py`) is run for the first time. This repo has
 -- no migration tooling — schema changes are applied directly in Supabase,
--- same as every existing pwhl_* table (see docs/session42_new_tables.sql
+-- same as every existing pwhl_* table (see docs/sql/session42_new_tables.sql
 -- for the precedent this mirrors).
 --
 -- Dedicated ahl_* tables, not a shared schema with pwhl_*/nhl_* tables and
@@ -191,7 +191,7 @@ create table public.ahl_shot_events (
   -- confirmed live (2026-08-29 production run), and without the
   -- coordinates in the key a same-batch upsert crashes with Postgres error
   -- 21000 ("ON CONFLICT DO UPDATE command cannot affect row a second
-  -- time"). See docs/ahl_shot_events_constraint_fix.sql if this table
+  -- time"). See docs/sql/ahl_shot_events_constraint_fix.sql if this table
   -- already exists with the narrower constraint from an earlier apply.
   constraint ahl_shot_events_natural_key
     unique (game_id, event_type, period_id, time_seconds, team_id, shooter_id, x_raw, y_raw)

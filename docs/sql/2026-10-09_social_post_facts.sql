@@ -1,7 +1,7 @@
 -- social_post_facts -- rotation memory for cherry_picked.py's Sunday
 -- "Cherry Picked Stats" post. Run in the Supabase SQL editor before the
 -- first Sunday it should post: until this table exists, a real run exits 1
--- ("run docs/2026-10-09_social_post_facts.sql") and posts nothing. Dry runs
+-- ("run docs/sql/2026-10-09_social_post_facts.sql") and posts nothing. Dry runs
 -- work without it (no rotation history).
 --
 -- One row per fact per post, written once at least one platform has

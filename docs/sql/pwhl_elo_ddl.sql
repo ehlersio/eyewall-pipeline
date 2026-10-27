@@ -1,5 +1,5 @@
 -- PWHL Elo tables for hockeytech_elo.py -- same shape and posture as
--- docs/hockeytech_elo_ddl.sql (AHL/ECHL), keyed by HockeyTech team_id.
+-- docs/sql/hockeytech_elo_ddl.sql (AHL/ECHL), keyed by HockeyTech team_id.
 -- Run in the Supabase SQL editor before the PWHL Elo step runs or
 -- eyewall-poller's /pwhl/prediction reads pwhl_team_elo_ratings.
 

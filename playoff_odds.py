@@ -437,7 +437,7 @@ def run(season=None, n_sims=N_SIMS, dry_run=False, seed_value=None):
     except Exception as e:
         # A real run must fail loudly here (missing table, bad key, ...). A
         # dry run can still show tonight's odds without the change
-        # explanation -- e.g. before docs/session_playoff_odds.sql is run.
+        # explanation -- e.g. before docs/sql/session_playoff_odds.sql is run.
         if not dry_run:
             raise
         print(f"  (dry-run) previous run unreadable, skipping change explanations: {e}")

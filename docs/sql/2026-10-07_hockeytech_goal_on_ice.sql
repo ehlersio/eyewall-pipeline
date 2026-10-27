@@ -3,7 +3,7 @@
 -- `python hockeytech_goal_on_ice.py ahl|echl` (ahl-/echl-nightly.yml); until
 -- then that step logs one error and skips.
 --
--- Same shape as pwhl_goal_on_ice (docs/session42_new_tables.sql): one row per
+-- Same shape as pwhl_goal_on_ice (docs/sql/session42_new_tables.sql): one row per
 -- (game_goal_id, player_id) from gameSummary's
 -- periods[].goals[].plus_players[]/minus_players[]. game_goal_id is the id
 -- gameSummary and the play-by-play both use for the goal. eyewall-poller's

@@ -64,7 +64,7 @@ Usage:
   python social_posts.py recap --date 2026-10-19  # as if run that day (ET)
   python social_posts.py check                    # read-only credentials check, posts nothing
 
-Tables: docs/session_social_posts.sql.
+Tables: docs/sql/session_social_posts.sql.
 """
 
 import argparse

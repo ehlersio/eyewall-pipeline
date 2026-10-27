@@ -3,7 +3,7 @@
 Each team whose roster came back gets on_roster = true on those players and
 false on the team's other rows (one update per team). Only the nightly,
 current-season run marks; a backfill of another season doesn't. Until the
-owner runs docs/2026-10-06_on_roster.sql the column is missing: the first
+owner runs docs/sql/2026-10-06_on_roster.sql the column is missing: the first
 write's error is logged once and the rosters are written as before.
 """
 

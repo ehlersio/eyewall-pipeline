@@ -1,6 +1,6 @@
 """
 backfill_shot_event_ids.py -- fills shot_events.event_id for games ingested
-before that column existed (see docs/shot_events_event_id.sql, run that
+before that column existed (see docs/sql/shot_events_event_id.sql, run that
 first).
 
 shot_events.py skips any game already in the table, so the new column would

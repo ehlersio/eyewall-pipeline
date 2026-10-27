@@ -1,5 +1,5 @@
 -- French/English localization for pre-game predictions -- the same Track B
--- change docs/session_locale_trackb_b0_schema.sql made to the other AI
+-- change docs/sql/session_locale_trackb_b0_schema.sql made to the other AI
 -- narrative tables, applied to game_predictions (which that pass missed).
 -- Run in the Supabase SQL editor BEFORE merging the ai_predictions.py
 -- change (its upsert targets game_id,locale) and the eyewall-poller change

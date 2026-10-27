@@ -6,7 +6,7 @@ narrative-generation flow.
 
 player_seasons.on_ice_gf_pct/results_vs_process_diff and the player_narratives
 table don't exist in Supabase yet (Matt needs to run
-docs/session56_new_columns.sql first) -- these tests mock the Supabase client
+docs/sql/session56_new_columns.sql first) -- these tests mock the Supabase client
 rather than hitting the live DB, same convention as test_ai_context_corsi.py.
 """
 

@@ -4,7 +4,7 @@
 -- `python echl_penalty_shots.py`) is run for the first time. This repo has
 -- no migration tooling — schema changes are applied directly in Supabase.
 --
--- Straight mirror of docs/ahl_new_tables_ddl.sql (ahl_ -> echl_ renamed
+-- Straight mirror of docs/sql/ahl_new_tables_ddl.sql (ahl_ -> echl_ renamed
 -- throughout) -- ECHL is the same HockeyTech/LeagueStat vendor as AHL,
 -- confirmed live 2026-08-30 to have the identical data-shape ceiling (no
 -- shift data, no hit/faceoff/blocked_shot event types) -- see
@@ -177,7 +177,7 @@ create table public.echl_shot_events (
   -- Includes x_raw/y_raw in the natural key from day one -- AHL's own
   -- pipeline hit a real Postgres 21000 conflict in production without
   -- this (two shots by the same shooter in the same recorded second),
-  -- see docs/ahl_shot_events_constraint_fix.sql for that history. Built
+  -- see docs/sql/ahl_shot_events_constraint_fix.sql for that history. Built
   -- in correctly here rather than rediscovered.
   constraint echl_shot_events_natural_key
     unique (game_id, event_type, period_id, time_seconds, team_id, shooter_id, x_raw, y_raw)

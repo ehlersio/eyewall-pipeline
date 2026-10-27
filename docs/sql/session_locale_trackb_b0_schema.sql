@@ -14,9 +14,9 @@
 --
 -- STEP 0 (run first, read-only) -- confirms the real name of each table's
 -- existing unique constraint before you drop it. This repo's docs/*.sql
--- history only records player_narratives' (docs/session56_new_columns.sql,
+-- history only records player_narratives' (docs/sql/session56_new_columns.sql,
 -- a standalone UNIQUE INDEX, not a table constraint) and trivia_questions'
--- (docs/session92_trivia_tables.sql, an unnamed inline `unique(...)`, so
+-- (docs/sql/session92_trivia_tables.sql, an unnamed inline `unique(...)`, so
 -- Postgres auto-generated its name). game_summaries and player_scouting
 -- predate that convention -- their constraint names below are my best
 -- guess at Postgres's standard auto-naming for an unnamed inline
@@ -68,7 +68,7 @@ alter table public.player_scouting
   unique (player_id, season, team, locale);
 
 -- player_narratives: was a standalone UNIQUE INDEX named
--- player_narratives_conflict_key (docs/session56_new_columns.sql), not a
+-- player_narratives_conflict_key (docs/sql/session56_new_columns.sql), not a
 -- table constraint -- DROP INDEX, not DROP CONSTRAINT. Recreated under the
 -- same name so ai_results_vs_process.py's on_conflict= string (which
 -- matches by column list, not constraint name) keeps working unmodified
@@ -78,7 +78,7 @@ create unique index player_narratives_conflict_key
   on public.player_narratives (player_id, season, team, narrative_type, locale);
 
 -- trivia_questions: was (question_date, tier, sport, team) --
--- docs/session92_trivia_tables.sql's inline unique(...)
+-- docs/sql/session92_trivia_tables.sql's inline unique(...)
 alter table public.trivia_questions
   drop constraint if exists trivia_questions_question_date_tier_sport_team_key;
 alter table public.trivia_questions

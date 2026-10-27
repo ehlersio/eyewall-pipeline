@@ -1,7 +1,7 @@
 """
 projected_lines.py -- Project each NHL team's forward lines and D pairs for
 its NEXT game, from shift data. Writes `projected_lines` (one set per team,
-replaced every run). Requires docs/projected_lines_create.sql.
+replaced every run). Requires docs/sql/projected_lines_create.sql.
 
 Different question from line_combinations.py: that module describes the
 season (the most-used units, with xGF%); this one answers "who plays with

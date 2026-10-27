@@ -3,7 +3,7 @@ No network, no Supabase: the play-by-play fetch and the client are faked.
 
 event_id is the NHL's own id for the play a row came from -- (game_id,
 event_id) is what addresses a goal's video and its tracking replay
-(eyewall-poller's /nhl/goal-replay). See docs/shot_events_event_id.sql."""
+(eyewall-poller's /nhl/goal-replay). See docs/sql/shot_events_event_id.sql."""
 
 from unittest.mock import MagicMock, patch
 

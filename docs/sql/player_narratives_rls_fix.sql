@@ -15,7 +15,7 @@
 -- nobody noticed anything was wrong -- the content kept getting
 -- generated, nothing ever surfaced that no one could actually read it).
 --
--- The original table creation (docs/session56_new_columns.sql) never
+-- The original table creation (docs/sql/session56_new_columns.sql) never
 -- enabled RLS at all -- something enabled it afterward (dashboard action,
 -- a security sweep, unclear which) without adding the policy this
 -- restores. This has likely been silently broken for end users since

@@ -38,8 +38,8 @@ The season is the earliest regular season (Worker season list) with a game
 left in {league}_game_log -- the next season's preseason odds once its
 schedule is ingested and the current one is over.
 
-Tables: docs/2026-10-08_hockeytech_playoff_odds.sql, then
-docs/2026-10-08_hockeytech_playoff_odds_games_played.sql. Until the first
+Tables: docs/sql/2026-10-08_hockeytech_playoff_odds.sql, then
+docs/sql/2026-10-08_hockeytech_playoff_odds_games_played.sql. Until the first
 has been run the write logs one error and the run ends without failing the
 nightly; until the second, the rows are written without games_played.
 
@@ -349,7 +349,7 @@ def _upsert(client, key, rows):
 def write_rows(client, key, rows) -> bool:
     """Upsert, tolerating a missing table: one logged error, no exception.
 
-    games_played comes from docs/2026-10-08_hockeytech_playoff_odds_games_played.sql,
+    games_played comes from docs/sql/2026-10-08_hockeytech_playoff_odds_games_played.sql,
     which the owner runs. Until then the upsert fails with PostgREST's
     missing-column error: that is logged once and the rows are written
     without it, as before."""
@@ -361,7 +361,7 @@ def write_rows(client, key, rows) -> bool:
                 raise
             log.warning(
                 f"  {key}_playoff_odds.games_played is missing (run "
-                "docs/2026-10-08_hockeytech_playoff_odds_games_played.sql); "
+                "docs/sql/2026-10-08_hockeytech_playoff_odds_games_played.sql); "
                 f"writing without it this run: {e}"
             )
             _upsert(
@@ -370,7 +370,7 @@ def write_rows(client, key, rows) -> bool:
     except Exception as e:
         log.error(
             f"  {key}_playoff_odds write FAILED -- has "
-            f"docs/2026-10-08_hockeytech_playoff_odds.sql been run? {type(e).__name__}: {e}"
+            f"docs/sql/2026-10-08_hockeytech_playoff_odds.sql been run? {type(e).__name__}: {e}"
         )
         return False
     return True

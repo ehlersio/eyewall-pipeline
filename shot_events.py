@@ -116,7 +116,7 @@ def get_already_processed(client, season):
 
     Pages one game type at a time so each page is served by
     shot_events_season_type_id_idx (season, game type, id) -- see
-    docs/game_type_column.sql. Filtering on season alone has no index in
+    docs/sql/game_type_column.sql. Filtering on season alone has no index in
     id order, so Postgres walks the primary key from the oldest row and
     discards every other season's rows on the way. A new season's rows are
     all at the end of the table, which is how the first page timed out
@@ -246,12 +246,12 @@ def process_game(game, season, roster_out=None):
                 # play it came from: the game center `landing` feed names
                 # the same id for a goal, and a goal's tracking replay is
                 # addressed by (gameId, eventId). See
-                # docs/shot_events_event_id.sql.
+                # docs/sql/shot_events_event_id.sql.
                 "event_id": play.get("eventId"),
                 "player_id": shooter_id,
                 "goalie_id": goalie_id,
                 # Who assisted (goals) and who blocked (blocked shots) --
-                # see docs/shot_events_assists_blocker.sql
+                # see docs/sql/shot_events_assists_blocker.sql
                 "assist1_id": d.get("assist1PlayerId"),
                 "assist2_id": d.get("assist2PlayerId"),
                 "blocker_id": d.get("blockingPlayerId"),

@@ -1,6 +1,6 @@
 -- games_played on ahl_playoff_odds / echl_playoff_odds / pwhl_playoff_odds
 -- (2026-10-08). Run in the Supabase SQL editor after
--- docs/2026-10-08_hockeytech_playoff_odds.sql (which creates the tables).
+-- docs/sql/2026-10-08_hockeytech_playoff_odds.sql (which creates the tables).
 --
 -- games_played = the team's GP in HockeyTech's standings feed at run time,
 -- the same read as current_points. The app's early-season note ("odds

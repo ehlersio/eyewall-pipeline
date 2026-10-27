@@ -34,7 +34,7 @@ create table if not exists public.projected_lines (
 alter table public.projected_lines enable row level security;
 
 -- Public read-only data, same posture as team_elo_ratings
--- (docs/team_elo_ratings_create.sql). Writes stay service-role-only;
+-- (docs/sql/team_elo_ratings_create.sql). Writes stay service-role-only;
 -- projected_lines.py uses SUPABASE_SERVICE_KEY, which bypasses RLS.
 create policy "anon can read projected_lines" on public.projected_lines
   for select to anon using (true);

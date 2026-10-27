@@ -1,7 +1,7 @@
 -- New column for ahl_game_log/pwhl_game_log — supports
 -- ahl_live_refresh.py/pwhl_live_refresh.py (Phase 6, AHL/PWHL live-game
 -- parity). This repo has no migration tooling — same direct-in-Supabase
--- convention as docs/ahl_game_boxscore_ddl.sql.
+-- convention as docs/sql/ahl_game_boxscore_ddl.sql.
 --
 -- game_status_code is HockeyTech's numeric GameStatus field from
 -- feed=modulekit&view=scorebar — a companion to the existing string

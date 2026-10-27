@@ -124,7 +124,7 @@ ASSIST_GAME = {
 
 class TestAssistsAndBlocker:
     """Rows keep who assisted on a goal and who blocked a blocked shot
-    (docs/shot_events_assists_blocker.sql), and those players get names."""
+    (docs/sql/shot_events_assists_blocker.sql), and those players get names."""
 
     def play(self, event_id, type_key, **details):
         return {

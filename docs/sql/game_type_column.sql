@@ -111,7 +111,7 @@ notify pgrst, 'reload schema';
 -- exactly as the function body above, or the planner won't match it.
 --
 -- shift_events keeps the INCLUDE list of the index it replaces
--- (docs/session47_shift_events_index.sql): without an Index Only Scan the
+-- (docs/sql/session47_shift_events_index.sql): without an Index Only Scan the
 -- planner went back to scanning the primary key and filtering row by row,
 -- ~9s a page, which timed out rapm's shift load. game_id is in the INCLUDE
 -- list, which is what lets an Index Only Scan evaluate the expression.

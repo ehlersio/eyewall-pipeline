@@ -151,7 +151,7 @@ class OnRosterMarker:
     Roster tab and call-up watch) hide only on_roster = false, so a NULL
     (never marked) still shows.
 
-    The column comes from docs/2026-10-06_on_roster.sql, which the owner
+    The column comes from docs/sql/2026-10-06_on_roster.sql, which the owner
     runs. Until then the first write fails with PostgREST's missing-column
     error: that is logged once, and this run (and every later one until the
     column exists) upserts the rows without on_roster, as before.
@@ -176,7 +176,7 @@ class OnRosterMarker:
             if "on_roster" not in str(e):
                 raise
             log.warning(
-                f"{self.table}.on_roster is missing (run docs/2026-10-06_on_roster.sql); "
+                f"{self.table}.on_roster is missing (run docs/sql/2026-10-06_on_roster.sql); "
                 f"writing rosters without it this run: {e}"
             )
             self.enabled = False
@@ -242,7 +242,7 @@ def nhl_game_type(game_id) -> int | None:
     shot_events, shift_events, zone_starts and game_xg hold every season's
     preseason and playoff games alongside the regular season's, and each has
     a `game_type` PostgREST computed field that decodes game_id the same way
-    (docs/game_type_column.sql). Filter season-scoped reads of them on that
+    (docs/sql/game_type_column.sql). Filter season-scoped reads of them on that
     column in the query rather than decoding rows here: before it existed,
     61 preseason games became 2026-27's regular-season Corsi (team_seasons,
     game_type 2) before a regular-season game had been played.

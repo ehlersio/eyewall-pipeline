@@ -18,7 +18,7 @@ event_key). PWHL rows are unchanged: is_pwhl = true, no `sport`. AHL/ECHL
 rows have is_pwhl = false and sport = 'ahl' / 'echl', and `season` is the
 HockeyTech season_id -- eyewall-poller's /milestones filters them on
 sport=eq.X&season=eq.N (NHL/PWHL stay on is_pwhl). The `sport` column comes
-from docs/2026-10-07_milestones_sport.sql; until it's been run the AHL/ECHL
+from docs/sql/2026-10-07_milestones_sport.sql; until it's been run the AHL/ECHL
 upsert fails, is logged once, and the run moves on. milestone_type and
 event_key follow milestones.py ("sh_goal", "" for once-per-game types,
 f"{period}_{time}" for SH goals); game ids are disjoint across leagues
@@ -940,7 +940,7 @@ def run_for_games(lg: League, sb, games: list[dict], later: LaterGames | None = 
                 # Most likely the `sport` column isn't there yet; every other
                 # row would fail the same way.
                 log.error(
-                    "  Has docs/2026-10-07_milestones_sport.sql been run? "
+                    "  Has docs/sql/2026-10-07_milestones_sport.sql been run? "
                     f"Skipping the rest of this run's {lg.label} milestones."
                 )
                 break

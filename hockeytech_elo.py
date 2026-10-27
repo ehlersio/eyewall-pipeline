@@ -25,7 +25,7 @@ Each run, for one league:
 
 eyewall-poller's /{league}/prediction reads {league}_team_elo_ratings.
 
-Tables: docs/hockeytech_elo_ddl.sql (run in Supabase first).
+Tables: docs/sql/hockeytech_elo_ddl.sql (run in Supabase first).
 
 Usage:
   python hockeytech_elo.py ahl            # replay + write

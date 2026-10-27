@@ -2,7 +2,7 @@
 -- Run this in the Supabase SQL editor before ahl_game_boxscore.py's first
 -- run (manual `python ahl_game_boxscore.py 90` for a backfill, or the
 -- nightly workflow). This repo has no migration tooling — same
--- direct-in-Supabase convention as docs/ahl_new_tables_ddl.sql.
+-- direct-in-Supabase convention as docs/sql/ahl_new_tables_ddl.sql.
 --
 -- Mirrors PWHL's pwhl_skater_game_box/pwhl_goalie_game_box shape, with
 -- one deliberate difference: no hits/faceoff_attempts/faceoff_wins/

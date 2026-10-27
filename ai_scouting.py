@@ -28,7 +28,7 @@ from season_lookup import get_nhl_season
 # French/English localization, Track B Phase B1. Every DB read/write below
 # takes a locale so an 'en' and 'fr' blurb can coexist for the same
 # player/season/team under the widened conflict key (see
-# docs/session_locale_trackb_b0_schema.sql) instead of overwriting each
+# docs/sql/session_locale_trackb_b0_schema.sql) instead of overwriting each
 # other. Default stays 'en' so any caller not yet updated behaves exactly
 # as before.
 LOCALES = ("en", "fr")

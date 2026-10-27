@@ -65,7 +65,7 @@ def fetch_rated(fetch, client, table, select, filters: dict, game_types=None) ->
 
     One read per game type (`game_type = T`, never an `in.(...)` list), so a keyset
     page is a straight walk of the (season, game_type, id) index in id
-    order -- see docs/game_type_column.sql. Rows come back grouped by game
+    order -- see docs/sql/game_type_column.sql. Rows come back grouped by game
     type; nothing here depends on their order across games."""
     rows = []
     for game_type in game_types or RAPM_GAME_TYPES:
@@ -134,8 +134,8 @@ def fetch_all_keyset(client, table, select, filters: dict, page_size=999, cursor
     compounds with depth, and the failure mode is "one page times out, retry
     might work" rather than "guaranteed to get slower and eventually always
     fail" — but it is not a guaranteed fix without a supporting index. See
-    docs/session47_shift_events_index.sql for why the index has to be a
-    covering one, and docs/game_type_column.sql for the (season, game_type,
+    docs/sql/session47_shift_events_index.sql for why the index has to be a
+    covering one, and docs/sql/game_type_column.sql for the (season, game_type,
     id) index that now serves these reads (via fetch_rated); this function
     does not depend on it existing, but reliability without it is
     probabilistic, not certain.

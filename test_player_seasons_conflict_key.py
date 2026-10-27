@@ -12,7 +12,7 @@ production during a live backfill: 338 duplicate (player_id, season,
 game_type) pairs in player_seasons, 2 in goalie_seasons -- one row per
 pair had real box-score stats and no analytics, the other had WAR/
 percentiles and no box-score stats. All were merged and deleted in
-production before this fix landed (see docs/session81_dedupe_constraint_fix.sql
+production before this fix landed (see docs/sql/session81_dedupe_constraint_fix.sql
 for the matching unique-constraint migration).
 
 The fix: drop `team` from the conflict key entirely (player_id,season,

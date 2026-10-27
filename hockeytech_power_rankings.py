@@ -41,7 +41,7 @@ from the workflow's `run:` line to turn narratives off. Up to teams x 2
 calls per league per night: 32 x 2 (AHL) + 30 x 2 (ECHL) + 12 x 2 (PWHL) =
 148 on a night when all three play.
 
-Tables: docs/2026-10-08_hockeytech_power_rankings.sql. Until it has been
+Tables: docs/sql/2026-10-08_hockeytech_power_rankings.sql. Until it has been
 run, the write logs one error and the run ends without failing the nightly.
 
 Usage:
@@ -433,7 +433,7 @@ def write_narratives(client, key, league, season_id, ranked, prior, today, dry_r
             done = load_written_narratives(client, key, season_id, run_date)
         except Exception as e:
             log.error(
-                f"  {table} unreadable -- has docs/2026-10-08_hockeytech_power_rankings.sql "
+                f"  {table} unreadable -- has docs/sql/2026-10-08_hockeytech_power_rankings.sql "
                 f"been run? {type(e).__name__}: {e}"
             )
             return 0, 0
@@ -505,7 +505,7 @@ def run(key, season_id=None, narratives=False, dry_run=False, today=None) -> int
     except Exception as e:
         log.error(
             f"  {key}_power_rankings unreadable -- has "
-            f"docs/2026-10-08_hockeytech_power_rankings.sql been run? {type(e).__name__}: {e}"
+            f"docs/sql/2026-10-08_hockeytech_power_rankings.sql been run? {type(e).__name__}: {e}"
         )
         return 0
     rows = ranking_rows(season_id, today.isoformat(), ranked, prior)

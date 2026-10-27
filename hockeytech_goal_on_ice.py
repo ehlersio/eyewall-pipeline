@@ -27,7 +27,7 @@ in line combinations or on-ice rates.
 Queue per league: completed games ({league}_game_log Final) minus games
 already in {league}_goal_on_ice minus games in {league}_skipped_games for
 pipeline "{league}_goal_on_ice" ("no_gamesummary" / "no_goals").
-AHL/ECHL tables: docs/2026-10-07_hockeytech_goal_on_ice.sql.
+AHL/ECHL tables: docs/sql/2026-10-07_hockeytech_goal_on_ice.sql.
 
 Run modes (AHL/ECHL; PWHL runs through pwhl_goal_on_ice.py):
     python hockeytech_goal_on_ice.py ahl                 # current season
@@ -275,7 +275,7 @@ def run_season(lg: League, sb, season_id: str, season_type: str) -> int:
         # then skip the step (one log line) instead of failing the nightly.
         log.error(
             f"  Can't read {lg.key}_goal_on_ice ({type(e).__name__}: {e}) -- has "
-            "docs/2026-10-07_hockeytech_goal_on_ice.sql been run? Skipping."
+            "docs/sql/2026-10-07_hockeytech_goal_on_ice.sql been run? Skipping."
         )
         return 0
     completed = get_completed_games(lg, sb, season_id)

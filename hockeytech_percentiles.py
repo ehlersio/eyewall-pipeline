@@ -32,7 +32,7 @@ AHL/ECHL (toi_rates=False) -- per game played: their box scores have no
   Primary assists and finishing are per (player, team), so a traded
   player's rate on each team row only counts what he did there. Position
   comes from {league}_players.position (C/LW/RW -> F, LD/RD/D -> D).
-  Migration: docs/2026-10-07_hockeytech_percentiles.sql; until it's been run
+  Migration: docs/sql/2026-10-07_hockeytech_percentiles.sql; until it's been run
   the upsert fails, is logged once, and nothing else breaks.
 
 Run after the stats sweep, the shot-event ingest and hockeytech_shot_xg.py

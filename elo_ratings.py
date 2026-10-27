@@ -14,7 +14,7 @@ few thousand rows total across 3 seasons) and self-healing: a backfilled
 or corrected score just changes the outcome of the next run, with no
 double-counting/missed-game bug class to worry about.
 
-Requires docs/team_elo_ratings_create.sql to have been run first (RLS +
+Requires docs/sql/team_elo_ratings_create.sql to have been run first (RLS +
 table creation -- no migration tooling in this repo, hand DDL to the
 user).
 

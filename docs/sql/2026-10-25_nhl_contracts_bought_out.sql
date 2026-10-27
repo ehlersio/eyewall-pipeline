@@ -18,7 +18,7 @@
 --
 -- The buyout's cap charges (the seasons after the paid span, and the
 -- reduced charges during it) are in nhl_dead_cap with kind = 'buyout'
--- (docs/2026-10-25_nhl_dead_cap.sql), not on the contract row.
+-- (docs/sql/2026-10-25_nhl_dead_cap.sql), not on the contract row.
 
 alter table public.nhl_contracts add column if not exists bought_out boolean not null default false;
 alter table public.nhl_contracts add column if not exists end_season_signed text;

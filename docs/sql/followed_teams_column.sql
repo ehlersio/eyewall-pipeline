@@ -3,7 +3,7 @@
 -- Run this in the Supabase SQL editor.
 --
 -- Same table as favorite_team/favorite_sport/preferred_locale
--- (docs/session90_user_preferences_table.sql and the columns added after
+-- (docs/sql/session90_user_preferences_table.sql and the columns added after
 -- it). favorite_team/favorite_sport stay the PRIMARY team -- the one the
 -- app runs as. This is the whole list, in the user's order, always
 -- including the primary: [{"sport": "nhl", "abbr": "CAR"}, ...].

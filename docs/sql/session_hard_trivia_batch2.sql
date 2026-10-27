@@ -1,12 +1,12 @@
 -- Hard-tier trivia batch 2 -- correction + 56 new rows (43 NHL, 13 PWHL).
 -- Run this in the Supabase SQL editor -- this repo has no migration
--- tooling, same convention as docs/session92_trivia_tables.sql and
--- docs/session_hard_trivia_batch.sql.
+-- tooling, same convention as docs/sql/session92_trivia_tables.sql and
+-- docs/sql/session_hard_trivia_batch.sql.
 --
 -- ============================================================
 -- PART 1: CORRECTION -- run this first, it's urgent.
 -- ============================================================
--- docs/session_hard_trivia_batch.sql (already applied) shipped a real
+-- docs/sql/session_hard_trivia_batch.sql (already applied) shipped a real
 -- factual error on the 2026-08-14 PWHL row: it named the "Isobel Cup" as
 -- the PWHL's championship trophy. That's wrong -- the Isobel Cup belongs
 -- to the PHF (formerly NWHL), a separate, now-defunct league. The PWHL's
