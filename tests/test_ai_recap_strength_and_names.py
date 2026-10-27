@@ -26,7 +26,7 @@ import ai_context
 from ai_persona import build_game_summary_prompt, format_game_context
 from test_ai_period_labels import _context, _Query, _section
 
-FIXTURES = Path(__file__).parent / "tests" / "fixtures"
+FIXTURES = Path(__file__).parent / "fixtures"
 MADE_UP_NAME = re.compile(r"\b(Player|Goalie) #?\d+")
 
 

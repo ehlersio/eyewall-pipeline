@@ -23,7 +23,7 @@ import hockeytech_goal_on_ice
 import pwhl_goal_on_ice
 from hockeytech_leagues import AHL, ECHL
 
-GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "goal_on_ice"
+GOLDEN_DIR = Path(__file__).parent / "golden" / "goal_on_ice"
 
 RICH, NO_GOALS, SKIPPED, PROCESSED, ERROR, UNKNOWN_TEAM = 1001, 1002, 1003, 1004, 1005, 1006
 HOME, AWAY = 3, 12

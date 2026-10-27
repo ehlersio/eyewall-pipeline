@@ -23,7 +23,7 @@ import hockeytech_playoff_odds as hpo
 from hockeytech_leagues import AHL, ECHL, PWHL
 
 FIXTURE = json.loads(
-    (Path(__file__).parent / "tests/fixtures/hockeytech_final_standings_2025_26.json").read_text()
+    (Path(__file__).parent / "fixtures/hockeytech_final_standings_2025_26.json").read_text()
 )
 
 

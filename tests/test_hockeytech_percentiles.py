@@ -308,7 +308,7 @@ def test_pwhl_rows_have_no_rate_basis_column():
     import json
     from pathlib import Path
 
-    golden = Path(__file__).parent / "tests" / "golden" / "pwhl_percentiles"
+    golden = Path(__file__).parent / "golden" / "pwhl_percentiles"
     for f in golden.glob("*.json"):
         for w in json.loads(f.read_text()):
             assert all("rate_basis_per_gp" not in r for r in w["rows"])

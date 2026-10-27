@@ -26,7 +26,7 @@ import pwhl_goalie_percentiles
 import pwhl_percentiles
 import pwhl_shot_xg
 
-GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "pwhl_percentiles"
+GOLDEN_DIR = Path(__file__).parent / "golden" / "pwhl_percentiles"
 
 SEASON = 8
 TEAMS = [1, 2, 3, 4, 5, 6]

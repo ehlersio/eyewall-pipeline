@@ -21,7 +21,7 @@ import hockeytech_stats as hs
 from hockeytech_leagues import AHL, ECHL
 
 FIXTURES = json.loads(
-    (Path(__file__).parent / "tests" / "fixtures" / "hockeytech_team_splits.json").read_text()
+    (Path(__file__).parent / "fixtures" / "hockeytech_team_splits.json").read_text()
 )
 
 

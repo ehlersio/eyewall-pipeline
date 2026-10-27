@@ -66,7 +66,7 @@ SUPABASE_MODULES = (
     hockeytech_live_refresh,
 )
 
-GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "hockeytech"
+GOLDEN_DIR = Path(__file__).parent / "golden" / "hockeytech"
 
 RICH = 1001  # full box score / PBP, JSONP-wrapped like the real feed
 PARENS = 1002  # plain JSON with a "(" in a value -- see module docstring

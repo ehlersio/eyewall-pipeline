@@ -42,7 +42,7 @@ import pytest
 import nhl_contracts as nc
 from pipeline_common import FetchError
 
-FIXTURES = Path(__file__).parent / "tests" / "fixtures" / "nhl_contracts"
+FIXTURES = Path(__file__).parent / "fixtures" / "nhl_contracts"
 TODAY = date(2026, 10, 23)
 
 

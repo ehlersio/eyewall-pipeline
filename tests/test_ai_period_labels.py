@@ -36,7 +36,7 @@ from ai_persona import _format_form, build_game_summary_prompt, format_game_cont
 from early_season import ending_label, period_label
 from nhl_stats import period_end_of
 
-FIXTURES = Path(__file__).parent / "tests" / "fixtures"
+FIXTURES = Path(__file__).parent / "fixtures"
 
 # A raw period, a stringified missing value, or a shootout read as a manpower
 # state must never reach the prompt.

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-WORKFLOWS = Path(__file__).parent / ".github" / "workflows"
+WORKFLOWS = Path(__file__).parent.parent / ".github" / "workflows"
 ALL = sorted(p.name for p in WORKFLOWS.glob("*.yml"))
 DISPATCHED = {
     "nightly.yml": "run-pipeline",
@@ -235,7 +235,7 @@ def test_social_posts_every_cron_and_kind_routes_to_a_script():
         return "social_posts.py"
 
     for kind in set(by_cron.values()) | (set(options) - {"check"}):
-        src = (Path(__file__).parent / script_for(kind)).read_text()
+        src = (Path(__file__).parent.parent / script_for(kind)).read_text()
         assert f'"{kind}"' in src, f"{kind} -> {script_for(kind)}"
 
 

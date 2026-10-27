@@ -100,7 +100,7 @@ class TestGoalies:
 # responses for both seasons (2026-10-05) are in
 # tests/fixtures/pwhl_teams_2026_27.json.
 TEAMS_2026_27 = json.loads(
-    (Path(__file__).parent / "tests" / "fixtures" / "pwhl_teams_2026_27.json").read_text()
+    (Path(__file__).parent / "fixtures" / "pwhl_teams_2026_27.json").read_text()
 )
 
 
@@ -142,7 +142,7 @@ class TestExpansionCodes:
 # only their playoff teams. Real responses (2026-10-06) in
 # tests/fixtures/pwhl_teams_season3_playoffs.json.
 SEASON_3 = json.loads(
-    (Path(__file__).parent / "tests" / "fixtures" / "pwhl_teams_season3_playoffs.json").read_text()
+    (Path(__file__).parent / "fixtures" / "pwhl_teams_season3_playoffs.json").read_text()
 )
 
 

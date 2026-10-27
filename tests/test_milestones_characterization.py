@@ -24,7 +24,7 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 import pwhl_milestones
 from test_milestones_catch_up import FakeClient
 
-GOLDEN_DIR = Path(__file__).parent / "tests" / "golden" / "milestones"
+GOLDEN_DIR = Path(__file__).parent / "golden" / "milestones"
 
 DAY, LATER = "2026-01-20", "2026-01-25"
 HOME, AWAY = 6, 8  # TOR, SEA
