@@ -1,6 +1,6 @@
 # Projected lines backtest (production rules, lineup unknown)
 
-`backtest_projected_lines.py` (read-only), run 2026-09-17. The two earlier backtests
+`scripts/backtest/backtest_projected_lines.py` (read-only), run 2026-09-17. The two earlier backtests
 ([line_projection_backtest_results.md](line_projection_backtest_results.md),
 [opening_night_backtest_results.md](opening_night_backtest_results.md)) chose
 `projected_lines.py`'s grouping and ranking rules while being **told** who dressed. This one

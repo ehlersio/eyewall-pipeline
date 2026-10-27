@@ -42,7 +42,7 @@ Each has a minimum sample (MIN_* below) and only counts if the team or
 player played in the week. A streak must still be alive on Saturday.
 
 Rotation: every fact has a category and a key ("NHL:streak:win:CAR").
-social_post_facts (docs/2026-10-09_social_post_facts.sql) records what was
+social_post_facts (docs/sql/2026-10-09_social_post_facts.sql) records what was
 posted. A key posted in the last ROTATION_DAYS is skipped, and categories
 are taken least-recently-used first (one per category per league), so the
 mix changes week to week by design. At most MAX_FACTS slides, up to
@@ -1295,7 +1295,9 @@ def post_cherry_picked(client, today, dry_run, nhl_season, pwhl_season=None, min
         recent = recent_facts(client, today)
     except Exception as e:  # table not created yet
         if not dry_run:
-            print(f"  Can't read {FACTS_TABLE} ({e}) -- run docs/2026-10-09_social_post_facts.sql")
+            print(
+                f"  Can't read {FACTS_TABLE} ({e}) -- run docs/sql/2026-10-09_social_post_facts.sql"
+            )
             return 1
         print(f"  {FACTS_TABLE} unreadable ({str(e)[:80]}) -- dry run without rotation history")
         recent = []

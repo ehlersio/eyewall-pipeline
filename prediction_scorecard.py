@@ -182,7 +182,7 @@ def live_game_winner(client, season):
 def backtest_game_winner():
     """Elo replayed over 2023-24..2025-26 regular seasons -- each game's
     probability computed from ratings BEFORE it, the same walk-forward as
-    elo_ratings.compute_ratings() / backtest_elo.py."""
+    elo_ratings.compute_ratings() / scripts/backtest/backtest_elo.py."""
     import elo
     import elo_ratings
 

@@ -1,8 +1,8 @@
 # Elo Prediction Model — Investigation & Backtest Results
 
 **Type:** Execution report. Runners: `eyewall-pipeline/elo.py` (pure Elo math),
-`backtest_elo.py` (chronological in-season backtest), `backtest_preseason.py`
-(extended with `elo_pred`/`continuity_vw_pred`), `tune_elo.py` (hyperparameter
+`scripts/backtest/backtest_elo.py` (chronological in-season backtest), `scripts/backtest/backtest_preseason.py`
+(extended with `elo_pred`/`continuity_vw_pred`), `scripts/backtest/tune_elo.py` (hyperparameter
 sweep). All read-only against production — no writes anywhere.
 
 **Motivating question:** the production preseason fallback
@@ -45,12 +45,12 @@ plausible future enrichment if Elo alone ever needs a secondary signal (see
 
 ## 2. In-season backtest — Elo vs. the production scorecard
 
-`backtest_elo.py` runs ONE continuous chronological pass over every regular-
+`scripts/backtest/backtest_elo.py` runs ONE continuous chronological pass over every regular-
 season game across all 3 seasons (Elo is inherently cumulative, unlike the
 scorecard's independent per-cutoff snapshots), carrying each team's rating
 forward and regressing it toward the mean once at each season boundary. The
 scorecard prediction is recomputed for the identical games (reusing
-`backtest_predictions.py`'s own `standings_inputs_asof`/`scorecard_win_pct`)
+`scripts/backtest/backtest_predictions.py`'s own `standings_inputs_asof`/`scorecard_win_pct`)
 for a same-game, same-coverage comparison — not a separate run.
 
 | Model | n | Brier ↓ | Log loss ↓ | Accuracy ↑ |
@@ -110,7 +110,7 @@ between the two runs. The ranking and conclusion are unaffected.
 
 `elo.py`'s constants (`K=6`, `HOME_ADVANTAGE=35`, `REGRESS_FRACTION=1/3`) are
 FiveThirtyEight's published NHL values, never fit against this pipeline's own
-data. `tune_elo.py` swept `K ∈ {3,4,6,8,10,14}`, `home_adv ∈ {0,20,35,50,65}`,
+data. `scripts/backtest/tune_elo.py` swept `K ∈ {3,4,6,8,10,14}`, `home_adv ∈ {0,20,35,50,65}`,
 `regress_fraction ∈ {0,0.15,1/3,0.5,0.7}` (150 combinations) — game_log
 fetched once, then every combination simulated in memory (no repeated
 network cost). Selection used Brier score on 2023-24+2024-25 only ("train");
@@ -184,7 +184,7 @@ hand-built heuristic regimes.
 
 ## 7. Margin-of-victory formula — tested, no real difference
 
-`backtest_mov.py` compared three MOV multiplier variants against the same
+`scripts/backtest/backtest_mov.py` compared three MOV multiplier variants against the same
 chronological harness, K/home_adv/regress_fraction held at their validated
 defaults throughout:
 

@@ -74,7 +74,7 @@ name: Social Posts
 #   pwhl-trends   20:00 / 21:00 Fri
 #   minor-trends  22:00 / 23:00 Fri
 #   cherry-picked 15:00 / 16:00 Sun (11am / noon EDT) -- after the nightly
-#                 has Saturday's games; needs docs/2026-10-09_social_post_facts.sql
+#                 has Saturday's games; needs docs/sql/2026-10-09_social_post_facts.sql
 # The Team Trends posts wait until every team has 10 games (exit 0 before).
 
 on:

@@ -325,7 +325,7 @@ jobs:
         # /pwhl/power-rankings). Only on nights after games were played, once
         # every team has 3 GP. Up to 2 OpenRouter calls per team per night:
         # remove --narratives above to stop them (rankings keep updating).
-        # Tables: docs/2026-10-08_hockeytech_power_rankings.sql (logs one
+        # Tables: docs/sql/2026-10-08_hockeytech_power_rankings.sql (logs one
         # error and moves on until it's been run).
 
       - name: PWHL Elo ratings + win probabilities (hockeytech_elo.py)
@@ -338,7 +338,7 @@ jobs:
         # feed (pwhl_game_log's ot/shootout columns are never populated), so
         # it doesn't depend on the steps above. Writes pwhl_team_elo_ratings
         # (read by eyewall-poller's /pwhl/prediction) and pwhl_game_win_probs.
-        # Tables: docs/pwhl_elo_ddl.sql.
+        # Tables: docs/sql/pwhl_elo_ddl.sql.
 
       - name: PWHL playoff odds (hockeytech_playoff_odds.py)
         if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
@@ -352,7 +352,7 @@ jobs:
         # pwhl_game_log (the stats step), into pwhl_playoff_odds (read by
         # eyewall-poller's /pwhl/playoff-odds). make_playoffs_pct is NULL
         # for a season whose playoff format isn't verified in
-        # hockeytech_leagues.py. Table: docs/2026-10-08_hockeytech_playoff_odds.sql
+        # hockeytech_leagues.py. Table: docs/sql/2026-10-08_hockeytech_playoff_odds.sql
         # (logs one error and moves on until it's been run). NHL_SEASON:
         # db.py resolves it at import.
 

@@ -7,8 +7,8 @@ gcp_*.json
 # Claude Code agent worktrees -- local scratch copies, not source
 .claude/worktrees/
 
-# backtest run output -- regeneratable from backtest_predictions.py /
-# backtest_preseason.py in ~18 min / ~8 min; not source, not committed
+# backtest run output -- regeneratable from scripts/backtest/backtest_predictions.py /
+# scripts/backtest/backtest_preseason.py in ~18 min / ~8 min; not source, not committed
 backtest_results.json
 backtest_summary.json
 backtest_preseason_results.json
@@ -21,18 +21,18 @@ mov_backtest_results.json
 backtest_pwhl_elo_results.json
 backtest_hockeytech_elo_results.json
 
-# backtest_lineup_adjustment.py -- boxscore cache (~3,900 games) and run output
+# scripts/backtest/backtest_lineup_adjustment.py -- boxscore cache (~3,900 games) and run output
 lineup_backtest_cache.json
 lineup_backtest_results.json
 
-# backtest_line_projection.py -- per-game 5v5 shift summaries and run output
+# scripts/backtest/backtest_line_projection.py -- per-game 5v5 shift summaries and run output
 line_projection_cache/
 line_projection_backtest_results.json
 
-# backtest_opening_night.py -- run output (shares line_projection_cache/)
+# scripts/backtest/backtest_opening_night.py -- run output (shares line_projection_cache/)
 opening_night_backtest_results.json
 
-# backtest_projected_lines.py -- run output (shares line_projection_cache/)
+# scripts/backtest/backtest_projected_lines.py -- run output (shares line_projection_cache/)
 projected_lines_backtest_results.json
 
 # social_posts.py --dry-run output

@@ -36,7 +36,7 @@ AHL/ECHL -- written to {league}_goalie_percentiles with the same columns
   * 5v5 and PK SV% stay NULL: shot rows carry no strength state, and their
     penalties aren't ingested yet (the PBP has them -- a
     {league}_pbp_events port would unlock both).
-  Migration: docs/2026-10-07_hockeytech_percentiles.sql; until it's been
+  Migration: docs/sql/2026-10-07_hockeytech_percentiles.sql; until it's been
   run the upsert fails, is logged once, and nothing else breaks.
 
 Run modes (AHL/ECHL; PWHL runs through pwhl_goalie_percentiles.py):

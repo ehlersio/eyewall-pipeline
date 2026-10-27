@@ -73,7 +73,7 @@ def fetch_all_keyset(client, table, select, filters, page_size=999, cursor_col="
     verification against production showed individual pages can still hit
     a `57014` timeout even with keyset pagination — a large reliability
     improvement over OFFSET, not a guaranteed fix. See
-    docs/game_type_column.sql for the index these reads now use.
+    docs/sql/game_type_column.sql for the index these reads now use.
     """
     rows, last_val = [], 0
     cols = select if cursor_col in select.split(",") else f"{cursor_col},{select}"

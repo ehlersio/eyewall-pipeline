@@ -10,7 +10,7 @@ Usage:
     python ai_predictions.py --locale fr            # only French (default: en and fr)
 
 Each game gets one row per locale in game_predictions (keyed on game_id +
-locale, docs/session_locale_predictions.sql) -- same Track B pattern as
+locale, docs/sql/session_locale_predictions.sql) -- same Track B pattern as
 ai_summaries.py / ai_scouting.py.
 
 Game day only (2026-10): the NHL /schedule/{date} response is a 7-day

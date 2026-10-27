@@ -1,6 +1,6 @@
 # True-Preseason Backtest — Results
 
-**Type:** Execution report, per `TRUE_PRESEASON_BACKTEST_EXTENSION.md`. Runner: `eyewall-pipeline/backtest_preseason.py` (reusable, builds on `backtest_predictions.py`). Read-only — no writes anywhere.
+**Type:** Execution report, per `TRUE_PRESEASON_BACKTEST_EXTENSION.md`. Runner: `eyewall-pipeline/backtest_preseason.py` (reusable, builds on `scripts/backtest/backtest_predictions.py`). Read-only — no writes anywhere.
 
 **Scope actually run:** 2024-25 and 2025-26 only. **2023-24 was excluded** — confirmed its prior season (2022-23) has zero rows in both `game_log` and `player_seasons`, so none of the three variants (all of which need a prior season's data) could be built for it. 105 opening-week games scored total (33 from 2024-25, 72 from 2025-26), 15-day post-opener window, each team's own first 2 games used only to build its roster/continuity proxy (never scored).
 

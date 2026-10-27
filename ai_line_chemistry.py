@@ -9,7 +9,7 @@ team's other lines/pairs of the same type, and to the league average once
 enough teams have rows.
 
 Writes to player_narratives, same table ai_results_vs_process.py uses (see
-docs/session56_new_columns.sql — deliberately keyed on (player_id, season,
+docs/sql/session56_new_columns.sql — deliberately keyed on (player_id, season,
 team, narrative_type) to hold more than one blurb type without a schema
 change). player_narratives is single-player-keyed, not unit-keyed, so a
 unit's narrative is written once per member player_id (identical text on

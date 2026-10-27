@@ -101,7 +101,7 @@ jobs:
         # echl_goal_on_ice: the skaters on the ice for every goal, from
         # gameSummary (read by eyewall-poller's /echl/game-box `goals`).
         # Needs echl_game_log from the stats step. Table:
-        # docs/2026-10-07_hockeytech_goal_on_ice.sql (skips, logged, until
+        # docs/sql/2026-10-07_hockeytech_goal_on_ice.sql (skips, logged, until
         # that's been run).
 
       - name: Ingest ECHL shot events (goals + shots with coordinates)
@@ -128,7 +128,7 @@ jobs:
           SEASON_ID: ${{ inputs.season_id }}
         run: python hockeytech_shot_xg.py echl "$SEASON_ID"
         # echl_player_xg from echl_shot_events, so after the shot-events step.
-        # Tables: docs/2026-10-07_hockeytech_percentiles.sql (logs one error
+        # Tables: docs/sql/2026-10-07_hockeytech_percentiles.sql (logs one error
         # and skips until that's been run).
 
       - name: ECHL skater percentiles, per game played (hockeytech_percentiles.py)
@@ -161,7 +161,7 @@ jobs:
         # doesn't depend on the ingestion steps above and runs even if one of
         # them failed. Writes echl_team_elo_ratings (read by eyewall-poller's
         # /echl/prediction) and echl_game_win_probs for today's/tomorrow's
-        # games. Tables: docs/hockeytech_elo_ddl.sql.
+        # games. Tables: docs/sql/hockeytech_elo_ddl.sql.
 
       - name: ECHL playoff odds (hockeytech_playoff_odds.py)
         if: ${{ !cancelled() && steps.guard.outputs.skip != 'true' }}
@@ -175,7 +175,7 @@ jobs:
         # echl_game_log (the stats step), into echl_playoff_odds (read by
         # eyewall-poller's /echl/playoff-odds). make_playoffs_pct is NULL
         # for a season whose playoff format isn't verified in
-        # hockeytech_leagues.py. Table: docs/2026-10-08_hockeytech_playoff_odds.sql
+        # hockeytech_leagues.py. Table: docs/sql/2026-10-08_hockeytech_playoff_odds.sql
         # (logs one error and moves on until it's been run). NHL_SEASON:
         # db.py resolves it at import.
 
@@ -190,7 +190,7 @@ jobs:
         # the last 3 ET days, into the shared milestones table (sport =
         # 'echl'). Reads echl_game_log/echl_player_seasons (stats step),
         # echl_shot_events and echl_goalie_game_box. Needs
-        # docs/2026-10-07_milestones_sport.sql (logs once and moves on until
+        # docs/sql/2026-10-07_milestones_sport.sql (logs once and moves on until
         # then). NHL_SEASON: db.py resolves it at import.
 
       - name: Generate daily ECHL trivia (easy + medium)
@@ -220,7 +220,7 @@ jobs:
         # /echl/power-rankings). Only on nights after games were played, once
         # every team has 3 GP. Up to 2 OpenRouter calls per team per night:
         # remove --narratives above to stop them (rankings keep updating).
-        # Tables: docs/2026-10-08_hockeytech_power_rankings.sql (logs one
+        # Tables: docs/sql/2026-10-08_hockeytech_power_rankings.sql (logs one
         # error and moves on until it's been run).
 
       - name: Notify on failure

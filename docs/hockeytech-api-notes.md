@@ -247,7 +247,7 @@ below. Full set: **Detroit=10, Hamilton=11, Las Vegas=12, San Jose=13.**
 
 ## Follow-up: real params found via browser network inspection (2026-07-04)
 
-The automated param-guessing pass (`probe_leaders_standings.py`) got 1/19 hits
+The automated param-guessing pass (`scripts/inspect/probe_leaders_standings.py`) got 1/19 hits
 and mostly confirmed "still null." Rather than keep guessing, inspecting
 thepwhl.com's own Network tab (Chrome DevTools) directly gave the real
 production calls in a handful of requests — much faster than iterating
@@ -470,7 +470,7 @@ session — flagged for a future pass if any becomes relevant to a feature.
 ### Two items resolved 2026-07-05 via local script (browser had hit a size limit)
 `homeTeam`/`visitingTeam` shape and the real `hit`/`faceoff`/`goalie_change`
 team fields — both closed out with a direct local pull
-(`inspect_gamesummary_and_pbp_teamfields.py`, same request pattern as
+(`scripts/inspect/inspect_gamesummary_and_pbp_teamfields.py`, same request pattern as
 `pwhl_pbp_events.py`) once the browser's text-extraction tools proved too
 size-limited for the full `gameSummary` payload. See the updated
 `gameSummary` section above and the `gameCenterPlayByPlay` event table for
@@ -701,7 +701,7 @@ PWHL_CURRENT_SEASON = 8 (as of 2025-26 season; flip each October)
 
 ## TODO — comprehensive endpoint mapping
 
-**Comprehensive pass done 2026-07-04** (script: `hockeytech_endpoint_mapper.py`,
+**Comprehensive pass done 2026-07-04** (script: `scripts/inspect/hockeytech_endpoint_mapper.py`,
 216 combinations tried across 2 base URLs × 3 feed names × ~36 view names),
 **followed by three rounds of real-site browser inspection the same day.**
 Resolved:

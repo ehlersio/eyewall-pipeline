@@ -1,6 +1,6 @@
 # AHL / ECHL / PWHL Elo Backtest — Results (2026-09-19)
 
-`backtest_hockeytech_elo.py`, read-only. Three regular seasons + playoffs per
+`scripts/backtest/backtest_hockeytech_elo.py`, read-only. Three regular seasons + playoffs per
 league straight from HockeyTech's modulekit `schedule` view (2023-24 through
 2025-26; `{league}_game_log` only holds 2025-26), so the season-to-season
 carryover could be tested and the OT/SO flag (`game_status` "Final OT" /
@@ -96,7 +96,7 @@ eyewall-poller's `/{league}/prediction`. AHL opens 2026-10-02, ECHL 2026-10-15.
 
 ## PWHL (added 2026-09-19)
 
-Same script (`python backtest_hockeytech_elo.py pwhl`), seasons 1/3 (2024),
+Same script (`python -m scripts.backtest.backtest_hockeytech_elo pwhl`), seasons 1/3 (2024),
 5/6 (2024-25), 8/9 (2025-26). `pwhl_game_log`'s `ot`/`shootout` columns are
 false for every game, so the feed's "Final OT"/"Final SO" status is the only
 overtime source here too (26.9% of PWHL games went past regulation).

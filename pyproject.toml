@@ -1,6 +1,9 @@
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# tests/ holds shared helpers other tests import (test_social_posts etc.);
+# listing it keeps them first-party for isort, same as before the move.
+src = [".", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -35,16 +38,19 @@ exclude = [
     # Raw HockeyTech API-mapping investigation output (2026-07) -- not
     # source, and mapping_summary.md isn't valid UTF-8, which crashes a
     # ruff version new enough to attempt formatting Markdown by default.
-    "hockeytech_mapping_results",
+    "docs/research/hockeytech_mapping_results",
 ]
 
 [tool.ruff.lint.isort]
 known-first-party = ["db"]  # treat db.py as a first-party import
 
 [tool.pytest.ini_options]
-# test_*.py only. pytest's default also collects *_test.py, which picks up
-# ai_test.py/ai_test_summary.py -- manual scripts that call a local Ollama
-# server at import time, so a bare `pytest` died during collection.
+# Tests live in tests/ and import the pipeline modules from the repo root.
+testpaths = ["tests"]
+pythonpath = ["."]
+# test_*.py only. pytest's default also collects *_test.py, which would pick
+# up scripts/inspect/ai_test.py and ai_test_summary.py -- manual scripts that
+# call a local Ollama server at import time.
 python_files = ["test_*.py"]
 
 [tool.ruff.format]

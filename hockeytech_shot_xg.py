@@ -29,7 +29,7 @@ AHL/ECHL (toi_rates=False) -- attempts are goal / shot only: their
   {league}_player_xg, one per (player, team): shot rows' team_id is the
   shooter's own team in these feeds (shooterTeamId / the goal's team), so a
   traded player's attempts split by team cleanly. Migration:
-  docs/2026-10-07_hockeytech_percentiles.sql; until it has been run the
+  docs/sql/2026-10-07_hockeytech_percentiles.sql; until it has been run the
   upsert fails and is logged once, nothing else breaks.
 
 Run modes (AHL/ECHL; PWHL runs through pwhl_shot_xg.py):
@@ -175,7 +175,7 @@ class TableWriter:
             self.failed = True
             log.error(
                 f"  Upsert to {self.table} FAILED -- has "
-                "docs/2026-10-07_hockeytech_percentiles.sql been run? Skipping it for "
+                "docs/sql/2026-10-07_hockeytech_percentiles.sql been run? Skipping it for "
                 f"this run: {type(e).__name__}: {e}"
             )
             return 0

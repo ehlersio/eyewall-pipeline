@@ -1,6 +1,6 @@
 # Line projection backtest
 
-`backtest_line_projection.py` (read-only), run 2026-09-17. Question: from shift data alone,
+`scripts/backtest/backtest_line_projection.py` (read-only), run 2026-09-17. Question: from shift data alone,
 how well can we project a team's forward lines and D pairs for its **next** game? **Answer:
 well for groupings, poorly for line order.** "Same as last game" gets 3 of 4 linemate pairs
 right and 81% of D pairs exactly. Season-to-date lines, which is what the Scouting tab shows

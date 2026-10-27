@@ -11,7 +11,7 @@ guardrail, enforced once at the data layer.
 Writes to player_narratives rather than player_scouting -- that table is
 deliberately keyed on (player_id, season, team, narrative_type) to hold more
 than one blurb type later (e.g. a future line-chemistry narrative), not just
-this one. See docs/session56_new_columns.sql.
+this one. See docs/sql/session56_new_columns.sql.
 
 Usage:
     python ai_results_vs_process.py                          # current season, all 32 teams
