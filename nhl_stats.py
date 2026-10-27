@@ -354,7 +354,7 @@ def period_end_of(game: dict) -> int:
     shootout. periodDescriptor.number first, then gameOutcome.lastPeriodType,
     and only then the regulation default -- a bare default of 3 is what left
     every 2023-24/2024-25 game_log row stuck at regulation (see
-    backfill_period_end.py), silently disabling Elo's overtime damping."""
+    scripts/backfill/backfill_period_end.py), silently disabling Elo's overtime damping."""
     number = (game.get("periodDescriptor") or {}).get("number")
     if isinstance(number, int) and number >= 3:
         return number
@@ -421,7 +421,7 @@ def write_team_seasons(client, season: int):
     # unmapped id silently dropped Utah from summary_by_abbr below (2026-08
     # investigation: team_seasons' 2025-26 UTA row had goals_for/pp_pct/
     # pk_pct/shots_for_pg/shots_ag_pg/faceoff_win_pct all null despite a
-    # complete 82-game season -- see backfill_uta_2025_team_stats.py).
+    # complete 82-game season -- see scripts/backfill/backfill_uta_2025_team_stats.py).
     # Keep both ids mapped rather than swapping, since 59 is still correct
     # for any future re-run against 2024-25 data.
     TEAM_ID_TO_ABBR = {

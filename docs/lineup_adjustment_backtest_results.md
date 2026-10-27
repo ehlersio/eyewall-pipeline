@@ -1,6 +1,6 @@
 # Lineup adjustment backtest
 
-`backtest_lineup_adjustment.py` (read-only), run 2026-09-14. Question: would knowing each
+`scripts/backtest/backtest_lineup_adjustment.py` (read-only), run 2026-09-14. Question: would knowing each
 night's lineup make the Elo game-winner probabilities (the ones the public scorecard grades)
 better? **Answer: not enough to adopt.** Missing skaters add nothing out of sample. The starting
 goalie adds a small, consistent improvement, but only with the actual starter known in advance.

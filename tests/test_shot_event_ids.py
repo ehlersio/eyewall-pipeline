@@ -1,4 +1,4 @@
-"""Tests for shot_events.py's event_id and backfill_shot_event_ids.py.
+"""Tests for shot_events.py's event_id and scripts/backfill/backfill_shot_event_ids.py.
 No network, no Supabase: the play-by-play fetch and the client are faked.
 
 event_id is the NHL's own id for the play a row came from -- (game_id,
@@ -7,8 +7,8 @@ event_id) is what addresses a goal's video and its tracking replay
 
 from unittest.mock import MagicMock, patch
 
-import backfill_shot_event_ids as backfill
 import shot_events
+from scripts.backfill import backfill_shot_event_ids as backfill
 
 
 def play(event_id, type_key="goal", x=80, y=3, shooter=8471214):

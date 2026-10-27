@@ -29,7 +29,7 @@ map, not a guess from date ranges) plus a full `pwhl_game_log` pull:
 | 10 | Regular (current) | — | 0 so far | 2026-27, not yet started |
 
 **282 total regular-season games exist across PWHL's entire history** — about
-1/14th of the 3,936 NHL games `backtest_elo.py` used. Two structural
+1/14th of the 3,936 NHL games `scripts/backtest/backtest_elo.py` used. Two structural
 differences from NHL worth naming up front:
 
 - **Only one prior-season boundary exists for a true-preseason test**
@@ -49,7 +49,7 @@ differences from NHL worth naming up front:
 which carries `pp_goals`/`pp_opps`/`pk_goals_against`/`pk_opps` per row) —
 computing those terms point-in-time-correctly isn't possible from this
 table without pulling in more data than this pass scoped. The ported
-scorecard (`backtest_pwhl_elo.py::scorecard_win_pct`) uses only
+scorecard (`scripts/backtest/backtest_pwhl_elo.py::scorecard_win_pct`) uses only
 **points/GF-per-game/GA-per-game/streak** — 3 of the live `pwhl.js`
 formula's 5 possible terms (points/GF/GA/streak/PP%, plus Corsi when
 available). **This is a fair comparison against a weaker scorecard than the

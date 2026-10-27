@@ -2,7 +2,7 @@
 hockeytech_elo.py -- AHL/ECHL/PWHL Elo ratings and pre-game win probabilities.
 
 The AHL/ECHL counterpart of elo_ratings.py + win_probs.py, validated by
-backtest_hockeytech_elo.py (docs/hockeytech_elo_backtest_results.md: Brier
+scripts/backtest/backtest_hockeytech_elo.py (docs/hockeytech_elo_backtest_results.md: Brier
 0.2452 AHL / 0.2428 ECHL on 2025-26 vs 0.344 / 0.338 for the point-split
 heuristic /{league}/prediction served before this). Same model as NHL --
 elo.py's constants, no league-specific tuning (the backtest found tuning to

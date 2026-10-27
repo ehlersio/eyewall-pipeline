@@ -1,10 +1,10 @@
-"""Tests for backtest_hockeytech_elo.py's pure parsing/model math -- no
+"""Tests for scripts/backtest/backtest_hockeytech_elo.py's pure parsing/model math -- no
 network (schedule rows and game lists are hand-built, not fetched)."""
 
 import pytest
 
 import elo
-from backtest_hockeytech_elo import (
+from scripts.backtest.backtest_hockeytech_elo import (
     heuristic_win_pct,
     opening_window,
     parse_game,

@@ -1,6 +1,6 @@
 -- shot_events.event_id -- the NHL's own id for the play a row came from.
 -- Run this in the Supabase SQL editor before deploying shot_events.py's
--- change or running backfill_shot_event_ids.py.
+-- change or running scripts/backfill/backfill_shot_event_ids.py.
 --
 -- Why: every row here is one play from a game's play-by-play, and that
 -- play has an eventId the NHL uses in its other feeds too -- the game
@@ -14,7 +14,7 @@
 -- their ids.
 --
 -- Nullable on purpose: rows written before this column existed have no
--- id until backfill_shot_event_ids.py re-processes their game, and the
+-- id until scripts/backfill/backfill_shot_event_ids.py re-processes their game, and the
 -- app treats a missing id as "no replay for this dot" rather than an
 -- error. Not unique -- eventId is only unique within a game, so
 -- (game_id, event_id) is the identifying pair, and that's what the index

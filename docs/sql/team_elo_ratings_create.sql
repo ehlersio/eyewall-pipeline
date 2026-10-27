@@ -13,7 +13,7 @@
 -- -- elo_ratings.py checks it against the live-resolved current season
 -- and applies elo.regress_to_mean() exactly once when they differ, then
 -- writes the new season back. This is the persistent-state equivalent of
--- backtest_elo.py's "regress every team once at each season boundary"
+-- scripts/backtest/backtest_elo.py's "regress every team once at each season boundary"
 -- step in the backtest.
 --
 -- No history table alongside this -- a full nightly recompute from

@@ -18,7 +18,7 @@
 
 ## Part A — Isotonic calibration fit + validation
 
-Fit on full-pool 2024-25 (1,166 games), validated on held-out full-pool 2025-26 (1,132 games) — never fit and evaluated on the same data. Source: `fit_scorecard_calibration.py`, reading `backtest_results.json` (from `backtest_predictions.py`).
+Fit on full-pool 2024-25 (1,166 games), validated on held-out full-pool 2025-26 (1,132 games) — never fit and evaluated on the same data. Source: `scripts/backtest/fit_scorecard_calibration.py`, reading `backtest_results.json` (from `scripts/backtest/backtest_predictions.py`).
 
 **Confirmed rather than assumed** (per the brief's own instruction): directly verified against production that none of the 512 unique (season, cutoff, team) combinations underlying this dataset had zero games played at cutoff — the main backtest's data is genuinely all "current-season-to-date, however thin," never the zero-game preseason regime. 0 violations found.
 
@@ -35,7 +35,7 @@ A large, genuine improvement on both proper scoring rules (Brier −23%, log los
 
 **The true 2025-26 holdout has zero early-season (<10 GP) games.** All 92 early-season games in this dataset are inside the 2024-25 *fit* set — 2025-26's first cutoff (Nov 1) landed after every team had already played 10+ games, likely because that season's early schedule was denser than 2024-25's. This means the brief's ask ("report before/after separately on the early-season slice... on the holdout set") cannot be fulfilled as literally specified — there's no such holdout data to report on.
 
-Rather than silently drop this or fabricate a holdout evaluation, `fit_scorecard_calibration.py` reports an explicitly-labeled **in-sample sanity check** on the 92 early-season games instead — directional only, not validated evidence, since these games were part of the fit:
+Rather than silently drop this or fabricate a holdout evaluation, `scripts/backtest/fit_scorecard_calibration.py` reports an explicitly-labeled **in-sample sanity check** on the 92 early-season games instead — directional only, not validated evidence, since these games were part of the fit:
 
 | (in-sample, n=92) | Brier ↓ | Log loss ↓ | Accuracy |
 |---|---|---|---|

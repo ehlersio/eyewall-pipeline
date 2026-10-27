@@ -6,14 +6,14 @@
 
 ## Why this ran
 
-The original isotonic fit (pipeline PR #48, merged 2026-07-23 14:55) predates the pp_goals/pp_opps `situationCode`-misindexing fix (`PP_GOALS_FULL_FIX.md`, pipeline PR #53, merged 2026-07-23 22:54) by about 8 hours. `backtest_predictions.py`'s `standings_inputs_asof()` sums `game_log.pp_goals`/`pp_opps` directly into `pp_pct`, one of the scorecard's five inputs — and that column had a near-universal misclassification bug all season (home teams' `pp_goals` forced to ~0.0/game in nearly every game, a directional bias, not noise). The original fit and its reported Brier/log-loss improvement were both computed on backtest data carrying this bug, on both the 2024-25 training set and the 2025-26 holdout set.
+The original isotonic fit (pipeline PR #48, merged 2026-07-23 14:55) predates the pp_goals/pp_opps `situationCode`-misindexing fix (`PP_GOALS_FULL_FIX.md`, pipeline PR #53, merged 2026-07-23 22:54) by about 8 hours. `scripts/backtest/backtest_predictions.py`'s `standings_inputs_asof()` sums `game_log.pp_goals`/`pp_opps` directly into `pp_pct`, one of the scorecard's five inputs — and that column had a near-universal misclassification bug all season (home teams' `pp_goals` forced to ~0.0/game in nearly every game, a directional bias, not noise). The original fit and its reported Brier/log-loss improvement were both computed on backtest data carrying this bug, on both the 2024-25 training set and the 2025-26 holdout set.
 
-The PP fix's own consumer audit checked whether `backtest_predictions.py` *mis-parses* `situationCode` (it doesn't — clean) but not whether it *consumes* the `game_log` columns the bug corrupted. That's the gap this recheck closes.
+The PP fix's own consumer audit checked whether `scripts/backtest/backtest_predictions.py` *mis-parses* `situationCode` (it doesn't — clean) but not whether it *consumes* the `game_log` columns the bug corrupted. That's the gap this recheck closes.
 
 ## What ran
 
-1. Re-ran `backtest_predictions.py` unmodified — it reads `game_log` live at runtime with no local caching, so it picked up the corrected `pp_goals`/`pp_opps` (backfilled across 2023-24/2024-25/2025-26 by PR #53) automatically. 3,380 games scored, same scope as the original run (full-pool 2024-25/2025-26 + degraded-pool 2022-23/2023-24).
-2. Re-ran `fit_scorecard_calibration.py` unmodified against the new `backtest_results.json` — same fit/holdout split (fit: 2024-25, holdout: 2025-26), same train/holdout discipline as the original.
+1. Re-ran `scripts/backtest/backtest_predictions.py` unmodified — it reads `game_log` live at runtime with no local caching, so it picked up the corrected `pp_goals`/`pp_opps` (backfilled across 2023-24/2024-25/2025-26 by PR #53) automatically. 3,380 games scored, same scope as the original run (full-pool 2024-25/2025-26 + degraded-pool 2022-23/2023-24).
+2. Re-ran `scripts/backtest/fit_scorecard_calibration.py` unmodified against the new `backtest_results.json` — same fit/holdout split (fit: 2024-25, holdout: 2025-26), same train/holdout discipline as the original.
 
 ## Results
 

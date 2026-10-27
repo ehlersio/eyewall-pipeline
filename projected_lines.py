@@ -71,7 +71,8 @@ FILL_HALF_LIFE = 5  # games; "recently dressed" for choosing a vacancy's filler
 PRE_RECENT_HALF_LIFE = 2  # preseason games; for the "pre" / "combo" opening rules
 MIN_5V5_SECS = 1200  # a game with less 5v5 time has broken shift data; skip it
 UNAVAILABLE = {"out", "injured-reserve", "suspension"}  # day-to-day players often play
-OPENING_RULE = "combo"  # chosen by backtest_projected_lines.py, see select_opening_lineup()
+# Chosen by scripts/backtest/backtest_projected_lines.py, see select_opening_lineup().
+OPENING_RULE = "combo"
 
 
 # ── 5v5 game summaries ────────────────────────────────────────────────────────

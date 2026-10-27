@@ -13,8 +13,8 @@ season-to-season regression-to-mean is a principled, outcome-driven
 version of the continuity-dampening hack this pipeline built by hand for
 the preseason fallback.
 
-No writes anywhere -- pure functions only, consumed by backtest_elo.py and
-backtest_preseason.py. Not wired into production; this is the validation
+No writes anywhere -- pure functions only, consumed by scripts/backtest/backtest_elo.py and
+scripts/backtest/backtest_preseason.py. Not wired into production; this is the validation
 step before any of that.
 
 Constants below are FiveThirtyEight's published NHL Elo values, not tuned

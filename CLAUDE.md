@@ -5,7 +5,7 @@ Python data pipeline for EyeWall Analytics, run nightly via GitHub Actions. Inge
 ## Stack
 - Python, `db.py` as the consolidated Supabase access point
 - GitHub Actions cron (`nightly.yml` for NHL, `pwhl-nightly.yml` for PWHL — kept separate)
-- pytest for tests
+- pytest for tests (in `tests/`); one-off backtests, backfills and diagnostics live in `scripts/` and run as `python -m scripts.<dir>.<name>` from the repo root (README "Repository layout")
 - Ruff for linting
 
 ## Sibling repos
@@ -142,7 +142,7 @@ Renaming/removing the column outright would be a breaking schema change spanning
 - ~~`gameSummary`'s `goal.plus_players[]`/`minus_players[]`~~ — resolved Session 42: wired into `pwhl_goal_on_ice.py` / `pwhl_goal_on_ice` table, convention validated against `pwhl_skater_game_box.plus_minus` (10,669/10,669 player-games matched across the full historical backfill: sum `on_ice_for` excluding power-play goals only). Does NOT change the WAR/RAPM October-2026 blocker below — goal-scoped, not continuous shift data, too coarse a signal to substitute.
 - Penalty shots (`"penaltyshot"` PBP event / `gameSummary.penaltyShots`) — resolved Session 42: own table (`pwhl_penalty_shots.py` / `pwhl_penalty_shots`), sourced from `gameSummary.penaltyShots` (has misses; `periods[].goals[]` doesn't). No coordinate data exists for these at all. `pwhl_shot_events.is_penalty_shot` now always reads `false` — likely dead weight, not dropped this session.
 - ~~`pwhl_goal_on_ice.py`/`pwhl_penalty_shots.py` manual-only~~ — in `pwhl-nightly.yml` since 2026-10. `pwhl_goal_on_ice.py` is a wrapper over `hockeytech_goal_on_ice.py`, which also writes `ahl_goal_on_ice`/`echl_goal_on_ice`.
-- `inspect_*`/`test_*` diagnostic files are intentionally kept around (not scratch files to delete) — not audited recently though.
+- `scripts/inspect/` diagnostics and `scripts/backfill/` one-offs are intentionally kept around (not scratch files to delete) — not audited recently though.
 
 ## PWHL season 2 is the 2023 showcase — keep `SEASON_TYPE_MAP`'s label
 HockeyTech's `bootstrap` calls season 2 `"2024 Preseason"`; `season_lookup.PWHL_SEASON_TYPE_MAP` calls it `"showcase"`, and the map is right. Its games settle it: 9 games over 2023-12-04 to 12-07, all six teams three apiece, before the inaugural regular season (ID 1) opened 2024-01-01. Resolved 2026-09 (README has the detail).

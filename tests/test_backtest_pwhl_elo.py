@@ -1,7 +1,7 @@
-"""Tests for backtest_pwhl_elo.py's pure scorecard/standings math -- no
+"""Tests for scripts/backtest/backtest_pwhl_elo.py's pure scorecard/standings math -- no
 network (games lists are hand-built, not fetched)."""
 
-from backtest_pwhl_elo import scorecard_win_pct, standings_inputs_asof
+from scripts.backtest.backtest_pwhl_elo import scorecard_win_pct, standings_inputs_asof
 
 
 def make_game(game_id, game_date, home_id, away_id, home_score, away_score):

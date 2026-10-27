@@ -8,7 +8,7 @@ for the backtest this replaces the scorecard/continuity-fallback with.
 Full recompute, not incremental: replays every regular-season game_log row
 across every known season, in chronological order, applying
 elo.regress_to_mean() once at each season boundary -- same logic
-backtest_elo.py already validated. Deliberately not incremental (no "last
+scripts/backtest/backtest_elo.py already validated. Deliberately not incremental (no "last
 processed game" state to track) -- a full replay is cheap (game_log is a
 few thousand rows total across 3 seasons) and self-healing: a backfilled
 or corrected score just changes the outcome of the next run, with no
@@ -53,7 +53,7 @@ def load_games(season: int) -> list[dict]:
     """One row per game (game_log has one row per team per game), sorted
     chronologically. home_score/away_score/period_end are identical across
     both team-rows for a game, so any one row's values are safe to use --
-    same fetch shape as backtest_elo.py's load_games()."""
+    same fetch shape as scripts/backtest/backtest_elo.py's load_games()."""
     rows = rapm.fetch_all(
         supabase,
         "game_log",

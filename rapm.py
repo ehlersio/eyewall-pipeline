@@ -30,7 +30,7 @@ from db import NHL_SEASON, PRIMARY_TEAM_ABBR, get_client
 
 # A shot's xG comes from where it was taken -- nhl_shot_xg.py, shared with
 # line_combinations.py, and re-exported here because
-# backtest_predictions.py calls rapm.shot_xg. These are the values rapm
+# scripts/backtest/backtest_predictions.py calls rapm.shot_xg. These are the values rapm
 # uses as y, the outcome per shot event. Until 2026-09 this file had its
 # own copy that scored a goal 1.0 and used roughly double the real
 # per-band rates; see nhl_shot_xg.py.

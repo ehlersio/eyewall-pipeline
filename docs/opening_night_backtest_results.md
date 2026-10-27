@@ -1,6 +1,6 @@
 # Opening-night line projection backtest
 
-`backtest_opening_night.py` (read-only), run 2026-09-17. Companion to
+`scripts/backtest/backtest_opening_night.py` (read-only), run 2026-09-17. Companion to
 [line_projection_backtest_results.md](line_projection_backtest_results.md) (in-season, next
 game). Question: with only what's known before the season starts, how well can we project each
 team's opening-night lines? **Answer: preseason shift data is the whole story.** Group
