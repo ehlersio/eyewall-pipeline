@@ -8,6 +8,7 @@ Runs after nhl_stats.py (player_seasons rows must exist first).
 import csv
 import io
 import math
+import time
 import traceback
 
 import requests
@@ -73,10 +74,46 @@ MIN_TOI_MINUTES = {"F": 250, "D": 330}
 RESULTS_VS_PROCESS_MIN_GP = 25
 
 
+# Indirection so tests can skip the backoff.
+_sleep = time.sleep
+
+# Worth another try: rate limiting and server-side errors. Any other 4xx
+# (the 404 fetch_season_csv() expects for a season's playoffs before they
+# start, say) fails at once.
+MP_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def mp_get(url: str, timeout: float = 60, retries: int = 3) -> requests.Response:
+    """GET a MoneyPuck file, retrying timeouts, connection errors and
+    429/5xx up to `retries` attempts with 5 s, 10 s backoff (milk_carton's
+    MoneyPuck fetch waits the same). One read timeout on skaters.csv failed
+    the 2026-10-28 nightly's whole moneypuck stage; the same fetch worked
+    six hours later. Raises what requests raised on the last attempt
+    (HTTPError for a status, so fetch_season_csv() can still tell a 404),
+    and any other HTTP error at once."""
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt == retries - 1:
+                raise
+            err = e
+        else:
+            if r.status_code not in MP_RETRY_STATUSES or attempt == retries - 1:
+                r.raise_for_status()
+                return r
+            err = f"HTTP {r.status_code}"
+        wait = 5 * (attempt + 1)
+        print(
+            f"  MoneyPuck GET {url}: {err} (attempt {attempt + 1}/{retries}), retrying in {wait} s"
+        )
+        _sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def fetch_csv(url: str = MP_SKATERS_URL) -> list[dict]:
     print(f"  Fetching {url.rsplit('/', 1)[-1]}...")
-    r = requests.get(url, headers=HEADERS, timeout=60)
-    r.raise_for_status()
+    r = mp_get(url)
     reader = csv.DictReader(io.StringIO(r.text))
     rows = list(reader)
     print(f"  Parsed {len(rows)} rows")
@@ -289,8 +326,7 @@ def load_player_box_stats(client, season: int, game_type: int = 2) -> dict:
 
 def fetch_team_games_csv(season: int) -> list[dict]:
     print("  Fetching MoneyPuck all-teams game-by-game CSV...")
-    r = requests.get(MP_TEAM_GAMES_URL, headers=HEADERS, timeout=120)
-    r.raise_for_status()
+    r = mp_get(MP_TEAM_GAMES_URL, timeout=120)
     reader = csv.DictReader(io.StringIO(r.text))
     # Filter to current season and 5on5 only — keeps memory reasonable
     rows = [
