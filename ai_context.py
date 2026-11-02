@@ -410,7 +410,11 @@ def _player_season_dict(r: dict, info: dict) -> dict:
         "pct_ev_off": r.get("pct_ev_off"),
         "pct_ev_def": r.get("pct_ev_def"),
         "pct_finishing": r.get("pct_finishing"),
-        "pct_competition": r.get("pct_competition"),
+        # player_seasons.pct_competition is MoneyPuck's 5v5 off-ice xGF%: how
+        # the team does with this player on the bench, not quality of
+        # competition. Named for what it is here, because the prompts print
+        # every key and value and the model read "competition" as opponents.
+        "pct_team_xgf_off_ice": r.get("pct_competition"),
         "goals_per60": _float_or_none(r.get("goals_per60")),
         "a1_per60": _float_or_none(r.get("a1_per60")),
         "xgf_per60": _float_or_none(r.get("xgf_per60")),

@@ -1120,6 +1120,10 @@ def skater_metric_fns(ev_map: dict, pp_map: dict, pk_map: dict) -> dict:
         return -per60(row.get("I_F_penalityMinutes", 0), it)  # negative PIM = good
 
     def competition(row):
+        """5v5 off-ice xGF%: how the team does with this player on the bench.
+        Stored as `competition` / `pct_competition`, but it is not quality of
+        competition; MoneyPuck has no such column. The app labels it "Team
+        Without Player" and the AI context names it pct_team_xgf_off_ice."""
         ev = ev_map.get(row["playerId"])
         return n(ev["offIce_xGoalsPercentage"]) if ev else None
 
