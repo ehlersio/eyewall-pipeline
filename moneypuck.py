@@ -1021,18 +1021,29 @@ def season_games(season: int) -> int | None:
     return games or None
 
 
+def penalty_goals(row) -> float:
+    """Goals from one MoneyPuck "all" row's penalties: minutes drawn minus
+    minutes taken, at PEN_MIN_VALUE. Until 2026-11 WAR charged the minutes
+    taken and never credited the minutes drawn, so a player who draws a lot
+    of penalties (McDavid early in 2026-27: 18 drawn, 2 taken) was scored on
+    the 2 alone."""
+    drawn = n(row.get("penalityMinutesDrawn", 0))
+    taken = n(row.get("I_F_penalityMinutes", 0))
+    return (drawn - taken) * PEN_MIN_VALUE
+
+
 def war_from_rapm(row, ev_row, rapm, replacement: float = REPLACEMENT_WAR) -> float | None:
     """RAPM-derived WAR (beta) for one MoneyPuck "all" row: the RAPM
     coefficient (marginal xG/60 at 5v5) over the player's 5v5 hours, plus
-    penalties and finishing, in goals above average, then wins, plus the
-    replacement term. None under 6 minutes of 5v5 ice. The replacement term
-    is the caller's share of REPLACEMENT_WAR: by games played in the regular
-    season (regular_season_replacement), by ice time in the playoffs
-    (run_playoff_skaters)."""
+    penalties (drawn minus taken) and finishing, in goals above average, then
+    wins, plus the replacement term. None under 6 minutes of 5v5 ice. The
+    replacement term is the caller's share of REPLACEMENT_WAR: by games played
+    in the regular season (regular_season_replacement), by ice time in the
+    playoffs (run_playoff_skaters)."""
     it = n(ev_row.get("icetime", 0)) / 3600 if ev_row else 0.0  # hours of EV ice
     if it < 0.1:
         return None
-    pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
+    pen = penalty_goals(row)
     fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
     ev_gaa = float(rapm) * it  # xG above average from EV RAPM
     gaa = ev_gaa + pen * 0.3 + fin * 0.3
@@ -1501,7 +1512,7 @@ def run(season: int = NHL_SEASON) -> list[str]:
             return war_from_rapm(row, ev, rapm, replacement)
 
         # Fallback: xGoals-above-average method (original approach)
-        pen = n(row.get("I_F_penalityMinutes", 0)) * PEN_MIN_VALUE * -1
+        pen = penalty_goals(row)
         fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
         avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
         avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
