@@ -19,7 +19,6 @@ DISPATCHED = {
     "pwhl-nightly.yml": "run-pwhl-pipeline",
     "ahl-nightly.yml": "run-ahl-pipeline",
     "echl-nightly.yml": "run-echl-pipeline",
-    "moneypuck-ingest.yml": "ingest",
     "ai_pipeline.yml": "ai-morning",
 }
 GUARD_IF = "steps.guard.outputs.skip != 'true'"
