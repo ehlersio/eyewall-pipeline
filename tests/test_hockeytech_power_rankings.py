@@ -11,9 +11,10 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 import hockeytech_power_rankings as hpr
-from hockeytech_leagues import AHL, PWHL
+from hockeytech_leagues import AHL, ECHL, PWHL
 
 TODAY = date(2026, 11, 2)
+AHL_NAMES = {307: "Hartford Wolf Pack", 309: "Providence Bruins"}
 
 
 def team(tid, gp=10, w=5, lost=3, otl=2, pts=12, gf=30, ga=25, pp=0.2, pk=0.8, **extra):
@@ -188,18 +189,57 @@ def test_weights_add_to_one():
 
 def test_prompt_is_neutral_names_no_players_and_states_the_league():
     ranked = hpr.compute_rankings("ahl", [team(307, pts=18), team(309)], [])
-    prompt = hpr.build_prompt(AHL, ranked, ranked[0], 2, TODAY)
-    assert "HFD" in prompt and "the AHL (not the NHL), 2 teams" in prompt
+    prompt = hpr.build_prompt(AHL, ranked, ranked[0], 2, TODAY, AHL_NAMES)
+    assert "Team: Hartford Wolf Pack" in prompt and "the AHL (not the NHL), 2 teams" in prompt
     assert "CURRENT RANK: 1/2 -- up 1 from 2" in prompt
     assert "Do not name any players" in prompt
     assert "No betting" in prompt
-    first = hpr.build_prompt(AHL, ranked, ranked[1], None, TODAY)
+    first = hpr.build_prompt(AHL, ranked, ranked[1], None, TODAY, AHL_NAMES)
     assert "do not mention movement" in first
+
+
+def test_prompt_names_teams_and_carries_no_codes():
+    # 2026-11-04: Greensboro's write-up called them "the Stingrays" (South
+    # Carolina) and every AHL/ECHL write-up named teams by code ("GSO holds
+    # at 15th"), which Siri spells out. The prompt now has names only.
+    ranked = hpr.compute_rankings("echl", [team(18, pts=18), team(108)], [])
+    names = {18: "South Carolina Stingrays", 108: "Greensboro Gargoyles"}
+    gso = next(t for t in ranked if t["team_id"] == 108)
+    prompt = hpr.build_prompt(ECHL, ranked, gso, None, TODAY, names)
+    assert prompt.splitlines()[0] == "POWER RANKINGS NARRATIVE -- ECHL -- Greensboro Gargoyles"
+    assert "Team: Greensboro Gargoyles" in prompt
+    assert "1. South Carolina Stingrays (" in prompt and "2. Greensboro Gargoyles (" in prompt
+    assert "Never use a team abbreviation" in prompt
+    assert "untranslated" in prompt
+    for code in ECHL.team_id_map.values():
+        assert f" {code} " not in prompt and f" {code}\n" not in prompt, code
+    assert "GSO" not in prompt and "SC (" not in prompt
 
 
 def test_pwhl_prompt_has_corsi():
     ranked = hpr.compute_rankings("pwhl", [team(1, corsi_for_pct=52.0), team(2)], [])
-    assert "Corsi for %" in hpr.build_prompt(PWHL, ranked, ranked[0], None, TODAY)
+    names = {1: "Boston Fleet", 2: "Minnesota Frost"}
+    assert "Corsi for %" in hpr.build_prompt(PWHL, ranked, ranked[0], None, TODAY, names)
+
+
+def test_team_names_prefer_the_live_list_and_fill_from_config(monkeypatch):
+    import hockeytech_stats
+
+    seen = []
+
+    def fake_names(lg, season_id):
+        seen.append((lg.key, season_id))
+        return {"108": "Greensboro Gargoyles", "18": ""}
+
+    monkeypatch.setattr(hockeytech_stats, "_season_team_names", fake_names)
+    names = hpr.team_names(ECHL, 78)
+    assert seen == [("echl", "78")]
+    assert names[108] == "Greensboro Gargoyles"
+    # An empty live name falls back to ECHL's team_id_by_name.
+    assert names[18] == "South Carolina Stingrays"
+    # AHL has no name config: a failed list means no names at all.
+    monkeypatch.setattr(hockeytech_stats, "_season_team_names", lambda lg, sid: {})
+    assert hpr.team_names(AHL, 94) == {}
 
 
 @pytest.mark.parametrize(
@@ -283,9 +323,10 @@ def calls(monkeypatch):
 
     def fake_generate(prompt, system=None, max_tokens=1024):
         sent.append((prompt, system))
-        return "Narrative." if "HFD" in prompt.split("\n")[0] else None
+        return "Narrative." if "Hartford" in prompt.split("\n")[0] else None
 
     monkeypatch.setattr(hpr, "generate", fake_generate)
+    monkeypatch.setattr(hpr, "team_names", lambda league, season_id: dict(AHL_NAMES))
     monkeypatch.setattr(hpr, "league_seasons", lambda key: SEASONS)
     monkeypatch.setattr(hpr.time, "sleep", lambda s: None)
     return sent
@@ -315,6 +356,15 @@ def test_run_narratives_fill_missing_pairs_in_both_locales(monkeypatch, calls):
     # Only HFD's generation "succeeds" in the fake; PRO's fail and are not written.
     assert [(w[2]["team_id"], w[2]["locale"]) for w in narr] == [(307, "fr")]
     assert narr[0][1] == "season_id,run_date,team_id,locale"
+
+
+def test_run_writes_no_narratives_without_every_teams_name(monkeypatch, calls):
+    db = ahl_db()
+    monkeypatch.setattr(hpr, "get_client", lambda: db)
+    monkeypatch.setattr(hpr, "team_names", lambda league, season_id: {307: "Hartford Wolf Pack"})
+    assert hpr.run("ahl", narratives=True, today=TODAY) == 0
+    assert calls == []
+    assert [w[0] for w in db.writes] == ["ahl_power_rankings"]  # the rankings still land
 
 
 def test_run_waits_for_games_played(monkeypatch, calls):
