@@ -36,7 +36,14 @@ is each team's rank on the latest earlier run_date.
 ai_client.generate() (its retries/backoff), REQUEST_DELAY between calls,
 skipping (team, locale) pairs already written for this run_date -- a rerun
 the same night only fills the gaps. Neutral language, no player names (no
-player data is given to the model). The nightlies pass the flag; delete it
+player data is given to the model). Teams are named by their display names
+("Greensboro Gargoyles"), never their codes: the prompt carries no codes
+at all, so the model can't write "GSO" (which Siri and screen readers spell
+out letter by letter) or guess the team behind one (the 2026-11-04
+Greensboro write-up called them "the Stingrays"). The names come from
+HockeyTech's own team list for the season (team_names()); without a name
+for every team, a league gets no narratives that night rather than codes.
+The nightlies pass the flag; delete it
 from the workflow's `run:` line to turn narratives off. Up to teams x 2
 calls per league per night: 32 x 2 (AHL) + 30 x 2 (ECHL) + 12 x 2 (PWHL) =
 148 on a night when all three play.
@@ -281,14 +288,31 @@ def _pct(v) -> str:
     return "n/a" if v is None else f"{v * 100:.1f}%"
 
 
-def build_prompt(league, ranked, team, prior_rank, today: date) -> str:
-    code = league.team_id_map.get(str(team["team_id"]), str(team["team_id"]))
+def team_names(league, season_id) -> dict[int, str]:
+    """team_id -> display name ("Greensboro Gargoyles") for the narrative
+    prompts: HockeyTech's own team list for the season (modulekit
+    teamsbyseason, the call hockeytech_stats.py makes before fetching
+    rosters), checked live 2026-11-05 to name all 32 AHL, 30 ECHL and 12
+    PWHL teams. ECHL's team_id_by_name (the feed's own names, in
+    hockeytech_leagues.py) fills any team the list misses. A team in neither
+    is left out; write_narratives() then writes none rather than use codes."""
+    # Lazy, as in hockeytech_elo.py: hockeytech_stats reads the Supabase env
+    # at import, and the rankings themselves don't need it.
+    from hockeytech_stats import _season_team_names
+
+    names = {int(tid): name for name, tid in (league.team_id_by_name or {}).items()}
+    live = _season_team_names(league, str(season_id))
+    names.update({int(tid): name for tid, name in live.items() if name})
+    return names
+
+
+def build_prompt(league, ranked, team, prior_rank, today: date, names) -> str:
+    """names: team_id -> display name (team_names()), one for every team in
+    `ranked`. The prompt carries no team codes."""
+    name = names[team["team_id"]]
     n = len(ranked)
     c = team["components"]
     ranks = c.get("ranks", {})
-
-    def code_of(t):
-        return league.team_id_map.get(str(t["team_id"]), str(t["team_id"]))
 
     def rank_of(k):
         return f"{ranks[k]}/{n}" if k in ranks else "n/a"
@@ -306,18 +330,19 @@ def build_prompt(league, ranked, team, prior_rank, today: date) -> str:
     if "cf_pct" in c:
         lines.append(f"  Corsi for %:     {_pct(c['cf_pct'])} (rank {rank_of('cf_pct')})")
     table = "\n".join(
-        f"  {t['rank']:2}. {code_of(t)} ({t['components']['record']}, "
+        f"  {t['rank']:2}. {names[t['team_id']]} ({t['components']['record']}, "
         f"Pts% {_pct(t['components']['pts_pct'])})"
         for t in ranked
     )
-    return f"""POWER RANKINGS NARRATIVE -- {league.label} -- {code}
+    return f"""POWER RANKINGS NARRATIVE -- {league.label} -- {name}
 Generated: {today.isoformat()}
 League: the {league.label} (not the NHL), {n} teams.
+Team: {name}
 Record (W-L-OTL): {c["record"]} in {c["gp"]} games, {c["points"]} points
 
 CURRENT RANK: {team["rank"]}/{n} -- {movement(team["rank"], prior_rank)}
 
-COMPONENTS FOR {code} (league rank in brackets, 1 = best):
+COMPONENTS FOR {name} (league rank in brackets, 1 = best):
 {chr(10).join(lines)}
 
 HOW THE RANKING WORKS: a weighted blend of the components above (points %
@@ -329,14 +354,17 @@ ALL {n} TEAMS:
 ACCURACY RULES -- STRICTLY ENFORCED:
 - Use only the numbers above. Do not invent scores, opponents, streaks or injuries.
 - Do not name any players: no player data is provided.
-- Neutral language only: describe where {code} stands and why. No betting
+- Neutral language only: describe where this team stands and why. No betting
   language, no "locks", "picks", odds or guarantees about future results.
 - If there is no prior rank, do not mention movement.
-- Refer to teams by the codes above.
+- Name teams only as they are written above: the full name ("{name}"), or
+  its city or nickname alone where that can't be mistaken for another team
+  in the list. Never use a team abbreviation, and never a team name that
+  isn't in this prompt. Keep team names exactly as written, untranslated.
 
-Write a power ranking summary for {code} fans in 3-4 sentences: where {code}
-ranks and the main reason (its strongest or weakest component), then one
-observation about what is working or what needs to improve.
+Write a power ranking summary for {name} fans in 3-4 sentences: where the
+team ranks and the main reason (its strongest or weakest component), then
+one observation about what is working or what needs to improve.
 
 Plain text only. No bullet points. No markdown. 60-100 words."""
 
@@ -437,13 +465,24 @@ def write_narratives(client, key, league, season_id, ranked, prior, today, dry_r
                 f"been run? {type(e).__name__}: {e}"
             )
             return 0, 0
+    names = team_names(league, season_id)
+    unnamed = [t["team_id"] for t in ranked if t["team_id"] not in names]
+    if unnamed:
+        # Every prompt lists every team, so one missing name would put a code
+        # back into all of them. The next night's run fills the gaps.
+        missing = sum((t["team_id"], loc) not in done for t in ranked for loc in LOCALES)
+        log.error(
+            f"  No team name for team_id {unnamed} (HockeyTech teamsbyseason, season "
+            f"{season_id}) -- no narratives tonight"
+        )
+        return 0, missing
     written = failed = 0
     for locale in LOCALES:
         system = get_system_prompt(locale)
         for t in ranked:
             if (t["team_id"], locale) in done:
                 continue
-            prompt = build_prompt(league, ranked, t, prior.get(t["team_id"]), today)
+            prompt = build_prompt(league, ranked, t, prior.get(t["team_id"]), today, names)
             if dry_run:
                 if locale == LOCALES[0] and t is ranked[0]:
                     log.info(f"\n{prompt}\n")
