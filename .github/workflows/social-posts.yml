@@ -26,6 +26,9 @@ name: Social Posts
 #                              (team_trends.py)
 #   cherry-picked Sundays    -- Cherry Picked Stats: true, rotating facts
 #                              about Mon-Sat, every league (cherry_picked.py)
+#   announce      daily      -- app announcements dated that day in
+#                              announcements/*.json (announcements.py); a day
+#                              with none dated exits 0
 # (the other pwhl-*/minor-* posts are social_posts_leagues.py, milk-carton is
 # milk_carton.py, goal-of-week is goal_of_week.py)
 #
@@ -75,6 +78,10 @@ name: Social Posts
 #   minor-trends  22:00 / 23:00 Fri
 #   cherry-picked 15:00 / 16:00 Sun (11am / noon EDT) -- after the nightly
 #                 has Saturday's games; needs docs/sql/2026-10-09_social_post_facts.sql
+#   announce      14:00 / 18:00 daily -- the one post with no Worker slot:
+#                 announcements aren't time-bound, so GitHub's own (late)
+#                 schedule is enough. A missed day: dispatch kind=announce
+#                 with date=YYYY-MM-DD.
 # The Team Trends posts wait until every team has 10 games (exit 0 before).
 
 on:
@@ -115,13 +122,15 @@ on:
     - cron: '30 18 * * 1'
     - cron: '30 19 * * 1'
     - cron: '30 20 * * 1'
+    - cron: '0 14 * * *'
+    - cron: '0 18 * * *'
   workflow_dispatch:
     inputs:
       kind:
         description: 'Which post (check = read-only credentials test, posts nothing)'
         required: true
         type: choice
-        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-winners, minor-recap, pwhl-leaders, minor-rankings, pwhl-rankings, minor-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, check]
+        options: [winners, rankings, recap, leaders, pwhl-winners, pwhl-recap, minor-winners, minor-recap, pwhl-leaders, minor-rankings, pwhl-rankings, minor-leaders, milk-carton, goal-of-week, trends, pwhl-trends, minor-trends, cherry-picked, announce, check]
       dry_run:
         description: 'Render only (images / video kept as a run artifact), no upload or post'
         type: boolean
@@ -172,6 +181,7 @@ jobs:
             '0 15 * * 0'|'0 16 * * 0')  kind=cherry-picked ;;
             '30 17 * * 1'|'30 18 * * 1') kind=minor-rankings ;;
             '30 19 * * 1'|'30 20 * * 1') kind=pwhl-rankings ;;
+            '0 14 * * *'|'0 18 * * *')   kind=announce ;;
             '') kind="$INPUT_KIND" ;;
             *) echo "Unmapped schedule: $SCHEDULE"; exit 1 ;;
           esac
@@ -190,6 +200,7 @@ jobs:
             pwhl-*|minor-*) script=social_posts_leagues.py ;;
             milk-carton) script=milk_carton.py ;;
             goal-of-week) script=goal_of_week.py ;;
+            announce) script=announcements.py ;;
           esac
           echo "script=$script" >> "$GITHUB_OUTPUT"
           echo "kind=$kind" >> "$GITHUB_OUTPUT"

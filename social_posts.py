@@ -1134,7 +1134,16 @@ def publish_facebook_video(page_id, token, video_urls, caption, thumb_offset_ms=
 
 def platform_caption(platform, caption):
     """Links aren't clickable in Instagram captions but are on Facebook.
-    Every caption ends with the platform's APP_LINE."""
+    Every caption ends with the platform's APP_LINE.
+
+    `caption` can also be a mapping with a caption per platform
+    (announcements.py): {"instagram": ..., "facebook": ..., "app_line":
+    False} uses each platform's own text as written, and app_line False
+    leaves the APP_LINE off."""
+    if isinstance(caption, dict):
+        text = caption[platform]
+        app_line = APP_LINE.get(platform) if caption.get("app_line", True) else None
+        return f"{text}\n\n{app_line}" if app_line else text
     if platform == "facebook":
         caption = caption.replace("link in bio", SITE_URL)
     app_line = APP_LINE.get(platform)
