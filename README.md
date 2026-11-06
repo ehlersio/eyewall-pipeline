@@ -163,7 +163,7 @@ ruff check . && ruff format --check .
 |---|---|
 | `*.py` (root) | Everything a workflow runs or another module imports: the ingest stages, `run.py`, shared helpers (`db.py`, `pipeline_common.py`, `season_lookup.py`, `hockeytech_leagues.py`). They import each other by bare name, so they stay flat. |
 | `tests/` | The pytest suite, plus `fixtures/` and `golden/` files. `pyproject.toml` puts the repo root on the path, so tests import modules as before. |
-| `scripts/backtest/` | Read-only model backtests and tuning (`backtest_*.py`, `tune_elo.py`, `fit_scorecard_calibration.py`). `backtest_playoff_odds.py` and `backtest_starting_goalie.py` stay at the root because `prediction_scorecard.py` imports them. |
+| `scripts/backtest/` | Read-only model backtests and tuning (`backtest_*.py`, `tune_elo.py`, `fit_scorecard_calibration.py`), plus `trade_data_coverage.py` (data coverage for the planned trade candidacy backtest, results in `docs/trade_data_coverage_results.md`). `backtest_playoff_odds.py` and `backtest_starting_goalie.py` stay at the root because `prediction_scorecard.py` imports them. |
 | `scripts/backfill/` | One-off data repairs and backfills. |
 | `scripts/inspect/` | Diagnostics and API probes; they print, they don't write. |
 | `docs/` | Backtest results and API notes; `docs/sql/` holds the SQL migrations to run by hand, and `docs/research/` holds raw investigation output. |
