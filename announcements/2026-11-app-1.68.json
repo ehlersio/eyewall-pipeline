@@ -1,0 +1,218 @@
+{
+  "campaign": "EyeWall Analytics 1.68.0 on the App Store (live 2026-11-06)",
+  "posts": [
+    {
+      "slug": "1-68-whats-new",
+      "post_on": "2026-11-06",
+      "slides": [
+        {
+          "kicker": "New in 1.68",
+          "title": "What’s new in EyeWall",
+          "subtitle": "NHL, PWHL, AHL and ECHL, in English and French",
+          "items": [
+            {
+              "head": "Ask Siri",
+              "text": "The score, who scored, how the last game went, power rankings, record, playoff chances and player stats."
+            },
+            {
+              "head": "Salary cap",
+              "text": "A Cap tab for every NHL team, a league-wide cap view and a contract-value board."
+            },
+            {
+              "head": "Shootouts",
+              "text": "Every NHL shootout attempt on the shot map, shooter by shooter."
+            },
+            {
+              "head": "Holiday and seasonal themes",
+              "text": "The opening faceoff and the logo dress up for holidays and seasons."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "New in EyeWall Analytics 🏒\n\n🗣️ Ask Siri about your team: the score, who scored, how the last game went, power rankings, record and playoff chances\n💰 A salary cap tab for every NHL team, plus a league-wide cap view and a contract-value board\n🎯 Shootouts shooter by shooter on the shot map\n🎃 Holiday and seasonal themes for the opening faceoff\n\nNHL, PWHL, AHL and ECHL, in English and French.\n\n#hockey #NHL #PWHL #AHL #ECHL #hockeyanalytics #iOS",
+        "facebook": "EyeWall Analytics has a big update on the App Store.\n\n• Siri: ask \"What's the score in EyeWall\", \"Who scored in EyeWall\" or \"How did we play in EyeWall\" and get an answer for your team without opening the app. It works for every NHL, PWHL, AHL and ECHL team, in English and French.\n• Salary cap: a Cap tab on every NHL team page, a league-wide cap comparison, and a contract-value board that scores players by production per $1M of cap hit.\n• Shootouts: every attempt on the shot map, with the shooter, the result and the game-winner tagged.\n• Holiday and seasonal themes for the opening faceoff and the logo, which you can change in Settings."
+      }
+    },
+    {
+      "slug": "1-68-siri-team",
+      "post_on": "2026-11-07",
+      "slides": [
+        {
+          "kicker": "Siri",
+          "title": "“Who scored in EyeWall?”",
+          "subtitle": "Ask Siri about your team, without opening the app",
+          "items": [
+            {
+              "head": "Who scored in EyeWall",
+              "text": "The latest goal with its time and assists, then every scorer."
+            },
+            {
+              "head": "How did we play in EyeWall",
+              "text": "The EyeWall AI recap of the last game, or the final score and scorers."
+            },
+            {
+              "head": "EyeWall power rankings",
+              "text": "Where your team sits, how it moved, and the write-up."
+            },
+            {
+              "head": "Score, record, playoff chances",
+              "text": "With no team named, Siri answers for your primary team, or for the game on your Lock Screen."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "\"Hey Siri, who scored in EyeWall?\" 🗣️🚨\n\nEyeWall now answers out loud:\n• What's the score in EyeWall\n• Who scored in EyeWall: the latest goal with its assists, then every scorer\n• How did we play in EyeWall: the EyeWall AI recap of the last game\n• EyeWall power rankings\n• What's our record in EyeWall\n• What are our playoff chances in EyeWall\n\nWith no team named, Siri answers for your primary team, or for the game on your Lock Screen when a Live Activity is running. Records come out as wins and losses, not \"11 to 4 to 1.\"\n\nEvery NHL, PWHL, AHL and ECHL team. English and French.\n\n#hockey #NHL #PWHL #AHL #ECHL #Siri #iPhone",
+        "facebook": "You can now ask Siri about your team in EyeWall Analytics, without opening the app.\n\nTry \"Who scored in EyeWall\" during a game, \"How did we play in EyeWall\" the morning after, or \"EyeWall power rankings\" any time. With no team named, Siri answers for your primary team, or for the game on your Lock Screen when an EyeWall Live Activity is running. Name a team to ask about it instead.\n\nIt works for every NHL, PWHL, AHL and ECHL team, in English and French, and the same actions are in the Shortcuts app for your own automations."
+      }
+    },
+    {
+      "slug": "1-68-siri-players",
+      "post_on": "2026-11-08",
+      "slides": [
+        {
+          "kicker": "Siri",
+          "title": "“How’s a player doing?”",
+          "subtitle": "Say it to Siri with “in EyeWall”, then name the player",
+          "items": [
+            {
+              "head": "Skaters",
+              "text": "Goals, assists, points and plus-minus this season, plus the last game for NHL players."
+            },
+            {
+              "head": "Goalies",
+              "text": "Record, save percentage, goals-against average and shutouts."
+            },
+            {
+              "head": "More than 5,000 players",
+              "text": "NHL, PWHL, AHL and ECHL. A last name works too, and if two players share it, Siri asks which one."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "\"Hey Siri, how's a player doing in EyeWall?\" 🏒\n\nName the player and Siri reads their season:\n• Skaters: goals, assists, points and plus-minus, plus their last game for NHL players\n• Goalies: record, save percentage, goals-against average and shutouts\n\nMore than 5,000 players across the NHL, PWHL, AHL and ECHL. A last name works too. If two players share it, Siri asks which one.\n\n#hockey #NHL #PWHL #AHL #ECHL #Siri",
+        "facebook": "New in EyeWall Analytics: player stats from Siri. Say \"How's a player doing in EyeWall\", name the player, and Siri reads their season: goals, assists and points, or a goalie's record and save percentage.\n\nIt covers more than 5,000 players in the NHL, PWHL, AHL and ECHL. A last name works, and if more than one player has it, Siri asks which one instead of guessing."
+      }
+    },
+    {
+      "slug": "1-68-salary-cap",
+      "post_on": "2026-11-09",
+      "slides": [
+        {
+          "kicker": "Salary cap",
+          "title": "Where’s your team against the cap?",
+          "subtitle": "A Cap tab on every NHL team page",
+          "items": [
+            {
+              "head": "Team Cap tab",
+              "text": "Every player’s cap hit against the ceiling, deals ending this summer, and next summer’s free-agent class."
+            },
+            {
+              "head": "League Cap tab",
+              "text": "Every team’s commitments side by side, by all contracts or by the current roster."
+            },
+            {
+              "head": "Contract value",
+              "text": "Every skater and goalie scored by production per $1M of cap hit."
+            },
+            {
+              "head": "Sourced figures",
+              "text": "From official announcements and public reports. Reported figures are marked ≈."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "Where's your team against the cap? 💰\n\nNew Cap tab on every NHL team page:\n• Every player's cap hit against the ceiling\n• Deals ending this summer, and next summer's free-agent class by status\n• An estimate of space before long-term injury relief, with retained salary and buyouts listed\n\nPlus a league-wide cap comparison and a contract-value board that scores every player by production per $1M of cap hit.\n\nFigures come from official announcements and public reports. Reported figures are marked ≈, and a player with no public figure says so.\n\n#NHL #hockey #salarycap #hockeyanalytics",
+        "facebook": "EyeWall Analytics now has salary cap data for every NHL team.\n\n• Team Cap tab: each player's cap hit against the ceiling, deals that end this summer, and next summer's free-agent class grouped by status.\n• League Cap tab: every team's commitments side by side, by all contracts or by the current roster.\n• Contract value: every skater and goalie scored by production per $1M of cap hit.\n• Player popups show the contract year by year, with cap hit, salary, signing bonus and clauses where they're public.\n\nFigures come from official announcements and public reports. A reported figure is marked ≈, and a player with no public figure says so rather than showing a guess."
+      }
+    },
+    {
+      "slug": "1-68-shootouts",
+      "post_on": "2026-11-10",
+      "slides": [
+        {
+          "kicker": "Shootouts",
+          "title": "Every attempt, on the map",
+          "subtitle": "NHL shootouts, shooter by shooter",
+          "items": [
+            {
+              "head": "Each shooter",
+              "text": "Their photo and the result: goal, save, miss and where it went wide, or no shot."
+            },
+            {
+              "head": "Live",
+              "text": "During the shootout the card takes the live rink’s place, with a slot for whoever shoots next."
+            },
+            {
+              "head": "The tally",
+              "text": "The score card shows the round and the tally, and the event ticker lists every attempt."
+            },
+            {
+              "head": "Your team’s goals",
+              "text": "A shootout goal by your team gets its own alert, with the round and the tally."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "Every shootout attempt, on the map 🎯\n\nWhen an NHL game goes to a shootout, EyeWall shows each shooter with the result (goal, save, miss and where it went wide), the goalie they faced, and the game-winner tagged. The score card shows the tally round by round, and your team's shootout goals get their own alert.\n\n#NHL #hockey #shootout #hockeyanalytics",
+        "facebook": "Shootouts in EyeWall Analytics now get the full treatment. During an NHL shootout the live rink becomes a shootout card: each shooter's photo and result, a slot for whoever shoots next, and the goalie each team faces. The score card shows the tally and round, the event ticker lists every attempt, and a shootout goal by your team gets its own alert. After the final, the card stays under the score."
+      }
+    },
+    {
+      "slug": "veterans-day-2026",
+      "post_on": "2026-11-11",
+      "app_line": false,
+      "slides": [
+        {
+          "kicker": "Veterans Day",
+          "title": "Thank you.",
+          "subtitle": "To everyone who served.",
+          "items": [],
+          "note": "November 11",
+          "layout": "center"
+        }
+      ],
+      "caption": {
+        "instagram": "To everyone who served: thank you. 🇺🇸\n\n#VeteransDay",
+        "facebook": "To everyone who served: thank you. Today the opening faceoff in EyeWall starts with a salute and a stick tap."
+      }
+    },
+    {
+      "slug": "1-68-themes",
+      "post_on": "2026-11-12",
+      "slides": [
+        {
+          "kicker": "Themes",
+          "title": "The faceoff dresses up",
+          "subtitle": "Holiday and seasonal themes in the app",
+          "items": [
+            {
+              "head": "Holidays",
+              "text": "Halloween’s ghost ref, Christmas snow, Canada Day maple leaves, Fourth of July fireworks."
+            },
+            {
+              "head": "The logo joins in",
+              "text": "A turkey at Thanksgiving, a jack-o’-lantern for Halloween, a Santa hat at Christmas."
+            },
+            {
+              "head": "Seasons",
+              "text": "Falling leaves in the fall, snow in winter, and the Zamboni in the off-season."
+            },
+            {
+              "head": "Your choice",
+              "text": "Holidays and seasons, holidays only, off, or one theme all year, in Settings."
+            }
+          ]
+        }
+      ],
+      "caption": {
+        "instagram": "The opening faceoff dresses up for the holidays 🎃🎄🍁🎆\n\nHalloween's ghost ref, Christmas snow, Canada Day maple leaves, Fourth of July fireworks, and the logo in the top bar joins in. Between holidays come quieter seasonal themes: falling leaves, winter snow, and the Zamboni in the off-season.\n\nChoose holidays and seasons, holidays only, or one theme all year in Settings.\n\n#hockey #NHL #PWHL #AHL #ECHL #iOS",
+        "facebook": "A little fun in the latest EyeWall Analytics: on holidays the opening faceoff plays a themed version, from Halloween's ghost referee to Christmas snow, and the logo in the top bar changes too. Between holidays there are quieter seasonal themes, including the Zamboni resurfacing the ice in the off-season.\n\nYou choose in Settings: holidays and seasons, holidays only, off, or one theme all year."
+      }
+    }
+  ]
+}
