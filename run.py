@@ -45,7 +45,9 @@ Nightly run order (important — modules depend on each other):
   -> injury_games_lost / team_injury_impact. projected_lines runs right
   after line_combinations -- next-game projected lines per team (needs
   shift_data, game_log, the injury snapshot and player_seasons) ->
-  projected_lines.
+  projected_lines. team_needs runs right after projected_lines -- each
+  team's lineup slots rated and ranked league-wide (needs the fresh
+  projection, moneypuck's WAR / GSAx and players.shoots) -> team_needs.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -81,6 +83,7 @@ Usage:
   python run.py elo              # Team Elo rating recompute only
   python run.py moneypuck        # MoneyPuck WAR + percentiles only
   python run.py projected_lines  # Next-game projected lines, every team
+  python run.py team_needs       # Lineup slots rated + ranked league-wide, every team
   python run.py validate         # Internal RAPM sanity checks
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
   python run.py ai               # AI pipeline only (summaries + scouting + narratives)
@@ -214,6 +217,7 @@ def run_all():
     import shot_events
     import special_teams
     import starting_goalie
+    import team_needs
     import trade_trees
     import transactions
     import wiki_trades
@@ -264,6 +268,7 @@ def run_all():
     stage(
         "projected_lines", projected_lines.run
     )  # needs shift_data, game_log, injuries, player_seasons
+    stage("team_needs", team_needs.run)  # needs projected_lines, fresh WAR/GSAx, players
     stage("special_teams", special_teams.run)  # must run after shift_data
     stage("power_rankings", power_rankings.run)  # must run after moneypuck (needs fresh WAR + xGF%)
 
@@ -427,6 +432,10 @@ if __name__ == "__main__":
         import projected_lines
 
         projected_lines.run(*([season] if season else []))
+    elif arg == "team_needs":
+        import team_needs
+
+        team_needs.run(*([season] if season else []))
     elif arg == "special":
         import special_teams
 
