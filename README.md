@@ -389,26 +389,39 @@ Each team's lineup slots, the players in them and where each slot ranks in the l
 - **Slots** come from `projected_lines`: forward lines 1–2 and 3–4, each split into centers and wingers by roster position (`F_TOP6_C`, `F_TOP6_W`, `F_BOT6_C`, `F_BOT6_W`); D pairs 1–2 (`D_TOP4`, with a right-shot count) and pair 3 (`D_BOT2`). Goalies (`G_1A`, `G_1B`) are the team's two with the most starts this season.
 - **Ratings:** skaters get WAR per 82 games (the app's `warPer82`), goalies GSAx per 60. A player gets this season's rating once he has 20 GP (goalies 10), else last season's if he had that many then (labeled `last_season`), else none. Nothing is filled in.
 - **Strength and rank:** a slot's strength is the mean of its rated players, only when at least two-thirds are rated. Slots are ranked league-wide (1 = strongest) among teams with a strength, and the bottom third is flagged `need`.
-- No projected lines (offseason) means no rows. Offseason slots from next season's roster are a later phase.
+- **Offseason basis (Phase 2b, 2026-11):** once the offseason is on (`trade_calendar.phase_for`: the day after the trade deadline) and the season's playoffs have started (a `game_type` 3 `game_log` row), or the live season has flipped to one with no projection yet, the rows are next season's (`basis` `next_season_roster`, `season` = next season). Every player under contract for that season (the Worker's `/contracts/players?season=`, on his roster team, else the signing team) is slotted by last season's TOI per game at his position (2 C / 4 W top, the next 2 / 4, 4 + 2 D), goalies by last season's starts, with last season as "this season" for ratings. Players with no NHL TOI last season sort last. `projected_lines` keeps the last lineup all summer, which is why the playoffs are the switch, not "no lines".
+- Outside both bases (before a season's first projection with no offseason on) there are no rows.
 
 ```
 python team_needs.py --dry-run   # compute and print, no writes
 python run.py team_needs         # all teams
 ```
 
+### `trade_calendar.py` (2026-11)
+
+The trade calendar `team_needs.py`, `trade_fit.py` and `trade_candidacy.py` share: `TRADE_DEADLINES` (2026-27's March 1, 2027 is as reported, no NHL release yet), `phase_for(today, season, has_projection)` and `rights_open()`. Phases (scope §3.4): `in_season` from a season's first projection through its deadline, `offseason` from the day after the deadline to the next season's first projection, for next season. There's no hidden "freeze": the CBA keeps trades legal after the deadline (a player acquired after it just can't play in that spring's playoffs for his new team), so a trade then is a trade for next season (decided 2026-11-07). Pending UFAs/RFAs get rights fits through June 30.
+
 ### `trade_fit.py` (2026-11)
 
-For every player in the trade fit population, which of the other 31 teams he'd fit, in three tiers with the reasons: `trade_fit` (one row per player per team) and `trade_fit_players` (one row per player: rating, contract, clause). Requires `docs/sql/2026-11-06_trade_fit.sql`. Phase 2 of the trade fit scope. A fit, not a prediction: no probabilities.
+For every player in the trade fit population, which of the other 31 teams he'd fit, in three tiers with the reasons: `trade_fit` (one row per player per team) and `trade_fit_players` (one row per player: rating, contract, clause, `phase`, `rights`). Requires `docs/sql/2026-11-06_trade_fit.sql` and `docs/sql/2026-11-07_trade_fit_offseason.sql`. Phase 2 of the trade fit scope. A fit, not a prediction: no probabilities.
 
 - **Population:** skaters with 10+ GP and goalies with 5+ GP this season, on an NHL roster with a current non-ELC contract (the Worker's `/contracts/players`), and rated by `team_needs`' rule. Unrated players get no rows.
 - **Need:** the first of the player's position-group slots in the team's `team_needs` rows whose weakest rated player he out-rates. Met when that slot is a need (bottom third) or it's the top slot and he rates above its average. Otherwise a depth upgrade.
 - **Window:** a rental (contract ends this season) needs a buyer with playoff odds of 50% or more; term left fits any team.
 - **Cap:** the Worker's `/contracts/summary?basis=roster` space estimate (no LTIR) against his cap hit: fits, fits with the seller retaining 50% (if the seller has a retention slot left, `nhl_dead_cap`), or needs salary back.
 - **Tier:** need and window met is `strong`, one is `possible`, neither is `long_shot`; needing salary back even with retention drops one tier. A right-shot defenseman ranks first within a tier for teams with fewer than two right shots in their top four. Clauses never reorder teams; they're on the player row.
-- **Season gate:** rows only while `team_needs` has rows and on or before the trade deadline (`TRADE_DEADLINES`; 2026-27's March 1, 2027 is as reported, no NHL release yet). Otherwise both tables are emptied. Offseason fit is a later phase.
+- **Phases** (`trade_calendar.py`): `in_season` (the rules above) while `team_needs` has projection rows and on or before the trade deadline; `offseason` from the day after the deadline until next season's first projection, for next season (Phase 2b):
+  - **Need:** next season's signed rosters (`team_needs.next_season_needs`, built in memory, so the Team view keeps the current lineup until the playoffs).
+  - **Cap:** next season's committed roster cap hits and ceiling (`/contracts/summary?basis=roster&season=`), retention slots for next season. Until that ceiling is in the cap data the reason is `cap_unannounced` and no tier moves (2027-28's isn't yet).
+  - **Window:** next season's `playoff_odds` once they exist, else the top 16 by Elo (`team_elo_ratings`; the season-boundary regression keeps the order). Reasons carry `basis: 'elo'` and `elo_rank`.
+  - **Rights:** through June 30, pending UFAs/RFAs (contract ends this season, none for next) get a rights-only fit: `window_rights` (never met, so at best `possible`) and `cap_rights` (the team's next-season space).
+  - **Population:** contracts covering next season (extensions included, not ELC or bought out) with 10+ GP last season (5+ goalies), on the roster team else the signing team, plus the rights players.
+  - Dry run as of 2027-03-02 on 2026-11-07 data: 510 players (141 rights), 15,810 rows.
+- Outside both phases both tables are emptied.
 
 ```
 python trade_fit.py --dry-run   # compute and print, no writes
+python trade_fit.py --dry-run --today 2027-03-02   # phase as of a date (offseason)
 python run.py trade_fit         # all players
 ```
 

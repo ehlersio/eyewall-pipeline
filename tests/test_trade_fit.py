@@ -3,6 +3,7 @@ population filter, clause selection and the season gate."""
 
 from datetime import date
 
+import trade_calendar as cal
 import trade_fit as tf
 
 
@@ -160,8 +161,13 @@ def test_build_players_filters_population():
 
 
 def test_season_gate():
-    assert tf.in_season(date(2026, 11, 6), 20262027, True)
-    assert tf.in_season(date(2027, 3, 1), 20262027, True)
-    assert not tf.in_season(date(2027, 3, 2), 20262027, True)
-    assert not tf.in_season(date(2026, 11, 6), 20262027, False)
-    assert tf.in_season(date(2030, 1, 1), 20292030, True)  # no deadline on file: no gate
+    """In season through the deadline, with projections; the offseason (for next
+    season) from the day after."""
+    assert cal.phase_for(date(2026, 11, 6), 20262027, True) == ("in_season", 20262027)
+    assert cal.phase_for(date(2027, 3, 1), 20262027, True) == ("in_season", 20262027)
+    assert cal.phase_for(date(2027, 3, 2), 20262027, True) == ("offseason", 20272028)
+    assert cal.phase_for(date(2026, 11, 6), 20262027, False) == (None, None)
+    assert cal.phase_for(date(2030, 1, 1), 20292030, True) == (
+        "in_season",
+        20292030,
+    )  # no deadline on file
