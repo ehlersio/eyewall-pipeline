@@ -55,6 +55,7 @@ python run.py playoff_odds     # Simulated playoff odds only
 python run.py prediction_scorecard [--backtest]  # Public scorecard (live rows; --backtest adds the three backtests)
 python run.py injury_impact [--full]  # Man-games + WAR lost to injury (last 7 days; --full = every game of the season)
 python run.py projected_lines  # Next-game projected lines, every team
+python run.py team_needs       # Lineup slots rated + ranked league-wide, every team
 python run.py special          # PP/PK unit inference only
 python run.py ai               # AI sub-pipeline only (game_scoring, summaries, scouting, narratives, NHL trivia)
 python run.py shots            # Shot events (incremental)
@@ -178,7 +179,7 @@ Run anything under `scripts/` as a module from the repo root (`python -m scripts
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -375,6 +376,20 @@ Each team's projected forward lines and D pairs for its **next** game, written t
 ```
 python projected_lines.py --team CAR --dry-run   # compute and print, no writes
 python run.py projected_lines                    # all teams
+```
+
+### `team_needs.py` (2026-11)
+
+Each team's lineup slots, the players in them and where each slot ranks in the league, written to `team_needs` (one row per team per slot, rewritten every run; requires `docs/sql/2026-11-06_team_needs.sql`). Phase 1 of the trade fit scope: the app's Team view reads it, and trade fit will use it to find which teams need a player.
+
+- **Slots** come from `projected_lines`: forward lines 1–2 and 3–4, each split into centers and wingers by roster position (`F_TOP6_C`, `F_TOP6_W`, `F_BOT6_C`, `F_BOT6_W`); D pairs 1–2 (`D_TOP4`, with a right-shot count) and pair 3 (`D_BOT2`). Goalies (`G_1A`, `G_1B`) are the team's two with the most starts this season.
+- **Ratings:** skaters get WAR per 82 games (the app's `warPer82`), goalies GSAx per 60. A player gets this season's rating once he has 20 GP (goalies 10), else last season's if he had that many then (labeled `last_season`), else none. Nothing is filled in.
+- **Strength and rank:** a slot's strength is the mean of its rated players, only when at least two-thirds are rated. Slots are ranked league-wide (1 = strongest) among teams with a strength, and the bottom third is flagged `need`.
+- No projected lines (offseason) means no rows. Offseason slots from next season's roster are a later phase.
+
+```
+python team_needs.py --dry-run   # compute and print, no writes
+python run.py team_needs         # all teams
 ```
 
 ### `injuries.py`
@@ -1379,6 +1394,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `goalie_game_starts` / `goalie_start_probs` | (2026-09) Who started / probability each candidate starts the next game — `goalie_starts.py` / `starting_goalie.py` |
 | `injury_games_lost` / `team_injury_impact` | (2026-09) Man-games and WAR lost — `injury_impact.py` |
 | `projected_lines` | (2026-09) Next-game projected lines, replaced each run — `projected_lines.py` |
+| `team_needs` | (2026-11) Lineup slots rated and ranked league-wide, replaced each run — `team_needs.py` |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
