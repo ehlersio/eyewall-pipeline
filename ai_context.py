@@ -1524,3 +1524,197 @@ def build_matchup_context(
         ctx[f"{side}_lines_projected"] = projected_from
         ctx[f"{side}_blurbs"] = get_scouting_blurbs(team=team, season=season)
     return ctx
+
+
+# ---------------------------------------------------------------------------
+# Trade candidacy paragraph (trade fit scope §5.5, ai_trade_candidacy.py)
+#
+# The paragraph may say only what one trade_candidacy row (its signals and
+# clause) and the player's top trade_fit rows (their reasons) say. Every
+# fact is worded here, in Python, so the model restates sentences instead
+# of decoding reason codes -- the same lesson as line chemistry's
+# precomputed rank. No number in these facts is a chance: playoff odds
+# become "projected as a playoff team", ice time stays in minutes, and the
+# model's own probability is never read (trade_candidacy.model_p isn't
+# selected). Values are rounded so a nightly wobble (a few seconds of ice
+# time, a cap estimate moving by $50k) doesn't change the facts, which keeps
+# ai_trade_candidacy.py's input hash -- and its token spend -- steady.
+# ---------------------------------------------------------------------------
+
+# A player's best fits the paragraph may name: strong and possible tiers
+# among his top trade_fit ranks. A long shot isn't a reason to name a team.
+CANDIDACY_FIT_TEAMS = 3
+CANDIDACY_FIT_TIERS = ("strong", "possible")
+
+POSITION_WORDS = {
+    "C": "center",
+    "L": "left wing",
+    "R": "right wing",
+    "D": "defenseman",
+    "G": "goalie",
+}
+SLOT_WORDS = {
+    "F_TOP6_C": "top-six centers",
+    "F_TOP6_W": "top-six wingers",
+    "F_BOT6_C": "bottom-six centers",
+    "F_BOT6_W": "bottom-six wingers",
+    "D_TOP4": "top-four defense",
+    "D_BOT2": "third defense pair",
+    "G_1A": "starting goalie spot",
+    "G_1B": "backup goalie spot",
+}
+CONFERENCE_WORDS = {"E": "Eastern", "W": "Western"}
+TIER_WORDS = {"several": "Several signals", "some": "Some signals"}
+FIT_TIER_WORDS = {"strong": "strong fit", "possible": "possible fit"}
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _minutes(seconds) -> int | None:
+    return round(seconds / 60) if seconds else None
+
+
+def candidacy_signal_fact(signal: dict, team: str) -> str | None:
+    """One trade_candidacy signal as a sentence, or None for a code this
+    doesn't know (it's left out rather than guessed at)."""
+    code = signal.get("code")
+    if code == "expiring":
+        kind = signal.get("expiry_type")
+        if kind in ("UFA", "RFA"):
+            free = "an unrestricted" if kind == "UFA" else "a restricted"
+            fact = f"His contract ends this season; he'd become {free} free agent ({kind})"
+            if signal.get("derived"):
+                fact += ", a status estimated from his age, not a published one"
+            return fact + "."
+        return "His contract ends this season."
+    if code == "outside_playoffs":
+        conf = CONFERENCE_WORDS.get(signal.get("conference"))
+        rank, line = signal.get("conference_rank"), signal.get("line") or 8
+        if conf and rank:
+            return (
+                f"{team} is {_ordinal(rank)} in the {conf} Conference standings, "
+                f"outside the top {line} that hold playoff spots."
+            )
+        return f"{team} is outside a playoff spot in its conference."
+    if code == "toi_down":
+        recent, season = _minutes(signal.get("recent_toi")), _minutes(signal.get("season_toi"))
+        if recent and season:
+            return (
+                f"His ice time is down: about {recent} minutes a game over his last 10 games, "
+                f"against about {season} for the season."
+            )
+        return "His ice time over his last 10 games is down from his season average."
+    return None
+
+
+def candidacy_clause_fact(kind: str | None, list_size: int | None) -> str:
+    """The clause line. No row isn't "no clause": the contract data can't
+    tell none from not reported (scope §1), and the fact says so."""
+    if kind == "NMC":
+        return "He has a no-movement clause (NMC)."
+    if kind == "M-NMC":
+        return "He has a modified no-movement clause (M-NMC)."
+    if kind == "NTC":
+        return "He has a no-trade clause (NTC)."
+    if kind == "M-NTC":
+        if list_size:
+            return f"He has a modified no-trade clause (M-NTC) with a {list_size}-team list."
+        return "He has a modified no-trade clause (M-NTC); its list size isn't reported."
+    return (
+        "No trade clause is on record for him, but the contract data can't tell "
+        "'no clause' from 'not reported', so don't say he has no clause."
+    )
+
+
+def fit_reason_fact(reason: dict, team: str) -> str | None:
+    """One trade_fit reason as a clause about `team`, or None to leave it out
+    (unknowns and codes this doesn't know aren't reasons to name)."""
+    code = reason.get("code")
+    slot = SLOT_WORDS.get(reason.get("slot"), "lineup")
+    if code == "need_upgrade":
+        if reason.get("slot_need"):
+            return f"he'd out-rate {team}'s weakest of its {slot}, a group in the league's bottom third"
+        return f"he'd rate above the average of {team}'s {slot}"
+    if code == "need_depth":
+        return f"he'd out-rate {team}'s weakest of its {slot}, though that group isn't a bottom-third need"
+    if code == "window_term":
+        through = reason.get("expires_after")
+        return f"his contract runs past this season{f' (through {through})' if through else ''}"
+    if code == "window_rental_contender":
+        return (
+            f"{team} is projected as a playoff team, the kind of buyer an expiring contract suits"
+        )
+    if code == "window_rental_not":
+        return f"{team} isn't projected as a playoff team, which an expiring contract suits less"
+    if code == "cap_fits":
+        return f"his cap hit fits {team}'s estimated cap space"
+    if code == "cap_fits_retained":
+        return f"his cap hit fits {team}'s estimated cap space only if his team retains salary"
+    if code == "cap_needs_salary":
+        return f"{team} would need to send salary back to fit his cap hit under its estimated cap"
+    if code == "hand_right_shot":
+        n = reason.get("right_shots")
+        if n is not None:
+            return f"he shoots right, and {team}'s top four has {n} right-shot defensem{'a' if n == 1 else 'e'}n"
+    return None
+
+
+def build_trade_candidacy_context(row: dict, fit_rows: list[dict]) -> dict:
+    """The paragraph's input for one tiered trade_candidacy row: its signals
+    and clause, and its best CANDIDACY_FIT_TEAMS strong/possible trade_fit
+    rows with their reasons -- worded, and nothing else."""
+    team = row["team"]
+    signals = [f for s in row.get("signals") or [] if (f := candidacy_signal_fact(s, team))]
+    fits = []
+    for f in sorted(fit_rows, key=lambda f: f["rank"]):
+        if f.get("tier") not in CANDIDACY_FIT_TIERS or len(fits) == CANDIDACY_FIT_TEAMS:
+            continue
+        reasons = [x for r in f.get("reasons") or [] if (x := fit_reason_fact(r, f["team"]))]
+        fits.append({"team": f["team"], "tier": FIT_TIER_WORDS[f["tier"]], "reasons": reasons})
+    return {
+        "player_id": row["player_id"],
+        "season": row["season"],
+        "name": row.get("name"),
+        "team": team,
+        "position": POSITION_WORDS.get(row.get("position"), row.get("position")),
+        "tier": TIER_WORDS[row["tier"]],
+        "signals": signals,
+        "clause": candidacy_clause_fact(row.get("clause_kind"), row.get("clause_list_size")),
+        "fits": fits,
+    }
+
+
+CANDIDACY_COLUMNS = "player_id,season,name,team,position,tier,signals,clause_kind,clause_list_size"
+
+
+def get_trade_candidacy_contexts(player_id: int | None = None) -> list[dict]:
+    """build_trade_candidacy_context() for every tiered trade_candidacy row
+    (or one player), ranked. Players without a name are left out: a
+    paragraph about "Player 8478402" is worse than none."""
+
+    def candidacy():
+        q = supabase.table("trade_candidacy").select(CANDIDACY_COLUMNS).not_.is_("tier", "null")
+        return q.eq("player_id", player_id) if player_id else q
+
+    rows = [r for r in select_all(candidacy, order="player_id") if r.get("name") and r["signals"]]
+    if not rows:
+        return []
+    ids = [r["player_id"] for r in rows]
+    fits_by_player: dict[int, list[dict]] = {}
+    for i in range(0, len(ids), 200):  # keeps the in.() filter's URL short
+        chunk = ids[i : i + 200]
+        for f in select_all(
+            lambda chunk=chunk: (
+                supabase.table("trade_fit")
+                .select("player_id,team,tier,rank,reasons")
+                .in_("player_id", chunk)
+                .in_("tier", list(CANDIDACY_FIT_TIERS))
+                .lte("rank", CANDIDACY_FIT_TEAMS)
+            ),
+            order="player_id,team",
+        ):
+            fits_by_player.setdefault(f["player_id"], []).append(f)
+    return [build_trade_candidacy_context(r, fits_by_player.get(r["player_id"], [])) for r in rows]

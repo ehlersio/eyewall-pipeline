@@ -54,7 +54,7 @@ jobs:
   # Manual: workflow_dispatch with job = "night" or "all"
   # --------------------------------------------------------------------------
   ai-night:
-    name: "Night — Summaries + Scouting"
+    name: "Night — Summaries + Scouting + Trade candidacy"
     runs-on: ubuntu-latest
     timeout-minutes: 60
     if: |
@@ -83,6 +83,12 @@ jobs:
 
       - name: Run ai_results_vs_process.py --missing
         run: python ai_results_vs_process.py --missing
+        continue-on-error: false
+
+      # Jan 1 to the trade deadline only (empties its table otherwise); a
+      # player whose inputs haven't changed costs no tokens.
+      - name: Run ai_trade_candidacy.py
+        run: python ai_trade_candidacy.py
         continue-on-error: false
 
       - name: Notify on failure

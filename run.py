@@ -18,6 +18,8 @@ Nightly run order (important — modules depend on each other):
   13. ai_line_chemistry — missing line-chemistry blurbs (needs fresh line_combinations -- see
       run_all()'s stage("line_combinations", ...) call, not numbered above since this docstring
       predates that stage)
+  14. ai_trade_candidacy -- an EyeWall AI paragraph per tiered trade candidate (needs
+      trade_candidacy + trade_fit; Jan 1 to the trade deadline only, unchanged inputs skipped)
 
   Also not numbered above (same reason): injuries -- ESPN injury feed ->
   player_injuries, runs right after nhl_stats (matches against its fresh
@@ -163,15 +165,17 @@ def run_stage(label, fn, *args, **kwargs):
 
 def run_ai_pipeline():
     """AI pipeline — game_scoring, summaries, scouting, results-vs-process,
-    line-chemistry, daily trivia. Runs after moneypuck (results-vs-process
+    line-chemistry, trade candidacy paragraphs, daily trivia. Runs after moneypuck (results-vs-process
     needs its fresh on_ice_gf_pct/results_vs_process_diff columns) and after
     line_combinations (line-chemistry needs fresh line_combinations rows to
     narrate).
 
-    Each sub-stage is isolated: none of the six depend on each other's
+    Each sub-stage is isolated: none of the seven depend on each other's
     output (confirmed — neither ai_summaries.py, ai_scouting.py,
-    ai_results_vs_process.py, ai_line_chemistry.py, nor trivia_questions.py
-    reference game_scoring or each other), so one crashing must not prevent
+    ai_results_vs_process.py, ai_line_chemistry.py, ai_trade_candidacy.py
+    nor trivia_questions.py reference game_scoring or each other;
+    ai_trade_candidacy.py reads trade_candidacy/trade_fit, which run_all()
+    writes before this), so one crashing must not prevent
     the others from running.
     """
     failures = []
@@ -186,6 +190,10 @@ def run_ai_pipeline():
         (
             "ai_line_chemistry — missing line-chemistry blurbs",
             ["ai_line_chemistry.py", "--missing"],
+        ),
+        (
+            "ai_trade_candidacy — EyeWall AI paragraphs for trade candidates",
+            ["ai_trade_candidacy.py"],
         ),
         (
             "trivia_questions — daily NHL trivia (easy + medium)",
