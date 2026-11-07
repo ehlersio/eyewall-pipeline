@@ -37,3 +37,6 @@ projected_lines_backtest_results.json
 
 # social_posts.py --dry-run output
 social_out/
+
+# scripts/backtest/backtest_trade_candidacy.py -- network cache
+trade_candidacy_cache.json
