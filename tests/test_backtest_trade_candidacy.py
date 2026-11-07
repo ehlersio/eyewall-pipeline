@@ -1,12 +1,13 @@
 """scripts/backtest/backtest_trade_candidacy.py: labels from team switches
-and trade rows (waivers and pre-as-of moves dropped), the as-of features,
-the two-cell baseline and the §4.4 ship rule."""
+and trade rows (waivers and pre-as-of moves dropped), the two-cell baseline,
+the §4.4 ship rule and the model export. The features are trade_candidacy.py's
+(tests/test_trade_candidacy.py)."""
 
 from datetime import date
-from itertools import pairwise
 
 import numpy as np
 
+import trade_candidacy as tc
 from scripts.backtest import backtest_trade_candidacy as btc
 
 AS_OF = date(2024, 1, 1)
@@ -74,46 +75,6 @@ def test_waiver_index_keeps_claims_by_name_token():
     assert "else" not in idx
 
 
-def test_standings_gap_against_the_eighth_team():
-    standings = {f"E{i}": ["E", 0.7 - i * 0.05] for i in range(10)}
-    standings["W0"] = ["W", 0.9]
-    gap, seller = btc.standings_gap(standings, "E9")
-    assert round(gap, 4) == -0.1 and seller == 1  # E7 holds the line at 0.35
-    gap0, seller0 = btc.standings_gap(standings, "E0")
-    assert round(gap0, 4) == 0.35 and seller0 == 0
-    assert btc.standings_gap(standings, "XXX") == (0.0, 0)
-
-
-def test_production_and_toi_trend():
-    skater = [g(f"2023-11-{d:02d}", "PIT", points=1, toi=1000) for d in range(1, 11)]
-    skater += [g(f"2023-12-{d:02d}", "PIT", points=0, toi=800) for d in range(1, 11)]
-    assert btc.production(skater, False) == (0.5, 0.0)
-    assert round(btc.toi_trend(skater, False), 4) == round(800 / 900 - 1, 4)
-    goalie = [g("2023-11-01", "PIT", saves=28, shots_against=30)]
-    ppg, sv = btc.production(goalie, True)
-    assert ppg == 0.0 and round(sv, 4) == round((28 / 30 - 0.9) * 100, 4)
-    assert btc.toi_trend(skater[:5], False) == 0.0
-
-
-def test_contract_features():
-    c = {
-        "contract_key": "k",
-        "end_season": "2023-24",
-        "cap_hit_usd": 3_000_000,
-        "expiry_status": None,
-    }
-    f = btc.contract_features(c, [{"kind": "M-NTC", "season_from": None, "season_to": None}], 2023,
-                              "1990-01-01")  # fmt: skip
-    assert (f["expiring"], f["ufa_expiring"], f["years_left"], f["clause_modified"]) == (1, 1, 0, 1)
-    assert round(f["log_cap"], 4) == round(np.log1p(3.0), 4)
-    unknown = btc.contract_features(None, [], 2023, None)
-    assert (unknown["contract_unknown"], unknown["cap_unknown"], unknown["expiring"]) == (1, 1, 0)
-    young = btc.contract_features(
-        {**c, "end_season": "2025-26"}, [{"kind": "NMC"}], 2023, "2003-01-01"
-    )
-    assert (young["years_left"], young["expiring"], young["clause_full"]) == (2, 0, 1)
-
-
 def test_two_cell_rates_and_ship_rule():
     train = [{"expiring": 1, "seller": 1, "y": 1}, {"expiring": 1, "seller": 1, "y": 0},
              {"expiring": 0, "seller": 1, "y": 0}, {"expiring": 1, "seller": 0, "y": 0}]  # fmt: skip
@@ -133,9 +94,23 @@ def test_two_cell_rates_and_ship_rule():
     assert btc.ship_decision(calibrated)["show_percentage"] is True
 
 
-def test_date_windows_cover_the_season_without_gaps():
-    windows = list(btc.date_windows(2023, days=14))
-    assert windows[0][0] == date(2023, 9, 1) and windows[-1][1] == date(2024, 7, 31)
-    for (_, hi), (lo, _) in pairwise(windows):
-        assert (lo - hi).days == 1
-    assert all((hi - lo).days <= 13 for lo, hi in windows)
+def test_export_model_reproduces_sklearn_and_cuts_tiers():
+    rng = np.random.default_rng(7)
+    rows = []
+    for _ in range(400):
+        r = {f: float(rng.normal()) for f in btc.FEATURES}
+        r["y"] = int(r["expiring"] + rng.normal() > 1.0)
+        rows.append(r)
+    model = btc.fit(rows)
+    reliability = btc.reliability(model.predict_proba(btc.matrix(rows)[0])[:, 1],
+                                  np.array([r["y"] for r in rows]))  # fmt: skip
+    out = btc.export_model(model, rows, reliability, "2026-11-07")
+    for r in rows[:25]:
+        expected = model.predict_proba(btc.matrix([r])[0])[0, 1]
+        assert abs(tc.predict(out, r) - expected) < 1e-5
+    p = np.array([tc.predict(out, r) for r in rows])
+    several, some = out["tiers"]["several"], out["tiers"]["some"]
+    assert several["min_p"] > some["min_p"]
+    assert abs((p >= several["min_p"]).mean() - 0.1) < 0.01
+    assert abs((p >= some["min_p"]).mean() - 0.3) < 0.01
+    assert several["held_out_traded"] == round(reliability[-1][2], 4)

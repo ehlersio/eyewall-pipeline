@@ -5,6 +5,7 @@ per-season counts, the expiry age-rule check)."""
 from collections import Counter
 from datetime import date
 
+import trade_candidacy as tc
 from scripts.backtest import trade_data_coverage as tdc
 
 
@@ -43,15 +44,15 @@ def test_infer_deadline_takes_busiest_jan_to_apr_day_not_a_stray_late_one():
 
 def test_covers_is_inclusive_and_needs_both_ends():
     c = contract("k", start="2016-17", end="2018-19")
-    assert tdc.covers(c, 2016) and tdc.covers(c, 2018)
-    assert not tdc.covers(c, 2019)
-    assert not tdc.covers(contract("k", end=None), 2017)
+    assert tc.covers(c, 2016) and tc.covers(c, 2018)
+    assert not tc.covers(c, 2019)
+    assert not tc.covers(contract("k", end=None), 2017)
 
 
 def test_clause_without_range_covers_any_season():
-    assert tdc.clause_covers({"season_from": None, "season_to": None}, 2020)
-    assert tdc.clause_covers({"season_from": "2019-20", "season_to": "2020-21"}, 2020)
-    assert not tdc.clause_covers({"season_from": "2021-22", "season_to": None}, 2020)
+    assert tc.clause_covers({"season_from": None, "season_to": None}, 2020)
+    assert tc.clause_covers({"season_from": "2019-20", "season_to": "2020-21"}, 2020)
+    assert not tc.clause_covers({"season_from": "2021-22", "season_to": None}, 2020)
 
 
 def test_index_prefers_id_then_unique_name_only():
@@ -60,7 +61,7 @@ def test_index_prefers_id_then_unique_name_only():
         contract("b", pid=None, name="Bo Name", start="2016-17", end="2018-19"),
         contract("c", pid=None, name="Dup Name", start="2016-17", end="2018-19"),
     ]
-    idx = tdc.ContractIndex(contracts, unique_names={"annid", "boname"})
+    idx = tc.ContractIndex(contracts, unique_names={"annid", "boname"})
     assert idx.find(1, "Ann Id", 2017)[1] == "id"
     assert idx.find(1, "Ann Id", 2018) == (None, None)
     c, how = idx.find(2, "Bo Name", 2018)
@@ -74,7 +75,7 @@ def test_index_picks_the_contract_with_money_when_two_cover():
         contract("pto", pid=1, cap_hit_usd=None, n_sources=3),
         contract("spc", pid=1, cap_hit_usd=2_000_000),
     ]
-    c, _ = tdc.ContractIndex(contracts, set()).find(1, "x", 2017)
+    c, _ = tc.ContractIndex(contracts, set()).find(1, "x", 2017)
     assert c["contract_key"] == "spc"
 
 
@@ -83,7 +84,7 @@ def test_unique_name_keys_drops_names_two_players_share():
         2016: [{"player_id": 1, "name": "Sebastian Aho"}, {"player_id": 2, "name": "Jo Solo"}],
         2017: [{"player_id": 3, "name": "Sebastian Aho"}, {"player_id": 2, "name": "Jo Solo"}],
     }
-    assert tdc.unique_name_keys(bios) == {"josolo"}
+    assert tc.unique_name_keys(bios) == {"josolo"}
 
 
 def test_season_report_counts_window_labels_and_coverage():
@@ -118,7 +119,7 @@ def test_season_report_counts_window_labels_and_coverage():
         ),
         contract("c3", pid=3, start="2017-18", end="2019-20"),
     ]
-    idx = tdc.ContractIndex(contracts, set())
+    idx = tc.ContractIndex(contracts, set())
     clauses = {"c1": [{"season_from": "2016-17", "season_to": "2017-18"}]}
     population = [
         {"player_id": 1, "name": "P1"},
@@ -166,7 +167,7 @@ def test_pairing_uncertain_trade_drops_every_player_in_it():
             "pairing_uncertain": False,
         },
     ]
-    r = tdc.season_report(2019, trades, assets, tdc.ContractIndex([], set()), {}, [], set())
+    r = tdc.season_report(2019, trades, assets, tc.ContractIndex([], set()), {}, [], set())
     assert r["pairing_uncertain"] == 2
     assert r["traded"] == {}
 

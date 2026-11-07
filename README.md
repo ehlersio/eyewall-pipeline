@@ -57,6 +57,7 @@ python run.py injury_impact [--full]  # Man-games + WAR lost to injury (last 7 d
 python run.py projected_lines  # Next-game projected lines, every team
 python run.py team_needs       # Lineup slots rated + ranked league-wide, every team
 python run.py trade_fit        # Which teams each player fits, tiers + reasons
+python run.py trade_candidacy  # Candidate signals + tier per player (Jan 1 - deadline)
 python run.py special          # PP/PK unit inference only
 python run.py ai               # AI sub-pipeline only (game_scoring, summaries, scouting, narratives, NHL trivia)
 python run.py shots            # Shot events (incremental)
@@ -166,7 +167,7 @@ ruff check . && ruff format --check .
 |---|---|
 | `*.py` (root) | Everything a workflow runs or another module imports: the ingest stages, `run.py`, shared helpers (`db.py`, `pipeline_common.py`, `season_lookup.py`, `hockeytech_leagues.py`). They import each other by bare name, so they stay flat. |
 | `tests/` | The pytest suite, plus `fixtures/` and `golden/` files. `pyproject.toml` puts the repo root on the path, so tests import modules as before. |
-| `scripts/backtest/` | Read-only model backtests and tuning (`backtest_*.py`, `tune_elo.py`, `fit_scorecard_calibration.py`), plus `trade_data_coverage.py` (data coverage for the trade candidacy backtest, results in `docs/trade_data_coverage_results.md`) and `backtest_trade_candidacy.py` (held-out test of a trade-candidacy logistic model against a base rate and an "expiring and below the playoff line" rule, results in `docs/trade_candidacy_backtest_results.md`; network responses cached in `trade_candidacy_cache.json`, gitignored). `backtest_playoff_odds.py` and `backtest_starting_goalie.py` stay at the root because `prediction_scorecard.py` imports them. |
+| `scripts/backtest/` | Read-only model backtests and tuning (`backtest_*.py`, `tune_elo.py`, `fit_scorecard_calibration.py`), plus `trade_data_coverage.py` (data coverage for the trade candidacy backtest, results in `docs/trade_data_coverage_results.md`) and `backtest_trade_candidacy.py` (held-out test of a trade-candidacy logistic model against a base rate and an "expiring and below the playoff line" rule, results in `docs/trade_candidacy_backtest_results.md`, and the frozen model `trade_candidacy_model.json` that `trade_candidacy.py` scores with; network responses cached in `trade_candidacy_cache.json`, gitignored; both import their feature code from `trade_candidacy.py`). `backtest_playoff_odds.py` and `backtest_starting_goalie.py` stay at the root because `prediction_scorecard.py` imports them. |
 | `scripts/backfill/` | One-off data repairs and backfills. |
 | `scripts/inspect/` | Diagnostics and API probes; they print, they don't write. |
 | `docs/` | Backtest results and API notes; `docs/sql/` holds the SQL migrations to run by hand, and `docs/research/` holds raw investigation output. |
@@ -180,7 +181,7 @@ Run anything under `scripts/` as a module from the repo root (`python -m scripts
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → trade_fit → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → trade_fit → trade_candidacy → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -407,6 +408,20 @@ For every player in the trade fit population, which of the other 31 teams he'd f
 ```
 python trade_fit.py --dry-run   # compute and print, no writes
 python run.py trade_fit         # all players
+```
+
+### `trade_candidacy.py` (2026-11)
+
+Each player's candidate signals and a tier, written to `trade_candidacy` (one row per player, replaced each run). Requires `docs/sql/2026-11-07_trade_candidacy.sql`. Phase 4 of the trade fit scope. The tier comes from the logistic model `scripts/backtest/backtest_trade_candidacy.py` fit on 2023-24..2025-26, frozen in `trade_candidacy_model.json` (rewritten by that backtest). Its held-out test missed the ±5-point calibration bar in the top decile, so the app shows tiers, never the model's number (`docs/trade_candidacy_backtest_results.md`).
+
+- **Population:** skaters with 10+ GP and goalies with 5+ GP before today (the NHL stats API's per-game rows, fetched in 14-day windows because a query's total is capped at 10,000 rows), on the team of their last game unless a `trade_assets` row came after it, with a known birth date.
+- **Features:** the backtest's own code (the backtest imports it from here): contract years left, expiry, cap hit and clause from the nhl-contracts release (matched by player id, else a name only one NHL player has), points per game or save %, ice-time trend over the last 10 games, gap to the 8th team in the conference by points %, age, position, days to the deadline. An expiring player with a contract starting next season (an extension) counts as not expiring.
+- **Tier:** `several` = the model's top tenth of the backtest population (22.6% of those were traded before the deadline, held out), `some` = the next two tenths (10.1%), else none. No tier without at least one signal (contract expiring, team outside a playoff spot, ice time down 10%+), and none without a public cap hit (that flag carries weight in the model, and a tier shouldn't rest on missing data).
+- **Season gate:** rows only from Jan 1 through the trade deadline (`trade_fit.TRADE_DEADLINES`), the span the model was fit on; otherwise the table is emptied and the app hides the section and the Deadline board. `--dry-run --as-of 2027-01-01` scores the model on the games so far before that.
+
+```
+python trade_candidacy.py --dry-run --as-of 2027-01-01   # compute and print, no writes
+python run.py trade_candidacy                            # write (Jan 1 - deadline)
 ```
 
 ### `injuries.py`
@@ -1413,6 +1428,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `projected_lines` | (2026-09) Next-game projected lines, replaced each run — `projected_lines.py` |
 | `team_needs` | (2026-11) Lineup slots rated and ranked league-wide, replaced each run — `team_needs.py` |
 | `trade_fit` / `trade_fit_players` | (2026-11) Which teams each player fits, tiers and reasons, replaced each run — `trade_fit.py` |
+| `trade_candidacy` | (2026-11) Candidate signals and tier per player, Jan 1 to the deadline, replaced each run — `trade_candidacy.py` |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |

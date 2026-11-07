@@ -88,3 +88,12 @@ Pooled held-out Brier with the extra seasons: model 0.0608 (vs 0.0622 without), 
 | `clause_modified` | -0.078 |
 | `seller` | -0.074 |
 | `contract_unknown` | +0.050 |
+
+## Production tiers (`trade_candidacy_model.json`)
+
+`trade_candidacy.py` scores today's players with the fit above and shows a tier, never the number. Cuts are the fitted model's top tenth and next two tenths of the training population; the traded rate is the matching held-out deciles'.
+
+| Tier | Model probability at least | Share of population | Traded (held out) |
+|---|---:|---:|---:|
+| several | 16.2% | 10.0% | 22.6% |
+| some | 7.4% | 20.0% | 10.1% |
