@@ -56,6 +56,7 @@ python run.py prediction_scorecard [--backtest]  # Public scorecard (live rows; 
 python run.py injury_impact [--full]  # Man-games + WAR lost to injury (last 7 days; --full = every game of the season)
 python run.py projected_lines  # Next-game projected lines, every team
 python run.py team_needs       # Lineup slots rated + ranked league-wide, every team
+python run.py trade_fit        # Which teams each player fits, tiers + reasons
 python run.py special          # PP/PK unit inference only
 python run.py ai               # AI sub-pipeline only (game_scoring, summaries, scouting, narratives, NHL trivia)
 python run.py shots            # Shot events (incremental)
@@ -179,7 +180,7 @@ Run anything under `scripts/` as a module from the repo root (`python -m scripts
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → trade_fit → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -390,6 +391,22 @@ Each team's lineup slots, the players in them and where each slot ranks in the l
 ```
 python team_needs.py --dry-run   # compute and print, no writes
 python run.py team_needs         # all teams
+```
+
+### `trade_fit.py` (2026-11)
+
+For every player in the trade fit population, which of the other 31 teams he'd fit, in three tiers with the reasons: `trade_fit` (one row per player per team) and `trade_fit_players` (one row per player: rating, contract, clause). Requires `docs/sql/2026-11-06_trade_fit.sql`. Phase 2 of the trade fit scope. A fit, not a prediction: no probabilities.
+
+- **Population:** skaters with 10+ GP and goalies with 5+ GP this season, on an NHL roster with a current non-ELC contract (the Worker's `/contracts/players`), and rated by `team_needs`' rule. Unrated players get no rows.
+- **Need:** the first of the player's position-group slots in the team's `team_needs` rows whose weakest rated player he out-rates. Met when that slot is a need (bottom third) or it's the top slot and he rates above its average. Otherwise a depth upgrade.
+- **Window:** a rental (contract ends this season) needs a buyer with playoff odds of 50% or more; term left fits any team.
+- **Cap:** the Worker's `/contracts/summary?basis=roster` space estimate (no LTIR) against his cap hit: fits, fits with the seller retaining 50% (if the seller has a retention slot left, `nhl_dead_cap`), or needs salary back.
+- **Tier:** need and window met is `strong`, one is `possible`, neither is `long_shot`; needing salary back even with retention drops one tier. A right-shot defenseman ranks first within a tier for teams with fewer than two right shots in their top four. Clauses never reorder teams; they're on the player row.
+- **Season gate:** rows only while `team_needs` has rows and on or before the trade deadline (`TRADE_DEADLINES`; 2026-27's March 1, 2027 is as reported, no NHL release yet). Otherwise both tables are emptied. Offseason fit is a later phase.
+
+```
+python trade_fit.py --dry-run   # compute and print, no writes
+python run.py trade_fit         # all players
 ```
 
 ### `injuries.py`
@@ -1395,6 +1412,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `injury_games_lost` / `team_injury_impact` | (2026-09) Man-games and WAR lost — `injury_impact.py` |
 | `projected_lines` | (2026-09) Next-game projected lines, replaced each run — `projected_lines.py` |
 | `team_needs` | (2026-11) Lineup slots rated and ranked league-wide, replaced each run — `team_needs.py` |
+| `trade_fit` / `trade_fit_players` | (2026-11) Which teams each player fits, tiers and reasons, replaced each run — `trade_fit.py` |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
