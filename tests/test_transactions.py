@@ -15,6 +15,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 from transactions import (
+    ESPN_EARLY_DATES,
     HISTORICAL_TEAMS,
     build_row,
     build_team_patterns,
@@ -293,3 +294,11 @@ class TestRun:
         with patch("transactions.upsert") as mock_upsert:
             assert run(years=[2026]) is None
         mock_upsert.assert_not_called()
+
+
+def test_espn_early_window_matches_the_measured_boundaries():
+    # last ESPN date seen early 2024-06-16, first seen right 2024-06-20;
+    # first seen early 2021-01-04, ESPN's 2021 calendar-year feed onward
+    first, last = ESPN_EARLY_DATES
+    assert first <= date(2021, 1, 4) and last >= date(2024, 6, 16)
+    assert last < date(2024, 6, 20) and first > date(2020, 10, 31)

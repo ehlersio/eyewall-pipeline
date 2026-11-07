@@ -27,6 +27,9 @@ Nightly run order (important — modules depend on each other):
   healthy vs injured). Nothing else depends on either. Then transactions
   -- ESPN's NHL transactions feed -> nhl_transactions; fully independent,
   placed here only to keep the ESPN-sourced stages together. Then
+  wiki_trades -- Wikipedia's per-season NHL transactions lists: adds the
+  trades ESPN's feed is missing and corrects (or flags) ESPN's dates in
+  nhl_transactions (needs transactions just before it). Then
   draft_history -- NHL records API draft picks (with each pick's chain of
   owners) -> draft_pick_history; also fully independent. Then trade_trees
   -- parses the stored trade entries into trades / trade_assets, resolves
@@ -54,6 +57,7 @@ Usage:
   python run.py scratches 20252026  # Game scratches backfill for a season
   python run.py transactions     # ESPN NHL transactions, current calendar year
   python run.py transactions 2025   # Transactions backfill for a calendar year
+  python run.py wiki_trades      # Wikipedia trades: fill ESPN's gaps, fix its dates
   python run.py draft_history    # Draft pick history, last 5 drafts
   python run.py draft_history 1963  # Draft pick history since a draft year (backfill)
   python run.py trade_trees      # Structured trades + where each asset went next
@@ -212,6 +216,7 @@ def run_all():
     import starting_goalie
     import trade_trees
     import transactions
+    import wiki_trades
     import win_probs
     import zone_starts
 
@@ -229,8 +234,9 @@ def run_all():
     stage("goalie_starts", goalie_starts.run)  # needs fresh game_log (boxscore starters)
     stage("starting_goalie", starting_goalie.run)  # needs rosters, injury snapshot, goalie_starts
     stage("transactions", transactions.run)  # independent; ESPN NHL transactions feed
+    stage("wiki_trades", wiki_trades.run)  # after transactions: fills/corrects its rows
     stage("draft_history", draft_history.run)  # independent; NHL records API, last 5 drafts
-    stage("trade_trees", trade_trees.run)  # needs fresh nhl_transactions + draft_pick_history
+    stage("trade_trees", trade_trees.run)  # needs nhl_transactions (+ wiki_trades), draft history
     stage("nhl_contracts", nhl_contracts.run)  # independent; open nhl-contracts dataset
     stage("elo_ratings", elo_ratings.run)  # needs nhl_stats' fresh game_log
     stage("win_probs", win_probs.run)  # needs tonight's elo_ratings; logs today/tomorrow pre-game
@@ -343,6 +349,10 @@ if __name__ == "__main__":
 
         # Calendar year(s), not an NHL season -- ESPN's feed is keyed by year.
         transactions.run(years=[season] if season else None)
+    elif arg == "wiki_trades":
+        import wiki_trades
+
+        wiki_trades.run()
     elif arg == "draft_history":
         import draft_history
 
