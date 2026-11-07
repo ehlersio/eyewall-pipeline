@@ -986,6 +986,55 @@ def build_line_chemistry_prompt(
     return "\n".join(lines) + "\n\n" + task
 
 
+def build_trade_candidacy_prompt(ctx: dict) -> str:
+    """The EyeWall AI paragraph for one tiered player in the popup's Candidate
+    signals section (trade fit scope §5.5). ctx is ai_context's
+    build_trade_candidacy_context(): every fact already worded, so the
+    model restates them instead of reading codes. The rules are scope §1's:
+    this is speculation about a real person's job, so no odds, no "will be
+    traded", no "rumored", and nothing beyond the listed reasons.
+    ai_trade_candidacy.py checks the reply against the same rules."""
+    team = ctx["team"]
+    lines = [
+        f"Candidate signals for {ctx['name']} ({ctx['position']}, {team}).",
+        "",
+        f"EyeWall's tier: {ctx['tier']}. It counts how many of the signals that came before "
+        "past deadline trades he has. It is a label, not a prediction.",
+        "",
+        "His signals:",
+        *[f"  - {s}" for s in ctx["signals"]],
+        "",
+        f"Clause: {ctx['clause']}",
+        "",
+    ]
+    if ctx["fits"]:
+        lines.append(
+            "Teams he fits best (EyeWall's trade fit: lineup need, contract window, "
+            "estimated cap space):"
+        )
+        for f in ctx["fits"]:
+            why = "; ".join(f["reasons"]) or "no reasons listed"
+            lines.append(f"  - {f['team']}, {f['tier']}: {why}.")
+        named = ", ".join([team, *[f["team"] for f in ctx["fits"]]])
+    else:
+        lines.append("No team is a strong or possible trade fit for him.")
+        named = team
+    task = (
+        "Write one short paragraph, 50 to 90 words, saying what these signals and fits add up "
+        "to. Rules, all non-negotiable:\n"
+        "- Use only the facts above. Add no stats, injuries, history, quotes, contract figures "
+        "or team news that aren't listed.\n"
+        "- Neutral, factual wording. Never say or suggest that he will be traded, is likely to "
+        "be traded, is on the trade block, or is rumored to be moving.\n"
+        "- No odds, chances, probabilities or percentages, and no % sign.\n"
+        "- Describe the tier as signals he has, not as a forecast.\n"
+        f"- Name no team other than {named}.\n"
+        "- This is about a real player's job: keep the tone measured and skip the slang.\n"
+        "- Plain text, one paragraph, no bullet points or headers."
+    )
+    return "\n".join(lines) + "\n\n" + task
+
+
 # ---------------------------------------------------------------------------
 # Quick test
 # ---------------------------------------------------------------------------

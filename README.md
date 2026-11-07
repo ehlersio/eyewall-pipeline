@@ -85,6 +85,8 @@ python ai_results_vs_process.py --missing        # Missing results-vs-process bl
 python ai_results_vs_process.py --team CAR --dry-run  # Preview prompts for one team
 python ai_line_chemistry.py --missing            # Missing line-chemistry blurbs (all 32 teams), en + fr
 python ai_line_chemistry.py --team CAR --dry-run # Preview prompts for one team
+python ai_trade_candidacy.py                     # EyeWall AI paragraph per tiered trade candidate, en + fr (Jan 1 - deadline)
+python ai_trade_candidacy.py --dry-run --as-of 2027-01-15  # Preview prompts, no calls or writes
 python power_rankings.py --dry-run --team CAR    # Preview prompt, no DB writes
 python trivia_questions.py                       # Today, both tiers, both sports, en + fr (manual/dry-run convenience)
 python trivia_questions.py --sport nhl            # NHL only (what nightly.yml actually calls)
@@ -181,7 +183,7 @@ Run anything under `scripts/` as a module from the repo root (`python -m scripts
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → trade_fit → trade_candidacy → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → team_needs → trade_fit → trade_candidacy → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → ai_trade_candidacy → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -786,7 +788,7 @@ python milestones.py --since 2026-06-01 # date range through yesterday (ET)
 ### `game_scoring.py`
 Goal-by-goal scorers/assists from NHL play-by-play → `game_scoring` (incremental: games already in the table are skipped unless `--force`; `python game_scoring.py [season]`, `--backfill`, `--game <id>`). First step of `run.py`'s AI sub-pipeline; read by `ai_context.py` and `milestones.py`.
 
-### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `power_rankings.py`, `hockeytech_power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
+### AI modules (`ai_client.py`, `ai_summaries.py`, `ai_predictions.py`, `ai_scouting.py`, `ai_results_vs_process.py`, `ai_line_chemistry.py`, `ai_trade_candidacy.py`, `power_rankings.py`, `hockeytech_power_rankings.py`, `trivia_questions.py`, `ai_persona.py`, `ai_context.py`)
 
 #### Model provider: OpenRouter
 
@@ -827,6 +829,8 @@ Requires `OPENROUTER_API_KEY` (see Setup above) instead of `CLOUDFLARE_ACCOUNT_I
 `get_line_chemistry_context()`'s league-wide average is `None` until `line_combinations` has rows from at least 2 teams for that unit type — a "league average" of one team isn't a real comparison, which matters early in the 32-team backfill.
 
 **`build_line_chemistry_prompt()` precomputes the unit's xGF% rank** among its same-team, same-type siblings rather than handing the model a raw list and trusting it to infer relative position — an 8B model reliably got this wrong in testing (claimed a unit with the *lowest* xGF% of its group "ranks second, just behind the top line"). Doing the comparison in Python and stating the rank as a given fact in the prompt, with an explicit instruction not to recompute it, eliminated the hallucination in spot-checks across CAR's 7 units. The prompt also deliberately avoids inviting claims about zone starts, quality of competition, or matchups — no per-line data source for any of those exists yet.
+
+**`ai_trade_candidacy.py`** (2026-11, NHL only) — One short EyeWall AI paragraph per tiered `trade_candidacy` row and locale, written to `trade_candidacy_ai` (`docs/sql/2026-11-07_trade_candidacy_ai.sql`) and shown in the app's player popup under Candidate signals (trade fit scope §5.5). Its input is only the row's signals and clause plus the player's best three strong/possible `trade_fit` rows' reasons, all worded in Python by `ai_context.build_trade_candidacy_context()` (playoff odds become "projected as a playoff team", ice time stays in minutes, `model_p` is never read). Every reply goes through `wording_problems()` before it's stored: no percentages, odds, chances, likelihood, "will be traded", "rumored", "trade block", betting words or the persona's prompt-only name, and no team abbreviation the facts don't name. A reply that fails twice isn't stored and the player's old paragraph is deleted. Runs only from Jan 1 to the deadline (`trade_candidacy.in_window`), emptying the table otherwise; players who lose their tier lose their paragraph. Each row stores an `input_hash` (facts, locale, `PROMPT_VERSION`, model), and a night whose hash matches makes no model call. Bump `PROMPT_VERSION` when the prompt or the facts' wording changes. Never posted to social. Flags: `--player`, `--locale`, `--force`, `--dry-run [--as-of DATE]`.
 
 ---
 
@@ -1429,6 +1433,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `team_needs` | (2026-11) Lineup slots rated and ranked league-wide, replaced each run — `team_needs.py` |
 | `trade_fit` / `trade_fit_players` | (2026-11) Which teams each player fits, tiers and reasons, replaced each run — `trade_fit.py` |
 | `trade_candidacy` | (2026-11) Candidate signals and tier per player, Jan 1 to the deadline, replaced each run — `trade_candidacy.py` |
+| `trade_candidacy_ai` | (2026-11) EyeWall AI paragraph per tiered trade candidate, keyed `(player_id, locale)`, with the `input_hash` that skips unchanged inputs — `ai_trade_candidacy.py` |
 | `power_rankings_narratives` | Nightly rankings + AI narrative history |
 | `special_teams_units` | PP/PK unit inference |
 | `draft_rankings_2026` | NHL Central Scouting rankings |
@@ -1513,11 +1518,11 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 
 | Workflow | Schedule | Description |
 |----------|----------|-------------|
-| `nightly.yml` | Worker dispatch 07:00 UTC; cron 07:00 UTC fallback | NHL-only pipeline (`run.py`, then `milestones.py`, then an informational Ruff lint that can't block ingest — `ci.yml` is the real gate) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry` |
+| `nightly.yml` | Worker dispatch 07:00 UTC; cron 07:00 UTC fallback | NHL-only pipeline (`run.py`, then `milestones.py`, then an informational Ruff lint that can't block ingest — `ci.yml` is the real gate) — `run.py`'s AI sub-pipeline now includes `trivia_questions.py --sport nhl` (Session 92) alongside `ai_summaries`/`ai_scouting`/`ai_results_vs_process`/`ai_line_chemistry`/`ai_trade_candidacy` |
 | `pwhl-nightly.yml` | Worker dispatch 07:20 UTC; cron fallback | PWHL stats/rosters, shot events, PBP events, game box scores, skater + goalie percentiles, milestones, news, daily trivia, power rankings, Elo, playoff odds, upcoming schedules (order below). `trivia_questions.py --sport pwhl` (Session 92) is the first-ever AI-generation step in this workflow. `workflow_dispatch` accepts an optional `season_id` (2026-10), passed to every per-season step, so a playoff round can be backfilled from GitHub (`gh workflow run pwhl-nightly.yml -f season_id=<id>`) |
 | `ahl-nightly.yml` | Worker dispatch 07:40 UTC; cron fallback | AHL news, stats/rosters/standings, per-game box scores, goal on-ice, shot events, penalty shots, xG + percentiles, Elo, playoff odds, milestones, trivia, power rankings (order below). `workflow_dispatch` accepts an optional `season_id` to backfill a specific season (added after AHL's entire 2025-26 regular season was found to have never been ingested — see `ahl_stats.py` above) |
 | `echl-nightly.yml` | Worker dispatch 08:00 UTC; cron fallback | Same step order and `season_id` input as `ahl-nightly.yml` (order below) |
-| `ai_pipeline.yml` | Worker dispatch 14:00 UTC; cron fallback | Morning job: `ai_predictions.py`. A bare dispatch (the Worker's) runs the morning job only (`job` input defaults to `morning`). The night job (summaries, scouting, results-vs-process) has no schedule, since `run.py` already runs those every night; run it by hand with `-f job=night` or `-f job=all` |
+| `ai_pipeline.yml` | Worker dispatch 14:00 UTC; cron fallback | Morning job: `ai_predictions.py`. A bare dispatch (the Worker's) runs the morning job only (`job` input defaults to `morning`). The night job (summaries, scouting, results-vs-process, trade candidacy paragraphs) has no schedule, since `run.py` already runs those every night; run it by hand with `-f job=night` or `-f job=all` |
 | `live-score-refresh.yml` | Manual only (2026-10) | Runs `ahl_live_refresh.py` + `pwhl_live_refresh.py` + `echl_live_refresh.py`. The Worker now writes live state and finals to `{league}_game_log` itself (see `ahl_live_refresh.py` above); this is a manual backfill for a game it missed. Its old `*/5` cron fired every 3–10 hours in practice |
 | `sbnation-ingest.yml` | Every 4 hours | 24 SBNation/Vox team-blog RSS/Atom feeds → Worker `/atom/ingest` (Session 61 — was `reddit-ingest.yml`, ran every 30 min and also fetched 32 subreddits despite Reddit having blocked GH Actions runner IPs the whole time; dropped the dead Reddit half and cut the cadence. Expanded from 5 to 24 feeds in the news ingestion investigation session — covers 28 of 32 NHL teams now, up from 5) |
 | `social-posts.yml` | Worker dispatch at each post's slot (2026-10-15); 36 crons (18 posts + backups) fallback, plus `announce` on its own 2 daily crons | Instagram + Facebook posts, see `social_posts.py` above |
