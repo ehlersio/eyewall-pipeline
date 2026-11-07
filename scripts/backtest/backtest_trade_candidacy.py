@@ -65,9 +65,7 @@ Run: python -m scripts.backtest.backtest_trade_candidacy
 
 import argparse
 import json
-import math
 import os
-import time
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -77,16 +75,17 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 import nhl_contracts as nc
+import trade_candidacy as tc
 from db import get_client
 from injuries import normalize_name
-from pipeline_common import get_logger, nhl_get, select_all
-from scripts.backtest import trade_data_coverage as tdc
+from pipeline_common import get_logger, select_all
+from trade_candidacy import FEATURES, MIN_GP_GOALIE, MIN_GP_SKATER
 
 log = get_logger(__name__)
 
-NHL_STATS = "https://api.nhle.com/stats/rest/en"
 CACHE = "trade_candidacy_cache.json"
 OUT = "docs/trade_candidacy_backtest_results.md"
+MODEL_OUT = tc.MODEL_PATH
 
 TEST_SEASONS = [2023, 2024, 2025]  # start years with >= 90% contract coverage (Phase 0)
 EXTRA_TRAIN_SEASONS = [2021, 2022]  # 84% / 89%: sensitivity run only
@@ -99,24 +98,12 @@ DEADLINES = {
     2024: date(2025, 3, 7),
     2025: date(2026, 3, 6),
 }
-MIN_GP_SKATER = 10
-MIN_GP_GOALIE = 5
-TOI_RECENT = 10
-CONF_LINE = 8  # the 8th team in a conference holds the last playoff spot
 TRADE_ROW_SLACK = timedelta(days=1)  # ESPN posts some deadline-day trades the next day
 WAIVER_WINDOW = (timedelta(days=7), timedelta(days=3))  # before last old game / after first new
 DECILE_MIN = 30
 CALIBRATION_TOLERANCE = 0.05
 TOP_K = 50
-PAGE_PAUSE = 2.0  # seconds between NHL stats requests (the API answers 429 under load)
-API_ROW_CAP = 10000  # the stats API never reports a total above this
-WINDOW_DAYS = 14  # ~6,000 skater-games: well under the cap
-
-FEATURES = [
-    "years_left", "expiring", "ufa_expiring", "contract_unknown", "log_cap", "cap_unknown",
-    "clause_full", "clause_modified", "ppg", "sv_pct", "toi_trend", "gap", "seller",
-    "expiring_x_seller", "age", "goalie", "defense", "days_to_deadline",
-]  # fmt: skip
+TIER_SHARES = (0.1, 0.2)  # 'several' = top tenth, 'some' = the next two (§10)
 
 
 def as_of_dates(year):
@@ -167,60 +154,7 @@ def waiver_index(rows):
     return out
 
 
-# ── Features ──────────────────────────────────────────────────────────────────
-
-
-def standings_gap(standings, team):
-    """(gap, seller) from {team: (conference, points_pct)}: the team's
-    points % minus the CONF_LINE-th best in its conference; seller when
-    negative. (0.0, 0) when the team isn't in the standings."""
-    if team not in standings:
-        return 0.0, 0
-    conf, pct = standings[team]
-    pcts = sorted((p for c, p in standings.values() if c == conf), reverse=True)
-    line = pcts[min(CONF_LINE, len(pcts)) - 1]
-    gap = pct - line
-    return gap, int(gap < 0)
-
-
-def production(before, goalie):
-    if goalie:
-        shots = sum(g.get("shots_against") or 0 for g in before)
-        saves = sum(g.get("saves") or 0 for g in before)
-        return 0.0, (saves / shots - 0.9) * 100 if shots else 0.0
-    return sum(g.get("points") or 0 for g in before) / len(before), 0.0
-
-
-def toi_trend(before, goalie):
-    if goalie or len(before) < TOI_RECENT:
-        return 0.0
-    season = np.mean([g["toi"] or 0 for g in before])
-    recent = np.mean([g["toi"] or 0 for g in before[-TOI_RECENT:]])
-    return float(recent / season - 1) if season else 0.0
-
-
-def contract_features(contract, clauses, year, birth_date):
-    if contract is None:
-        return {"years_left": 0, "expiring": 0, "ufa_expiring": 0, "contract_unknown": 1,
-                "log_cap": 0.0, "cap_unknown": 1, "clause_full": 0, "clause_modified": 0}  # fmt: skip
-    end = nc.season_start_year(contract.get("end_season"))
-    years_left = max(end - year, 0) if end is not None else 0
-    expiring = int(years_left == 0)
-    expiry = nc.normalize_expiry_status(contract.get("expiry_status")) or nc.derive_expiry_type(
-        birth_date, contract.get("end_season")
-    )
-    cap = contract.get("cap_hit_usd")
-    kinds = {c.get("kind") for c in clauses if tdc.clause_covers(c, year)}
-    return {
-        "years_left": years_left,
-        "expiring": expiring,
-        "ufa_expiring": int(expiring and expiry == "UFA"),
-        "contract_unknown": 0,
-        "log_cap": math.log1p(cap / 1e6) if cap else 0.0,
-        "cap_unknown": int(not cap),
-        "clause_full": int(bool(kinds & {"NMC", "NTC", "M-NMC"})),
-        "clause_modified": int("M-NTC" in kinds and not (kinds & {"NMC", "NTC", "M-NMC"})),
-    }
+# ── Rows ──────────────────────────────────────────────────────────────────────
 
 
 def build_rows(year, timelines, bios, standings_by_date, index, clauses_by_key, trades, waivers):
@@ -251,33 +185,16 @@ def build_rows(year, timelines, bios, standings_by_date, index, clauses_by_key, 
             if status in ("waiver", "moved_before"):
                 counts[f"dropped_{status}"] += 1
                 continue
-            bio = bios.get(pid, {})
+            birth = bios.get(pid, {}).get("birth_date")
             contract, _ = index.find(pid, info["name"], year)
-            feats = contract_features(
-                contract,
+            feats = tc.feature_row(
+                info, before, team, standings, contract,
                 clauses_by_key.get(contract["contract_key"], []) if contract else [],
-                year,
-                bio.get("birth_date"),
-            )
-            ppg, sv = production(before, goalie)
-            gap, seller = standings_gap(standings, team)
-            birth = bio.get("birth_date")
-            feats.update(
-                {
-                    "ppg": ppg,
-                    "sv_pct": sv,
-                    "toi_trend": toi_trend(before, goalie),
-                    "gap": gap,
-                    "seller": seller,
-                    "expiring_x_seller": feats["expiring"] * seller,
-                    "age": (as_of - date.fromisoformat(birth)).days / 365.25 if birth else 27.0,
-                    "goalie": int(goalie),
-                    "defense": int(info["position"] == "D"),
-                    "days_to_deadline": (deadline - as_of).days / 60,
-                }
-            )
-            if not birth:
+                birth, year, as_of, deadline,
+            )  # fmt: skip
+            if feats is None:
                 counts["age_unknown"] += 1
+                continue
             counts["rows"] += 1
             counts["traded"] += status == "traded"
             if status == "traded" and not any(
@@ -308,91 +225,6 @@ class Cache:
             with open(self.path, "w") as f:
                 json.dump(self.data, f)
         return self.data[key]
-
-
-def _game_row(d, kind):
-    row = {"pid": d["playerId"], "date": d["gameDate"][:10], "team": d["teamAbbrev"],
-           "last": d.get("lastName")}  # fmt: skip
-    if kind == "skater":
-        row.update(
-            toi=d.get("timeOnIcePerGame"), points=d.get("points"),
-            pos=d.get("positionCode"), name=d.get("skaterFullName"),
-        )  # fmt: skip
-    else:
-        row.update(
-            toi=d.get("timeOnIce"), saves=d.get("saves"),
-            shots_against=d.get("shotsAgainst"), pos="G", name=d.get("goalieFullName"),
-        )  # fmt: skip
-    return row
-
-
-def date_windows(year, days=WINDOW_DAYS):
-    """[lo, hi] date windows covering Sep 1 - Jul 31 of a season."""
-    lo, end = date(year, 9, 1), date(year + 1, 7, 31)
-    while lo <= end:
-        hi = min(lo + timedelta(days=days - 1), end)
-        yield lo, hi
-        lo = hi + timedelta(days=1)
-
-
-def fetch_game_rows(year, kind):
-    """Every regular-season game row of one season for skaters or goalies.
-    The stats API caps a query's `total` at API_ROW_CAP rows (a season is
-    ~36,000 skater-games), so it's fetched in WINDOW_DAYS-day date windows,
-    each paged by `start` over a stable sort; a window that reaches the cap
-    raises instead of silently truncating."""
-    rows = []
-    sort = json.dumps([{"property": "gameId", "direction": "ASC"},
-                       {"property": "playerId", "direction": "ASC"}])  # fmt: skip
-    for lo, hi in date_windows(year):
-        got, start = 0, 0
-        cayenne = (f"gameTypeId=2 and seasonId={year}{year + 1} and "
-                   f'gameDate>="{lo}" and gameDate<="{hi} 23:59:59"')  # fmt: skip
-        while True:
-            body = nhl_get(
-                f"{NHL_STATS}/{kind}/summary",
-                params={"isAggregate": "false", "isGame": "true", "start": start,
-                        "limit": API_ROW_CAP, "sort": sort, "cayenneExp": cayenne},
-                timeout=120, retries=6,
-            )  # fmt: skip
-            time.sleep(PAGE_PAUSE)
-            total = body.get("total") or 0
-            if total >= API_ROW_CAP:
-                raise RuntimeError(
-                    f"{kind} {lo}..{hi}: {total} rows hits the API cap; shrink WINDOW_DAYS"
-                )
-            page = body.get("data") or []
-            rows += [_game_row(d, kind) for d in page]
-            got += len(page)
-            start += len(page)
-            if not page or got >= total:
-                break
-    return rows
-
-
-def fetch_standings(day):
-    body = nhl_get(f"/standings/{day}", timeout=60, retries=6)
-    time.sleep(PAGE_PAUSE)
-    return {
-        s["teamAbbrev"]["default"]: [s["conferenceAbbrev"], s["pointPctg"]]
-        for s in body.get("standings") or []
-    }
-
-
-def timelines_from(rows):
-    out = {}
-    for r in sorted(rows, key=lambda r: (r["pid"], r["date"])):
-        t = out.setdefault(
-            r["pid"],
-            {"games": [], "goalie": r["pos"] == "G", "position": r["pos"], "name": r.get("name"),
-             "last_name": r.get("last") or (r.get("name") or "").split()[-1]},
-        )  # fmt: skip
-        t["games"].append(
-            {"date": date.fromisoformat(r["date"]), "team": r["team"], "toi": r.get("toi"),
-             "points": r.get("points"), "saves": r.get("saves"),
-             "shots_against": r.get("shots_against")}
-        )  # fmt: skip
-    return out
 
 
 # ── Model and scoring ─────────────────────────────────────────────────────────
@@ -477,6 +309,41 @@ def evaluate(rows_by_season, extra_rows=()):
     for k in ("model", "base", "two_cell", "y"):
         pooled[k] = np.array(pooled[k])
     return pooled, folds
+
+
+def export_model(model, train_rows, reliability, generated):
+    """The fit as plain numbers for trade_candidacy.predict(), with the tier
+    cuts (§10): 'several' = the top TIER_SHARES[0] of the training population
+    by the fitted model, 'some' = the next TIER_SHARES[1]. Each tier carries
+    the held-out traded rate of the matching reliability deciles."""
+    scaler, lr = model[0], model[-1]
+    X, _ = matrix(train_rows)
+    p = model.predict_proba(X)[:, 1]
+    n_bins = len(reliability)
+
+    def held_out(lo, hi):  # deciles [lo, hi) from the top
+        chunk = reliability[n_bins - hi : n_bins - lo]
+        return round(sum(n * ob for n, _, ob in chunk) / sum(n for n, _, _ in chunk), 4)
+
+    several, some = TIER_SHARES
+    k1, k2 = round(several * n_bins), round((several + some) * n_bins)
+    return {
+        "generated": generated,
+        "source": "scripts/backtest/backtest_trade_candidacy.py",
+        "trained_on": [f"{s}-{str(s + 1)[2:]}" for s in TEST_SEASONS],
+        "rows": len(train_rows),
+        "features": FEATURES,
+        "mean": [round(float(v), 6) for v in scaler.mean_],
+        "scale": [round(float(v), 6) for v in scaler.scale_],
+        "coef": [round(float(v), 6) for v in lr.coef_[0]],
+        "intercept": round(float(lr.intercept_[0]), 6),
+        "tiers": {
+            "several": {"min_p": round(float(np.quantile(p, 1 - several)), 6),
+                        "population_share": several, "held_out_traded": held_out(0, k1)},
+            "some": {"min_p": round(float(np.quantile(p, 1 - several - some)), 6),
+                     "population_share": some, "held_out_traded": held_out(k1, k2)},
+        },
+    }  # fmt: skip
 
 
 def ship_decision(pooled):
@@ -601,6 +468,22 @@ def render(counts, folds, decision, sens_folds, sens_decision, coefs, topk, meta
     ]
     for name, c in sorted(coefs, key=lambda t: -abs(t[1])):
         L.append(f"| `{name}` | {c:+.3f} |")
+    tiers = meta["model"]["tiers"]
+    L += [
+        "",
+        "## Production tiers (`trade_candidacy_model.json`)",
+        "",
+        "`trade_candidacy.py` scores today's players with the fit above and shows a tier, "
+        "never the number. Cuts are the fitted model's top tenth and next two tenths of the "
+        "training population; the traded rate is the matching held-out deciles'.",
+        "",
+        "| Tier | Model probability at least | Share of population | Traded (held out) |",
+        "|---|---:|---:|---:|",
+    ]
+    for name in ("several", "some"):
+        t = tiers[name]
+        L.append(f"| {name} | {pct(t['min_p'])} | {pct(t['population_share'])} "
+                 f"| {pct(t['held_out_traded'])} |")  # fmt: skip
     L.append("")
     return "\n".join(L)
 
@@ -608,6 +491,7 @@ def render(counts, folds, decision, sens_folds, sens_decision, coefs, topk, meta
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--out", default=OUT)
+    ap.add_argument("--model-out", default=MODEL_OUT)
     args = ap.parse_args()
     cache = Cache(CACHE)
     sb = get_client()
@@ -643,22 +527,24 @@ def main():
 
     bios_by_season, rows_by_season, counts = {}, {}, {}
     for y in seasons:
-        bios_by_season[y] = cache.get(f"bios:{y}", lambda y=y: tdc.fetch_bios(y))
-    index = tdc.ContractIndex(contracts, tdc.unique_name_keys(bios_by_season))
+        bios_by_season[y] = cache.get(f"bios:{y}", lambda y=y: tc.fetch_bios(y))
+    index = tc.ContractIndex(contracts, tc.unique_name_keys(bios_by_season))
     for y in seasons:
         log.info(f"season {y}-{y + 1}")
         # A new list: `+=` on the cached skater list would add the goalie rows to
         # the cache itself and save them into the next write.
         games = cache.get(
-            f"games:skater:{y}", lambda y=y: fetch_game_rows(y, "skater")
-        ) + cache.get(f"games:goalie:{y}", lambda y=y: fetch_game_rows(y, "goalie"))
+            f"games:skater:{y}", lambda y=y: tc.fetch_game_rows(y, "skater")
+        ) + cache.get(f"games:goalie:{y}", lambda y=y: tc.fetch_game_rows(y, "goalie"))
         standings = {
-            d.isoformat(): cache.get(f"standings:{d}", lambda d=d: fetch_standings(d.isoformat()))
+            d.isoformat(): cache.get(
+                f"standings:{d}", lambda d=d: tc.fetch_standings(d.isoformat())
+            )
             for d in as_of_dates(y)
         }
         bios = {b["player_id"]: b for b in bios_by_season[y]}
         rows_by_season[y], counts[y] = build_rows(
-            y, timelines_from(games), bios, standings, index, clauses_by_key, trades, waivers
+            y, tc.timelines_from(games), bios, standings, index, clauses_by_key, trades, waivers
         )
         log.info(f"  {counts[y]}")
 
@@ -667,14 +553,21 @@ def main():
     extra = [r for s in EXTRA_TRAIN_SEASONS for r in rows_by_season[s]]
     sens_pooled, sens_folds = evaluate(rows_by_season, extra)
     sens_decision = ship_decision(sens_pooled)
-    full = fit([r for s in TEST_SEASONS for r in rows_by_season[s]])
+    train_all = [r for s in TEST_SEASONS for r in rows_by_season[s]]
+    full = fit(train_all)
     coefs = list(zip(FEATURES, full[-1].coef_[0].tolist(), strict=True))
     topk = top_k_precision(pooled["rows"], pooled["model"])
+    model = export_model(full, train_all, decision["reliability"], date.today().isoformat())
 
     with open(args.out, "w") as f:
         f.write(render(counts, folds, decision, sens_folds, sens_decision, coefs, topk,
-                       {"generated": date.today().isoformat()}))  # fmt: skip
-    log.info(f"wrote {args.out}: show_percentage={decision['show_percentage']}")
+                       {"generated": date.today().isoformat(), "model": model}))  # fmt: skip
+    with open(args.model_out, "w") as f:
+        json.dump(model, f, indent=2)
+        f.write("\n")
+    log.info(
+        f"wrote {args.out} and {args.model_out}: show_percentage={decision['show_percentage']}"
+    )
 
 
 if __name__ == "__main__":

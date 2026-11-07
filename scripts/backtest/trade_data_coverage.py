@@ -49,8 +49,13 @@ import requests
 
 import nhl_contracts as nc
 from db import get_client
-from injuries import normalize_name
 from pipeline_common import get_logger, select_all
+from trade_candidacy import (  # shared with the candidacy backtest and nightly job
+    ContractIndex,
+    clause_covers,
+    fetch_bios,
+    unique_name_keys,
+)
 
 log = get_logger(__name__)
 
@@ -87,64 +92,6 @@ def infer_deadline(trade_dates, start_year: int) -> date | None:
     lo, hi = date(start_year + 1, 1, 1), date(start_year + 1, 4, 30)
     counts = Counter(d for d in trade_dates if lo <= d <= hi)
     return max(counts, key=lambda d: (counts[d], d)) if counts else None
-
-
-def covers(contract: dict, year: int) -> bool:
-    s = nc.season_start_year(contract.get("start_season"))
-    e = nc.season_start_year(contract.get("end_season"))
-    return s is not None and e is not None and s <= year <= e
-
-
-def clause_covers(clause: dict, year: int) -> bool:
-    """A clause row with no season range (some tier-D rows) is taken to cover
-    every season of its contract."""
-    s = nc.season_start_year(clause.get("season_from"))
-    e = nc.season_start_year(clause.get("season_to"))
-    return (s is None or s <= year) and (e is None or year <= e)
-
-
-def _preference(c: dict):
-    return (
-        c.get("cap_hit_usd") is not None,
-        int(c.get("n_sources") or 0),
-        -nc.TIER_RANK.get(c.get("best_tier") or "", 9),
-    )
-
-
-class ContractIndex:
-    """Contracts by player_id, plus contracts without one by normalized name.
-    find() returns (contract, how) for the best contract covering a season,
-    how = 'id' | 'name', or (None, None)."""
-
-    def __init__(self, contracts, unique_names: set[str]):
-        self.by_id = defaultdict(list)
-        self.by_name = defaultdict(list)
-        for c in contracts:
-            if c.get("player_id") is not None:
-                self.by_id[int(c["player_id"])].append(c)
-            else:
-                key = normalize_name(c.get("player_name"))
-                if key in unique_names:
-                    self.by_name[key].append(c)
-
-    def find(self, player_id, name, year):
-        if player_id is not None:
-            hit = [c for c in self.by_id.get(int(player_id), []) if covers(c, year)]
-            if hit:
-                return max(hit, key=_preference), "id"
-        hit = [c for c in self.by_name.get(normalize_name(name), []) if covers(c, year)]
-        if hit:
-            return max(hit, key=_preference), "name"
-        return None, None
-
-
-def unique_name_keys(bios_by_season) -> set[str]:
-    """Normalized names exactly one NHL player has across every season fetched."""
-    ids = defaultdict(set)
-    for rows in bios_by_season.values():
-        for r in rows:
-            ids[normalize_name(r["name"])].add(r["player_id"])
-    return {k for k, v in ids.items() if len(v) == 1}
 
 
 def pct(n: int, d: int) -> str:
@@ -247,29 +194,6 @@ def expiry_agreement(contracts, birth_dates: dict[int, str]) -> Counter:
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
-
-
-def fetch_bios(year: int) -> list[dict]:
-    """Regular-season skaters and goalies of one season, from the NHL stats API."""
-    rows = []
-    for kind, name_field in (("skater", "skaterFullName"), ("goalie", "goalieFullName")):
-        r = requests.get(
-            f"{NHL_STATS}/{kind}/bios",
-            params={"limit": -1, "cayenneExp": f"seasonId={year}{year + 1} and gameTypeId=2"},
-            timeout=60,
-        )
-        r.raise_for_status()
-        for d in r.json().get("data") or []:
-            rows.append(
-                {
-                    "player_id": d["playerId"],
-                    "name": d[name_field],
-                    "gp": d.get("gamesPlayed") or 0,
-                    "goalie": kind == "goalie",
-                    "birth_date": d.get("birthDate"),
-                }
-            )
-    return rows
 
 
 def fetch_multi_team(year: int) -> set[int]:

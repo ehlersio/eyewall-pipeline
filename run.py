@@ -52,6 +52,10 @@ Nightly run order (important — modules depend on each other):
   teams he'd fit, in tiers with reasons (needs team_needs, playoff_odds,
   nhl_contracts via the Worker's contract routes) -> trade_fit /
   trade_fit_players; empties both outside the season window.
+  trade_candidacy runs right after trade_fit -- each player's candidate
+  signals and tier from the frozen backtest model (NHL stats API game rows
+  and standings, the nhl-contracts release, trade_assets) ->
+  trade_candidacy; Jan 1 to the trade deadline only, emptied otherwise.
 
 AI predictions run separately via ai_pipeline.yml morning cron (10AM ET).
 
@@ -89,6 +93,7 @@ Usage:
   python run.py projected_lines  # Next-game projected lines, every team
   python run.py team_needs       # Lineup slots rated + ranked league-wide, every team
   python run.py trade_fit        # Which teams each player fits, tiers + reasons
+  python run.py trade_candidacy  # Candidate signals + tier per player (Jan 1 - deadline)
   python run.py validate         # Internal RAPM sanity checks
   python run.py validate eh.csv  # RAPM vs Evolving Hockey CSV comparison
   python run.py ai               # AI pipeline only (summaries + scouting + narratives)
@@ -223,6 +228,7 @@ def run_all():
     import special_teams
     import starting_goalie
     import team_needs
+    import trade_candidacy
     import trade_fit
     import trade_trees
     import transactions
@@ -276,6 +282,7 @@ def run_all():
     )  # needs shift_data, game_log, injuries, player_seasons
     stage("team_needs", team_needs.run)  # needs projected_lines, fresh WAR/GSAx, players
     stage("trade_fit", trade_fit.run)  # needs team_needs, playoff_odds, nhl_contracts
+    stage("trade_candidacy", trade_candidacy.run)  # needs trade_assets (transactions, wiki_trades)
     stage("special_teams", special_teams.run)  # must run after shift_data
     stage("power_rankings", power_rankings.run)  # must run after moneypuck (needs fresh WAR + xGF%)
 
@@ -447,6 +454,10 @@ if __name__ == "__main__":
         import trade_fit
 
         trade_fit.run(*([season] if season else []))
+    elif arg == "trade_candidacy":
+        import trade_candidacy
+
+        trade_candidacy.run(*([season] if season else []))
     elif arg == "special":
         import special_teams
 
