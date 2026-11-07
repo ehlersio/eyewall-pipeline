@@ -1,0 +1,212 @@
+[
+{
+"contract_key": "8471215|PIT|2026-05",
+"season": "2026-27",
+"status": "clause",
+"basis": "source",
+"source_ids": "bsky:3mmrmydr2kl2r"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2024-25",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2025-26",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2026-27",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews;wayback:20240704221504:/teams/avalanche"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2027-28",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews;wayback:20240704221504:/teams/avalanche"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2028-29",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews;wayback:20240704221504:/teams/avalanche"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2029-30",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews;wayback:20240704221504:/teams/avalanche"
+},
+{
+"contract_key": "8478038|COL|2023-10",
+"season": "2030-31",
+"status": "clause",
+"basis": "source",
+"source_ids": "wayback:20240609205154:/players/devon-toews"
+},
+{
+"contract_key": "8478970|CAR|2024-06",
+"season": "2024-25",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8478970|CAR|2024-06",
+"season": "2025-26",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8478970|CAR|2024-06",
+"season": "2026-27",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8481721|NJD|2026-06",
+"season": "2026-27",
+"status": "none_likely",
+"basis": "breakdown_without_clause",
+"source_ids": "bsky:3mpjs5icowa25"
+},
+{
+"contract_key": "8481721|NJD|2026-06",
+"season": "2027-28",
+"status": "none_likely",
+"basis": "breakdown_without_clause",
+"source_ids": "bsky:3mpjs5icowa25"
+},
+{
+"contract_key": "8481721|NJD|2026-06",
+"season": "2028-29",
+"status": "none_likely",
+"basis": "breakdown_without_clause",
+"source_ids": "bsky:3mpjs5icowa25"
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2026-27",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2027-28",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2028-29",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2029-30",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2030-31",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2031-32",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2032-33",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "8482809|CAR|2025-07",
+"season": "2033-34",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "christian ehrhoff|SJS|2003-07",
+"season": "2003-04",
+"status": "none",
+"basis": "capfriendly_2024",
+"source_ids": "wayback:20240609210823:/players/christian-ehrhoff"
+},
+{
+"contract_key": "christian ehrhoff|SJS|2003-07",
+"season": "2004-05",
+"status": "none",
+"basis": "capfriendly_2024",
+"source_ids": "wayback:20240609210823:/players/christian-ehrhoff"
+},
+{
+"contract_key": "christian ehrhoff|SJS|2003-07",
+"season": "2005-06",
+"status": "none",
+"basis": "capfriendly_2024",
+"source_ids": "wayback:20240609210823:/players/christian-ehrhoff"
+},
+{
+"contract_key": "lawson crouse|ARI|2022-08",
+"season": "2022-23",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "lawson crouse|ARI|2022-08",
+"season": "2023-24",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "lawson crouse|ARI|2022-08",
+"season": "2024-25",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "lawson crouse|ARI|2022-08",
+"season": "2025-26",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+},
+{
+"contract_key": "lawson crouse|ARI|2022-08",
+"season": "2026-27",
+"status": "unknown",
+"basis": null,
+"source_ids": ""
+}
+]
