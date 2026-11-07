@@ -38,7 +38,12 @@ Usage:
   python transactions.py --dry-run
   python run.py transactions [year]      # via orchestrator
 
-Run order: independent -- no pipeline stage depends on it.
+Known gaps (2026-11-06): ESPN leaves out whole trades, and its dates for
+entries dated 2021-01-01 to 2024-06-19 run ~5 days early
+(ESPN_EARLY_DATES). wiki_trades.py, the next stage, adds the missing trades
+and corrects or flags those dates in the rows written here.
+
+Run order: before wiki_trades (which fills and corrects these rows).
 """
 
 import argparse
@@ -54,6 +59,21 @@ from injuries import ESPN_TEAM_ID_TO_ABBR
 
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl"
 PAGE_LIMIT = 1000
+
+# ESPN's own dates run early for entries it dates 2021-01-01 to 2024-06-19:
+# 5 days early nearly always, every kind of entry, not just trades.
+# Measured 2026-11-06 against Wikipedia's dated trade and waiver tables
+# (wiki_trades.py). Every one of the 345 trade-team sides matched inside the
+# window was early, 335 by 5 days and 10 by 4; so were 85 of 86 matched
+# waiver claims (82 by 5). Outside it, 107 of 109 claims match to the day
+# and matched trades are at most a day off -- before the window (Oct 2020)
+# and after it. The latest ESPN date seen early is 2024-06-16 and the
+# earliest seen right after it 2024-06-20, so the two days between count as
+# unconfirmed too. ESPN's API itself returns these dates. wiki_trades.py
+# corrects the trades it can source and marks the rest
+# date_status='espn_early' -- nothing is moved by a blanket offset.
+ESPN_EARLY_DATES = (date(2021, 1, 1), date(2024, 6, 19))
+ESPN_EARLY_MAX_DAYS = 6  # the most any matched entry in the window ran early
 
 # Franchises ESPN still serves history for but no longer lists in /teams.
 # Arizona (ESPN id 24) moved to Utah in 2024; without this its own entries

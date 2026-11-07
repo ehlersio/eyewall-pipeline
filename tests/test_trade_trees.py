@@ -244,3 +244,134 @@ class TestPlayerIndex:
         assert index.lookup("Alex Kerfoot") == 8479365
         assert index.lookup("J Staal") is None  # too short to tell Jordan from Jared
         assert index.lookup("Unknown Prospect") is None
+
+
+WIKI_EDM = {
+    "id": 20,
+    "tx_date": "2023-02-28",
+    "season": 20222023,
+    "team": "DAL",
+    "counterparties": ["SEA"],
+    # text deliberately unparseable: the stored assets must be what's used
+    "description": "Text trade_parse can't read.",
+    "source_url": "https://www.nhl.com/news/x",
+    "date_status": None,
+    "assets": {
+        "partner": "SEA",
+        "via": [],
+        "received": [{"type": "player", "name": "Mason Marchment", "position": None, "rights": False}],
+        "sent": [
+            {
+                "type": "pick",
+                "year": None,
+                "round": None,
+                "conditional": True,
+                "overall": None,
+                "original_team": None,
+                "pairing_uncertain": False,
+                "raw": "conditional 4th-round pick in 2025 or 3rd-round pick in 2026",
+                "alt_years": [2025, 2026],
+            }
+        ],
+    },
+}  # fmt: skip
+
+
+class TestWikipediaRows:
+    """Rows wiki_trades.py adds carry their assets as data (no text parsing)
+    and conditional picks with their alternative years; trades carry the
+    date status of their sides."""
+
+    def test_stored_assets_are_used_instead_of_the_text(self):
+        trades, assets = build([WIKI_EDM])
+        assert len(trades) == 1 and trades[0]["teams"] == ["DAL", "SEA"]
+        player = next(a for a in assets if a["asset_type"] == "player")
+        assert (player["player_name"], player["from_team"], player["to_team"]) == (
+            "Mason Marchment",
+            "SEA",
+            "DAL",
+        )
+        assert trades[0]["source_url"] == "https://www.nhl.com/news/x"
+        assert trades[0]["date_status"] is None
+
+    def test_alternative_years_bound_pick_resolution(self):
+        # DAL -> SEA hops exist in 2025 (round 4); the conditional pick could
+        # only be 2025 or 2026, so it resolves to that one pick.
+        draft_rows = [draft(2025, 4, 126, ["DAL", "SEA"], "Brandon Gorzynski")]
+        _, assets = build([WIKI_EDM], draft_rows)
+        pick = next(a for a in assets if a["asset_type"] == "pick")
+        assert pick["resolved_overall"] == 126 and pick["pick_note"] is None
+        # a hop outside the alternatives' years isn't taken
+        draft_rows = [draft(2024, 4, 120, ["DAL", "SEA"], "Someone")]
+        _, assets = build([WIKI_EDM], draft_rows)
+        pick = next(a for a in assets if a["asset_type"] == "pick")
+        assert pick["resolved_overall"] is None
+
+    def test_trade_is_espn_early_only_when_every_side_is(self):
+        early = [dict(e, date_status="espn_early") for e in MARCHMENT]
+        trades, _ = build(early)
+        assert trades[0]["date_status"] == "espn_early"
+        mixed = [early[0], dict(MARCHMENT[1], date_status="corrected", source_url="u")]
+        trades, _ = build(mixed)
+        assert trades[0]["date_status"] is None and trades[0]["source_url"] == "u"
+
+
+def test_halves_pair_on_espns_own_dates_when_one_was_corrected():
+    # Taylor Hall, Apr 12, 2021: ESPN posted both halves Apr 7. Buffalo's was
+    # corrected; Boston's bundles a second trade from another day, so it
+    # stays as ESPN dated it (flagged). The halves still pair, on the
+    # corrected date.
+    bos = entry(30, "2021-04-07", "BOS", ["BUF", "OTT"], "Traded LW Anders Bjork to Buffalo for C Curtis Lazar and LW Taylor Hall. Acquired D Mike Reilly from Ottawa in exchange for a 2022 third-round pick.")  # fmt: skip
+    buf = entry(31, "2021-04-12", "BUF", ["BOS"], "Acquired LW Anders Bjork from Boston for LW Taylor Hall and C Curtis Lazar.")  # fmt: skip
+    bos |= {"date_status": "espn_early", "espn_date": "2021-04-07T07:00:00+00:00"}
+    buf |= {"date_status": "corrected", "espn_date": "2021-04-07T07:00:00+00:00", "source_url": "u"}
+    teams = [*PATTERNS, ("BOS", re.compile(r"\b(?:Boston Bruins|Bruins|Boston)\b")),
+             ("BUF", re.compile(r"\b(?:Buffalo Sabres|Sabres|Buffalo)\b")),
+             ("OTT", re.compile(r"\b(?:Ottawa Senators|Senators|Ottawa)\b"))]  # fmt: skip
+    trades, assets = tt.build([bos, buf], teams, tt.PlayerIndex([]), [])
+    hall = next(t for t in trades if t["teams"] == ["BOS", "BUF"])
+    assert sorted(hall["source_tx_ids"]) == [30, 31]
+    assert (hall["tx_date"], hall["date_status"], hall["source_url"]) == ("2021-04-12", None, "u")
+    assert hall["season"] == 20202021
+    # Buffalo's half from Wikipedia instead of a corrected ESPN entry pairs too
+    wiki_buf = {k: v for k, v in buf.items() if k != "espn_date"} | {"date_status": None}
+    trades, _ = tt.build([bos, wiki_buf], teams, tt.PlayerIndex([]), [])
+    hall = next(t for t in trades if t["teams"] == ["BOS", "BUF"])
+    assert sorted(hall["source_tx_ids"]) == [30, 31] and hall["tx_date"] == "2021-04-12"
+    # without the flag, five days apart is two separate entries
+    plain = [dict(bos, date_status=None), wiki_buf]
+    assert (
+        len([t for t in tt.build(plain, teams, tt.PlayerIndex([]), [])[0] if "BUF" in t["teams"]])
+        == 2
+    )
+    assert {a["tx_date"] for a in assets if a["trade_id"] == hall["trade_id"]} == {"2021-04-12"}
+
+
+def test_wikipedia_halves_pair_as_told_not_by_teams_and_dates():
+    # Aug 20, 2024 (real): St. Louis' ESPN entry is Holloway and Broberg;
+    # the Fischer trade that day is Wikipedia's only. Teams and dates alone
+    # would put Edmonton's Fischer half with the Broberg entry.
+    stl = entry(40, "2024-08-20", "STL", ["EDM"], "Acquired D Philip Broberg from the Edmonton Oilers for a 2025 second-round pick.")  # fmt: skip
+    teams = [*PATTERNS, ("EDM", re.compile(r"\b(?:Edmonton Oilers|Oilers|Edmonton)\b")),
+             ("STL", re.compile(r"\b(?:St. Louis Blues|Blues|St. Louis)\b"))]  # fmt: skip
+    fischer = {"type": "player", "name": "Paul Fischer", "position": None, "rights": False}
+    fc = {"type": "future_considerations"}
+
+    def wiki(eid, team, partner, received, sent, key):
+        return entry(eid, "2024-08-20", team, [partner], f"Wikipedia {team}") | {
+            "assets": {"partner": partner, "via": [], "received": received, "sent": sent,
+                       "trade_key": key, "partner_tx_id": None},
+        }  # fmt: skip
+
+    rows = [
+        stl,
+        wiki(41, "EDM", "STL", [fischer], [fc], "k"),
+        wiki(42, "STL", "EDM", [fc], [fischer], "k"),
+    ]
+    trades, _ = tt.build(rows, teams, tt.PlayerIndex([]), [])
+    assert sorted(sorted(t["source_tx_ids"]) for t in trades) == [[40], [41, 42]]
+    # one half added, paired with the ESPN row wiki_trades matched for the other team
+    edm = wiki(43, "EDM", "STL", [fischer], [fc], None)
+    edm["assets"]["partner_tx_id"] = 40
+    trades, _ = tt.build([stl, edm], teams, tt.PlayerIndex([]), [])
+    assert [sorted(t["source_tx_ids"]) for t in trades] == [[40, 43]]

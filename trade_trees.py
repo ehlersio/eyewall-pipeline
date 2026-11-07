@@ -4,11 +4,13 @@ next -> `trades` + `trade_assets`, read by the Worker's /trades/tree route
 (tap a trade in the app's Transactions feed to see its tree).
 
 Built nightly from nhl_transactions (transactions.py -- ESPN's free-text
-feed; see trade_parse.py for how the text becomes assets):
+feed; see trade_parse.py for how the text becomes assets -- plus the rows
+wiki_trades.py adds for trades ESPN misses, whose `assets` are used as-is):
 1. Parse every trade entry into legs (one per trade clause: this team, its
    partner, what it received and sent).
 2. Pair each leg with the partner team's own leg within 2 days -- the same
-   rule the Worker's pairTransactions() uses for the feed. Each team's own
+   rule the Worker's pairTransactions() uses for the feed (wiki_trades.py's
+   rows pair exactly as it recorded; see pair_legs). Each team's own
    "Acquired ..." list is what it got; a leg with nothing listed (or a trade
    whose other half ESPN never posted) falls back to the other side's "sent"
    list.
@@ -51,6 +53,7 @@ from db import get_client, upsert
 from injuries import normalize_name
 from scratches import fetch_keyset
 from trade_parse import parse_entry
+from transactions import ESPN_EARLY_MAX_DAYS, nhl_season_for
 
 PAIR_WINDOW_DAYS = 2
 PICK_FIELDS = ("pick_year", "pick_round", "pick_conditional", "pick_overall", "pick_original_team")
@@ -60,13 +63,29 @@ def days_apart(a, b):
     return abs((date.fromisoformat(a) - date.fromisoformat(b)).days)
 
 
+def clauses_of(row, team_patterns):
+    """A row's trade clauses: the structured `assets` wiki_trades.py stored
+    for a Wikipedia row (one clause, nothing to parse), else ESPN's text
+    through trade_parse."""
+    if row.get("assets"):
+        a = row["assets"]
+        return [
+            {
+                "partner": a.get("partner"),
+                "via": a.get("via") or [],
+                "received": a.get("received") or [],
+                "sent": a.get("sent") or [],
+                "raw": row["description"],
+            }
+        ]
+    return parse_entry(row["description"], team_patterns, row.get("counterparties") or [])
+
+
 def build_legs(entries, team_patterns):
     """nhl_transactions trade rows -> legs, one per trade clause."""
     legs = []
     for r in entries:
-        for i, clause in enumerate(
-            parse_entry(r["description"], team_patterns, r.get("counterparties") or [])
-        ):
+        for i, clause in enumerate(clauses_of(r, team_patterns)):
             legs.append(
                 {
                     **clause,
@@ -76,29 +95,87 @@ def build_legs(entries, team_patterns):
                     "season": r.get("season"),
                     "team": r["team"],
                     "description": r["description"],
+                    "date_status": r.get("date_status"),
+                    "source_url": r.get("source_url"),
+                    # wiki_trades.py's pairing for its own rows (else None)
+                    "trade_key": (r.get("assets") or {}).get("trade_key"),
+                    "partner_tx_id": (r.get("assets") or {}).get("partner_tx_id"),
+                    "wiki": bool(r.get("assets")),
                 }
             )
     return legs
 
 
+def legs_close(a, b, window=PAIR_WINDOW_DAYS):
+    """b's date minus a's within the pairing window, widened on the side of a
+    leg whose ESPN date is known to run early."""
+    gap = (date.fromisoformat(b["tx_date"]) - date.fromisoformat(a["tx_date"])).days
+    early = ESPN_EARLY_MAX_DAYS
+    hi = window + (early if a.get("date_status") == "espn_early" else 0)
+    lo = -window - (early if b.get("date_status") == "espn_early" else 0)
+    return lo <= gap <= hi
+
+
 def pair_legs(legs, window=PAIR_WINDOW_DAYS):
-    """-> list of trades, each a list of 1 or 2 legs. A leg from A naming B
-    pairs with a leg from B naming A within `window` days. A leg with no
+    """-> list of trades, each a list of 1 or 2 legs.
+
+    Rows wiki_trades.py added say what they pair with: the other added half
+    of the same trade (trade_key), or the ESPN row matched for the other team
+    (partner_tx_id) -- those pair first, exactly. The rest pair as before: a
+    leg from A naming B with a leg from B naming A within `window` days. A
+    leg whose date is flagged 'espn_early' (ESPN's known early window, not
+    confirmed by wiki_trades.py -- e.g. an entry bundling trades from
+    different days, so no one date fits it) may sit up to ESPN_EARLY_MAX_DAYS
+    before its partner; that's slack for pairing only, and the trade's date
+    comes from the sourced half (trade_date_fields). A leg with no
     identifiable partner can't be placed and is left out."""
     ordered = sorted(legs, key=lambda leg: (leg["tx_date"], leg["entry_id"], leg["clause"]))
     used, trades = set(), []
+
+    def take(i, j):
+        used.update((i, j))
+        trades.append([ordered[i], ordered[j]])
+
+    by_key = {}
+    for i, leg in enumerate(ordered):
+        if leg.get("trade_key"):
+            by_key.setdefault(leg["trade_key"], []).append(i)
+    for idx in by_key.values():
+        if len(idx) == 2:
+            take(*idx)
+    for i, a in enumerate(ordered):
+        if i in used or not a.get("partner_tx_id"):
+            continue
+        cands = [
+            j
+            for j, b in enumerate(ordered)
+            if j not in used and b["entry_id"] == a["partner_tx_id"] and b["team"] == a["partner"]
+        ]
+        # the ESPN clause naming this team, else its only clause if that
+        # names no partner at all -- never a clause that's another trade
+        # (three-team trades: ESPN's entry can describe a different leg)
+        j = next((j for j in cands if ordered[j]["partner"] == a["team"]), None)
+        if j is None and len(cands) == 1 and ordered[cands[0]]["partner"] is None:
+            j = cands[0]
+        if j is not None:
+            take(i, j)
+
     for i, a in enumerate(ordered):
         if i in used or not a["partner"]:
             continue
         used.add(i)
+        if a.get("wiki"):  # its pairing was given above; never guess one
+            trades.append([a])
+            continue
         j = next(
             (
                 j
                 for j, b in enumerate(ordered)
                 if j not in used
+                and not b.get("wiki")
                 and b["team"] == a["partner"]
                 and b["partner"] == a["team"]
-                and days_apart(a["tx_date"], b["tx_date"]) <= window
+                and legs_close(a, b, window)
             ),
             None,
         )
@@ -120,6 +197,21 @@ def _direction(receiver, giver):
     if receiver and receiver["received"]:
         return receiver["received"]
     return giver["sent"] if giver else []
+
+
+def trade_date_fields(legs):
+    """tx_date / date_status / source_url for a trade from its legs' rows.
+    A leg whose date isn't an unconfirmed ESPN date in its early window
+    (transactions.ESPN_EARLY_DATES, date_status 'espn_early') sets the date;
+    'espn_early' only when every leg is one. The first citation (a corrected
+    or Wikipedia-sourced leg's) is the trade's source_url."""
+    settled = [leg for leg in legs if leg.get("date_status") != "espn_early"]
+    url = next((leg["source_url"] for leg in legs if leg.get("source_url")), None)
+    return {
+        "tx_date": min(leg["tx_date"] for leg in (settled or legs)),
+        "date_status": None if settled else "espn_early",
+        "source_url": url,
+    }
 
 
 def trade_asset_rows(legs):
@@ -151,7 +243,9 @@ def resolve_pick_group(assets, giver, taker, tx_date, hops, by_overall, last_dra
     one (resolution dict) per asset: {resolved: draft row or None, note}."""
     first = assets[0]
     tx_year = int(tx_date[:4])
-    years = [first["year"]] if first["year"] else [tx_year, tx_year + 1]
+    # a conditional pick listed with its alternatives (wiki_trades.py) only
+    # ever lands in one of those years
+    years = [first["year"]] if first["year"] else (first.get("alt_years") or [tx_year, tx_year + 1])
     if all(y > last_draft_year for y in years):
         return [{"resolved": None, "note": "future"} for _ in assets]
 
@@ -295,21 +389,23 @@ def build(entries, team_patterns, player_index, draft_rows):
     for legs in pair_legs(build_legs(entries, team_patterns)):
         tid = trade_id(legs)
         first = legs[0]
+        dated = trade_date_fields(legs)
         trades.append(
             {
                 "trade_id": tid,
-                "tx_date": min(leg["tx_date"] for leg in legs),
-                "season": first["season"],
+                # from the trade's own date: a corrected one can cross July 1
+                "season": nhl_season_for(date.fromisoformat(dated["tx_date"])),
                 "teams": sorted({first["team"], first["partner"]}),
                 "via": sorted({v for leg in legs for v in leg["via"]}),
                 "source_tx_ids": sorted({leg["entry_id"] for leg in legs}),
                 "descriptions": [leg["raw"] for leg in legs],
+                **dated,
             }
         )
         rows = trade_asset_rows(legs)
         groups = {}
         for i, (giver, taker, asset) in enumerate(rows):
-            row = asset_row(tid, i, first["tx_date"], giver, taker, asset, player_index)
+            row = asset_row(tid, i, dated["tx_date"], giver, taker, asset, player_index)
             assets.append(row)
             if asset["type"] == "pick":
                 groups.setdefault((giver, taker, asset["raw"]), []).append((row, asset))
@@ -318,7 +414,7 @@ def build(entries, team_patterns, player_index, draft_rows):
                 [a for _, a in members],
                 giver,
                 taker,
-                first["tx_date"],
+                dated["tx_date"],
                 hops,
                 by_overall,
                 last_draft_year,
@@ -387,7 +483,8 @@ def run(dry_run=False):
         for r in fetch_keyset(
             client,
             "nhl_transactions",
-            "id,tx_date,season,team,counterparties,categories,description",
+            "id,tx_date,season,team,counterparties,categories,description,assets,"
+            "date_status,source_url",
             lambda q: q,
         )
         if "trade" in (r.get("categories") or [])

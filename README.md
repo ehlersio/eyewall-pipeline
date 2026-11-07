@@ -46,6 +46,7 @@ python run.py scratches        # Game scratches (incremental; season = backfill)
 python run.py goalie_starts    # Boxscore goalie starters, new games only
 python run.py starting_goalie  # Start probabilities for every team's next game
 python run.py transactions     # ESPN NHL transactions (second argument is a calendar year)
+python run.py wiki_trades      # Wikipedia's trade lists: add the trades ESPN misses, fix its dates
 python run.py draft_history    # Draft pick history, last 5 drafts (second argument is a first draft year)
 python run.py trade_trees      # Structured trades + where each asset went next
 python run.py contracts [--force]  # Open nhl-contracts dataset -> nhl_contracts*, nhl_dead_cap (skips when unchanged)
@@ -177,7 +178,7 @@ Run anything under `scripts/` as a module from the repo root (`python -m scripts
 
 ### Run order (nightly, via `run.py`)
 ```
-nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
+nhl_stats → injuries → scratches → goalie_starts → starting_goalie → transactions → wiki_trades → draft_history → trade_trees → nhl_contracts → elo_ratings → win_probs → playoff_race → playoff_odds → prediction_scorecard → shot_events → shift_data → zone_starts → rapm → moneypuck → injury_impact → line_combinations → projected_lines → special_teams → power_rankings → AI (game_scoring → ai_summaries → ai_scouting → ai_results_vs_process → ai_line_chemistry → trivia_questions --sport nhl) → validate_rapm
 ```
 
 `nightly.yml` then runs `milestones.py`. `ai_predictions.py` is not in `run.py`; it runs in `ai_pipeline.yml`'s morning job (Worker dispatch 14:00 UTC, cron fallback).
@@ -429,6 +430,25 @@ python transactions.py --dry-run
 
 Requires `docs/sql/session_nhl_transactions.sql` to be run in Supabase first (creates the table + RLS policy).
 
+**Known ESPN gaps (measured 2026-11-06):** the feed leaves out whole trades (Kane and Ekholm, Feb 2023; Guentzel and Lindholm, 2024; Nelson, 2025; most July trades every year), and the dates it gives for entries it dates **2021-01-01 to 2024-06-19** run early, 5 days nearly always (`ESPN_EARLY_DATES`; every kind of entry, not only trades). Both come from ESPN's API. `wiki_trades.py` (next) fills and corrects them.
+
+### `wiki_trades.py` (2026-11)
+Reads Wikipedia's per-season "NHL transactions" lists (`<YYYY>–<YY> NHL transactions`, 2014-15 on, MediaWiki API wikitext, one request per page a second apart with a descriptive User-Agent) and writes into `nhl_transactions`, so the Transactions feed and `trade_trees.py` get the trades without a separate path. Each Wikipedia trade row is a date, both teams' received assets, and a citation (usually the NHL.com or team story); only cited rows are used (4 of 1,548 aren't). Per row:
+- **Matched to ESPN** (same two teams, ESPN's date 10 days before to 3 after, a player's last name with one-letter typos allowed, or the same pick rounds): if the dates differ, the ESPN row's `tx_date`/`season` are corrected, `date_status = 'corrected'`, `source_url` = the citation; `espn_date` keeps ESPN's.
+- **Not in ESPN**: one row per missing team side, `source = 'wikipedia'`, a plain description written from the row ("Acquired Patrick Kane from the Chicago Blackhawks for Vili Saarijarvi."), and the assets as data in `assets` (with `trade_key` / `partner_tx_id`, which `trade_trees.py` pairs on exactly).
+- Every other ESPN row in `ESPN_EARLY_DATES` gets `date_status = 'espn_early'` (shown as unconfirmed in the app); no date is moved by a blanket offset.
+
+Measured on the 2026-11-06 data (projected with `scripts/backtest/trade_data_coverage.py`'s own `season_report`): 1,866 team sides added, 372 ESPN dates corrected (345 inside the early window: 335 by 5 days, 10 by 4), 6,713 rows flagged `espn_early`; trades 965 → ~1,564, trades with both halves 259 → ~1,526; §0 recall (NHL multi-team players with a trade row) 21–82% → 74–87% for every completed season. Most of what's left is waiver claims (135 of ~171 players across 2015-16..2025-26), which Wikipedia lists separately and this doesn't ingest.
+
+Every run re-reads every season (~13 requests, ~15 s): corrections survive `transactions.py` re-upserting ESPN's dates, and a row Wikipedia drops is deleted here.
+
+```bash
+python wiki_trades.py
+python wiki_trades.py --dry-run
+```
+
+Run order: after `transactions`, before `trade_trees`. Requires `docs/sql/session_nhl_transactions_sources.sql` (adds `source`, `source_url`, `date_status`, `assets` to `nhl_transactions` and `date_status`, `source_url` to `trades`).
+
 ### `draft_history.py` (2026-09)
 Every NHL draft pick since 1963 (13,152 as of 2026-09) from the NHL's own records API (`records.nhl.com/site/api/draft`) into `draft_pick_history`, including the chain of teams that owned each pick before it was used — the API's `teamPickHistory`. One request returns everything (`limit=-1`); `cayenneExp=draftYear>=N` narrows it. Distinct from the year-specific `draft_*_2026` tables `draft_ingest.py` maintains for draft day.
 
@@ -446,7 +466,7 @@ python draft_history.py --all --dry-run
 Requires `docs/sql/session_draft_pick_history.sql` to be run in Supabase first (creates the table + RLS policy).
 
 ### `trade_parse.py` / `trade_trees.py` (2026-09)
-Structured NHL trades and where every asset went next → `trades` + `trade_assets`, read by the Worker's `/trades/tree` route (tap a trade in the app's Transactions feed to see its tree). Built nightly from the stored `nhl_transactions` entries (ESPN free text — see `transactions.py` above).
+Structured NHL trades and where every asset went next → `trades` + `trade_assets`, read by the Worker's `/trades/tree` route (tap a trade in the app's Transactions feed to see its tree). Built nightly from the stored `nhl_transactions` entries (ESPN free text — see `transactions.py` above — plus the rows `wiki_trades.py` adds, whose `assets` are used as-is instead of parsed).
 
 **`trade_parse.py`** (pure, no I/O) turns one entry into trade clauses — `{partner, via, received, sent}` — and each asset list into players (name, position, rights), picks (year, round, conditional, ESPN's own pick number, original team), future considerations, cash, or `unknown` with its raw text (never guessed). Handles every form in the 2025-26 feed: "Acquired … from X in exchange for …", "Traded … to X", "Sent … in exchange for …", three-team trades, two trades in one entry, trades bundled with recalls, plural positions ("Ds A and B"), compound picks ("second and fourth-round picks in the 2027 and 2029 drafts", flagged `pairing_uncertain`), and ESPN's typos ("20206", "thrid", "Philadephia", "Acquire", a missing "from"). On the 267 stored trade entries: 282 clauses, 1 with no identifiable partner, 0 unrecognized assets, and 106 of 106 paired trades whose two halves agree on every player. The 2015–2024 backfill brought older phrasing — pick numbers before the noun or with no noun ("a 2015 third-round (No. 66)"), rounds sharing one "-round" ("their 2015 second- (No. 57), third- (No. 79) and seventh-round (No. 184) draft picks"), years spread across rounds, overall-only picks ("the 38th and 89th picks in this year's draft"), "Aquired"/"Received", several trades in one "Traded" sentence, and asides folded into the sentence ("and assigned him to Albany (AHL)", "as compensation for …"), which are dropped. On its 852 trade entries: 942 clauses, 11 with no partner, 74 of about 2,260 assets unrecognized (3%, labeled `unknown`), 615 of 786 picks resolved (143 not traced, 19 ambiguous, 9 not drafted yet).
 
@@ -461,7 +481,9 @@ python trade_trees.py              # rebuild from every stored trade entry
 python trade_trees.py --dry-run
 ```
 
-Run order: after `transactions` and `draft_history`. Requires `docs/sql/session_trade_trees.sql` to be run in Supabase first (creates both tables + RLS policies).
+Rows from `wiki_trades.py` pair as it recorded (`trade_key`, `partner_tx_id`), never by teams and dates alone. A side whose date is still `espn_early` may sit up to 6 days before its partner when pairing; the trade's `tx_date` comes from a sourced side, and `trades.date_status` is `espn_early` only when every side is. A conditional pick listed with alternatives resolves only within those years (`alt_years`).
+
+Run order: after `transactions`, `wiki_trades` and `draft_history`. Requires `docs/sql/session_trade_trees.sql` to be run in Supabase first (creates both tables + RLS policies).
 
 ### `nhl_contracts.py` (2026-10)
 Loads the open **nhl-contracts** dataset ([github.com/ehlersio/nhl-contracts](https://github.com/ehlersio/nhl-contracts), CC0) into Supabase: NHL player contracts (one row per contract), per-season cap hits and salary structure, no-trade/no-move clauses, and `gaps.json` (current roster players the dataset has no public figure for). The dataset is published on the repo's rolling GitHub release `contracts` (`releases/download/contracts/<file>.json`) and refreshed hourly by a Worker-dispatched workflow; this stage downloads `contracts.json`, `contract_seasons.json`, `clauses.json`, `gaps.json` and `timestamp.json` once a night. Tiers A–C are official sources (club release, NHL.com, ESPN wire); D (PuckPedia public posts, r/hockey quotes of insiders) and E (CapFriendly pages archived by the Internet Archive, to July 2024) are reported. Coverage of current rosters at launch: 92% of players have a contract row, 82% a cap hit, 63% per-season structure, 34% clauses.
@@ -1339,7 +1361,7 @@ Confirmed live via `feed=modulekit&view=seasons`, 2026-08-30. ECHL's playoffs-se
 | `player_injuries` | (2026-09) NHL injury status from ESPN's injuries feed, current state only (full refresh each run), including body part/side/detail/return date — see `injuries.py` above |
 | `player_injury_history` | (2026-09) Daily snapshots of `player_injuries`, one row per `(snapshot_date, team, player_name)` — see `injuries.py` above |
 | `game_scratches` | (2026-09) One row per scratched player per game, classified healthy/injured/suspended/unknown — see `scratches.py` above |
-| `nhl_transactions` | (2026-09) ESPN NHL transactions feed, one row per ESPN entry with keyword categories + trade counterparties — see `transactions.py` above |
+| `nhl_transactions` | (2026-09) ESPN NHL transactions feed, one row per ESPN entry with keyword categories + trade counterparties — see `transactions.py` above; plus (2026-11) `source = 'wikipedia'` rows for trades ESPN misses, and `date_status` / `source_url` for corrected or unconfirmed dates — see `wiki_trades.py` |
 | `draft_pick_history` | (2026-09) Every NHL draft pick since 1963 with its chain of owners (`pick_chain`), one row per `(draft_year, overall_pick)` — see `draft_history.py` above |
 | `trades` | (2026-09) One row per NHL trade, paired from `nhl_transactions` entries — see `trade_trees.py` above |
 | `trade_assets` | (2026-09) Every player / pick / consideration in each trade, picks resolved to the drafted player, `next_trade_id` linking to where it went next — see `trade_trees.py` above |
@@ -1556,7 +1578,7 @@ True RAPM via ridge regression (alpha=2500):
 - **PWHL Corsi/Fenwick:** No missed shots in HockeyTech — FF% is SOG-based proxy only.
 - **RAPM linemate collinearity:** Documented in `validate_rapm.py`.
 - **Contracts / cap space:** contract figures come from the open nhl-contracts dataset (`nhl_contracts.py`), which covers 92% of current roster players (82% with a cap hit) and has no retained salary, buyouts or LTIR, so a team's cap space cannot be computed; the same contract can also appear under an id-keyed and a name-keyed row. See `nhl_contracts.py` above.
-- **Transactions/Injuries:** the NHL API has neither; both come from ESPN's unofficial site API (`injuries.py`, `transactions.py`), which has no player ids (name matching), can carry stale injury entries, and blocks custom User-Agents. See those modules above.
+- **Transactions/Injuries:** the NHL API has neither; both come from ESPN's unofficial site API (`injuries.py`, `transactions.py`), which has no player ids (name matching), can carry stale injury entries, and blocks custom User-Agents. ESPN's trade coverage is incomplete and its 2021-01..2024-06 dates run ~5 days early; `wiki_trades.py` fills trades and corrects their dates from Wikipedia's cited lists, but non-trade moves in that window keep ESPN's date (flagged `espn_early`), and waiver claims missing from ESPN aren't filled. See those modules above.
 - **Reddit ingest:** removed (Session 61) rather than fixed — GH Actions IPs blocked by Reddit, new app registration blocked by Responsible Builder Policy, and every 30-min cron run was pure wasted GH Actions minutes with zero working output. Re-confirmed live (Session: news ingestion investigation) with a real GH Actions runner — still a 403 bot-block page. The per-team `TEAM_NEWS_SOURCES` reddit-* entries and the now-permanently-no-op `/reddit/ingest` route (both in `eyewall-poller`) were removed in the same session; 25 teams had reddit as their *only* team-specific source, and 21 of those 25 got a real replacement blog instead (see `sbnation-ingest.yml`'s comment for the list). MIN/STL/SEA/UTA still have no team-specific blog source at all (28 of 32 teams now do). Revisit Reddit only if a workaround surfaces; not planned for October 2026.
 - **PWHL WAR/RAPM:** not built. HockeyTech PBP has no `player_change` events (checked June 2026), but `modulekit&view=gameshifts` returned populated shifts for a PWHL control game during the 2026-08 AHL/ECHL investigation (next bullet). Nothing ingests that view yet; check its coverage across PWHL seasons before scoping shift-based RAPM.
 - **AHL/ECHL WAR/RAPM/Corsi: not buildable, a harder wall than PWHL's own shift-data gap, no revisit date set.** Confirmed live (2026-08-28/29: 4 AHL games across 3 seasons including the 2025 Calder Cup Finals G5, and 5 ECHL games) that `modulekit&view=gameshifts` returns `{"home":[],"visitor":[]}` for every real game tested — verified against a real PWHL control game (which DOES return populated shifts through the identical request shape), so this isn't a request-shape mistake on this pipeline's part. AHL/ECHL's PBP also has no `hit`/`blocked_shot`/`faceoff` event types at all (only `goal`/`shot`/`penalty`/`goalie_change`/`penaltyshot` confirmed present across 16+ games each) — the box-score schema even carries `faceoff_wins`/`faceoff_attempts`/`hits` fields per player, but they're hardcoded `"0"` in every game checked for both leagues, confirming it's genuinely not charted, not a PBP-only omission. Consequence: not even attempts-based Corsi/Fenwick is computable for either league, only shots-on-goal + goals — parity with a plain box score, not an advanced stat. Unlike PWHL's shift gap, there's no known future HockeyTech data source that would unblock this, so no revisit date is set.
