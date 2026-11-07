@@ -221,8 +221,8 @@ def season_report(
             clause["with_row"] += any(clause_covers(cl, year) for cl in rows)
     r["expiring"] = dict(expiring)
     r["clauses"] = dict(clause)
-    espn_traded = {a["player_id"] for a in players if a.get("player_id") is not None}
-    r["label_recall"] = {"multi_team": len(multi_team), "in_espn": len(multi_team & espn_traded)}
+    traded = {a["player_id"] for a in players if a.get("player_id") is not None}
+    r["label_recall"] = {"multi_team": len(multi_team), "with_trade": len(multi_team & traded)}
     pop = r["population"]
     r["population_coverage"] = (
         (pop.get("n", 0) - pop.get("missing", 0)) / pop["n"] if pop.get("n") else 0
@@ -315,26 +315,29 @@ def render(results, expiry, meta) -> str:
         f"Scope: `eyewall/trade-likelihood-scope-2026-11-06.md` §6 Phase 0.",
         "",
         "Deadline = busiest trade day dated Jan 1 - Apr 30 (inferred from `trades`, not a "
-        "published date; see §0 for ESPN's date shift). Label window = Jan 1 → deadline. "
+        "published date; trades take wiki_trades.py's corrected dates where ESPN's ran early). "
+        "Label window = Jan 1 → deadline. "
         "Usable trade assets: "
         "player rows with a `player_id`, not rights-only, trade not `pairing_uncertain`. "
         f"Population: skaters ≥{MIN_GP_SKATER} GP, goalies ≥{MIN_GP_GOALIE} GP (season "
         f"totals). Training bar: population contract coverage ≥{COVERAGE_BAR:.0%}.",
         "",
-        "## 0. Label source check: ESPN trades vs the NHL's own multi-team players",
+        "## 0. Label source check: stored trades vs the NHL's own multi-team players",
         "",
         "Players the NHL season summary lists with two or more teams (`teamAbbrevs`) vs "
         "those with any player row in `trade_assets` that season. Multi-team players also "
-        "include waiver claims, so this recall is a floor for trades.",
+        "include waiver claims, so this recall is a floor for trades. `trade_assets` holds ESPN's "
+        "trades plus those `wiki_trades.py` adds from Wikipedia's cited lists (from 2026-11-07; "
+        "ESPN alone covered 21-82%).",
         "",
-        "| Season | Multi-team players (NHL) | With an ESPN trade row | Recall |",
+        "| Season | Multi-team players (NHL) | With a trade row | Recall |",
         "|---|---:|---:|---:|",
     ]
     for r in results:
         lr = r["label_recall"]
         L.append(
-            f"| {r['season']} | {lr['multi_team']} | {lr['in_espn']} "
-            f"| {pct(lr['in_espn'], lr['multi_team'])} |"
+            f"| {r['season']} | {lr['multi_team']} | {lr['with_trade']} "
+            f"| {pct(lr['with_trade'], lr['multi_team'])} |"
         )
     L += [
         "",

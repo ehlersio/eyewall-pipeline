@@ -131,8 +131,8 @@ def test_season_report_counts_window_labels_and_coverage():
     )
 
     assert r["deadline"] == "2018-02-26"
-    # 9 changed teams per the NHL but has no ESPN trade row
-    assert r["label_recall"] == {"multi_team": 3, "in_espn": 2}
+    # 9 changed teams per the NHL but has no trade row
+    assert r["label_recall"] == {"multi_team": 3, "with_trade": 2}
     assert (r["trades"], r["window_trades"]) == (3, 2)
     assert r["window_player_assets"] == 4
     assert (r["rights_only"], r["no_player_id"], r["pairing_uncertain"]) == (1, 1, 0)
