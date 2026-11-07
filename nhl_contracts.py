@@ -96,11 +96,18 @@ log = get_logger(__name__)
 
 RELEASE_BASE = "https://github.com/ehlersio/nhl-contracts/releases/download/contracts"
 
-# NHL/NHLPA figures for seasons the league has announced. The app's cap tab
-# used the same three numbers for 2026-27. Later seasons are unknown, not
-# guessed: add a season here when the NHL publishes it.
+# NHL/NHLPA figures for seasons the league has announced; seasons it hasn't
+# are unknown, not guessed. Ceiling and floor: the NHL/NHLPA payroll ranges
+# of 2025-01-31 (nhl.com, "NHL, NHLPA announce team payroll ranges for next 3
+# seasons through 2027-28"); 2026-27's were confirmed as final on 2026-05-06.
+# 2027-28's carry the release's "subject to potential minor adjustments (up or
+# down)": replace them when the league sets that season's cap (usually June).
+# Minimum salary: the 2025 CBA extension MOU ($850K in 2026-27, $900K in
+# 2027-28). Every run writes these, skipped runs included, so an edit here
+# lands on the next run.
 CAP_LIMITS = {
-    "2026-27": {"cap_ceiling": 104_000_000, "cap_floor": 77_000_000, "min_salary": 850_000},
+    "2026-27": {"cap_ceiling": 104_000_000, "cap_floor": 76_900_000, "min_salary": 850_000},
+    "2027-28": {"cap_ceiling": 113_500_000, "cap_floor": 83_900_000, "min_salary": 900_000},
 }
 
 # Dataset team codes that are not the app's tri-codes.
@@ -473,10 +480,7 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
         row["dataset_updated_at"] = stamp
         gap_rows[row["player_id"]] = row
 
-    cap_rows = [
-        {"season": season, **limits, "updated_at": datetime.now(UTC).isoformat()}
-        for season, limits in sorted(CAP_LIMITS.items())
-    ]
+    cap_rows = cap_limit_rows()
 
     dead_cap_rows = {}
     for r in dataset.get("dead_cap") or []:
@@ -516,6 +520,15 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             "n_expiry_unknown": sum(1 for r in contract_rows if r["expiry_type"] is None),
         },
     }
+
+
+def cap_limit_rows() -> list[dict]:
+    """nhl_cap_limits rows from CAP_LIMITS, oldest season first."""
+    now = datetime.now(UTC).isoformat()
+    return [
+        {"season": season, **limits, "updated_at": now}
+        for season, limits in sorted(CAP_LIMITS.items())
+    ]
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -592,6 +605,9 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
     last = last_load(sb) if sb is not None else None
     if not force and should_skip(last, updated_at, current):
         log.info(f"dataset unchanged since last load ({updated_at}); skipping")
+        # CAP_LIMITS lives in this file, not the release: keep the table in
+        # step with it even when the dataset hasn't moved.
+        upsert(sb, "nhl_cap_limits", cap_limit_rows(), CONFLICT_KEYS["nhl_cap_limits"])
         return {"skipped": True, "dataset_updated_at": updated_at}
 
     dataset = fetch_dataset()

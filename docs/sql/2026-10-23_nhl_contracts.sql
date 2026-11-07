@@ -59,9 +59,10 @@
 --   status  'has_contract' | 'older_rows_only' | 'in_raw_store' | 'absent'
 --   *_hint  the dataset's latest matching ESPN / NHL.com / PuckPedia text
 --
--- nhl_cap_limits: one row per season the NHL has announced (2026-27 only
--- today: $104M ceiling, $77M floor, $850K minimum). nhl_contracts.py
--- upserts CAP_LIMITS each load; later seasons are added when published.
+-- nhl_cap_limits: one row per season the NHL has announced (2026-27:
+-- $104M ceiling, $76.9M floor, $850K minimum; 2027-28 added 2026-11-07).
+-- nhl_contracts.py upserts CAP_LIMITS every run; later seasons are added
+-- when published.
 --
 -- nhl_contracts_loads: one row per successful load (append-only). The
 -- pipeline reads the latest row and skips when the dataset's updated_at and

@@ -329,14 +329,22 @@ class TestBuildRows:
         built = _built()
         gaps = {r["player_id"]: r for r in built["nhl_contract_gaps"]}
         assert gaps[8482093]["gap"] == "no_money" and gaps[8482093]["team"] == "CAR"
+        stamp = built["nhl_cap_limits"][0]["updated_at"]
         assert built["nhl_cap_limits"] == [
             {
                 "season": "2026-27",
                 "cap_ceiling": 104_000_000,
-                "cap_floor": 77_000_000,
+                "cap_floor": 76_900_000,
                 "min_salary": 850_000,
-                "updated_at": built["nhl_cap_limits"][0]["updated_at"],
-            }
+                "updated_at": stamp,
+            },
+            {
+                "season": "2027-28",
+                "cap_ceiling": 113_500_000,
+                "cap_floor": 83_900_000,
+                "min_salary": 900_000,
+                "updated_at": stamp,
+            },
         ]
 
 
@@ -352,7 +360,12 @@ class TestRun:
         result = nc.run(today=TODAY)
         assert result["skipped"] is True
         assert wired["fetched"] == ["timestamp.json"]
-        assert wired["sb"].upserts == {}
+        # only the cap limits, which live in nhl_contracts.py, not the release
+        assert set(wired["sb"].upserts) == {"nhl_cap_limits"}
+        assert [r["season"] for r in wired["sb"].upserts["nhl_cap_limits"]] == [
+            "2026-27",
+            "2027-28",
+        ]
 
     def test_new_updated_at_loads(self, wired):
         wired["sb"].loads = [
