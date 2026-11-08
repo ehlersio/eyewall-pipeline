@@ -189,7 +189,7 @@ def build_rows(year, timelines, bios, standings_by_date, index, clauses_by_key, 
             contract, _ = index.find(pid, info["name"], year)
             feats = tc.feature_row(
                 info, before, team, standings, contract,
-                clauses_by_key.get(contract["contract_key"], []) if contract else [],
+                tc.clauses_for(index, clauses_by_key, pid, info["name"], year) if contract else [],
                 birth, year, as_of, deadline,
             )  # fmt: skip
             if feats is None:

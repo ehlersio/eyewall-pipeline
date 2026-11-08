@@ -294,7 +294,47 @@ def clause_for(clauses, season_start):
     return min(covering, key=lambda c: order.get(c.get("kind"), 9))
 
 
-def build_players(season, contracts, gp, ratings, shoots, clauses_by_key, stamp,
+def _start_year(label):
+    return int(label[:4]) if label else None
+
+
+class ClauseIndex:
+    """Clause rows looked up by player, over every contract of his covering
+    the season. The nhl-contracts dataset often holds one deal twice, an
+    id-keyed row and a name-keyed CapFriendly row (`8476921|CAR|2024-07` and
+    `jordan martinook|CAR|2024-07`), and a clause can be filed under either;
+    the Worker's /contracts/players names only one of them. clauses:
+    nhl_contract_clauses rows; contracts: nhl_contracts rows (contract_key,
+    player_id, start_season, end_season). A contract that doesn't cover the
+    season contributes nothing, so an expired deal's clause never carries
+    over."""
+
+    def __init__(self, clauses=(), contracts=()):
+        self.by_key = defaultdict(list)
+        for c in clauses:
+            self.by_key[c["contract_key"]].append(c)
+        self.spans = defaultdict(list)
+        for c in contracts:
+            if c.get("player_id") is not None:
+                span = (_start_year(c.get("start_season")), _start_year(c.get("end_season")))
+                self.spans[int(c["player_id"])].append((c["contract_key"], *span))
+
+    def rows_for(self, player_id, season_start, contract_key=None):
+        """Clause rows of `contract_key` (the contract the caller picked) and
+        of every other contract of the player covering season_start."""
+        keys = {contract_key} if contract_key else set()
+        if player_id is not None:
+            keys |= {
+                k for k, s, e in self.spans.get(int(player_id), [])
+                if s is not None and e is not None and s <= season_start <= e
+            }  # fmt: skip
+        return [c for k in sorted(keys) for c in self.by_key.get(k, [])]
+
+    def clause(self, player_id, season_start, contract_key=None):
+        return clause_for(self.rows_for(player_id, season_start, contract_key), season_start)
+
+
+def build_players(season, contracts, gp, ratings, shoots, clauses, stamp,
                   phase="in_season"):  # fmt: skip
     """Population rows. contracts: the Worker's /contracts/players `players`
     for `season`. gp: {player_id: (games_played, is_goalie)} (offseason: last
@@ -329,7 +369,7 @@ def build_players(season, contracts, gp, ratings, shoots, clauses_by_key, stamp,
         prev = out.get(pid)
         if prev and (prev["cap_hit"] is not None or c.get("capHit") is None):
             continue  # keep the row with a cap hit when the payload has two
-        clause = clause_for(clauses_by_key.get(c.get("contractKey"), []), season_start)
+        clause = clauses.clause(pid, season_start, c.get("contractKey"))
         out[pid] = {
             "player_id": pid,
             "season": season,
@@ -356,7 +396,7 @@ def build_players(season, contracts, gp, ratings, shoots, clauses_by_key, stamp,
 
 
 def build_rights_players(fit_season, contracts_now, next_ids, gp, ratings, shoots,
-                         clauses_by_key, stamp):  # fmt: skip
+                         clauses, stamp):  # fmt: skip
     """Offseason, until June 30: pending UFAs and RFAs -- his contract ends
     this season (the Worker's /contracts/players for the live season), he's
     on an NHL roster and has no contract for the fit season (`next_ids`).
@@ -366,7 +406,7 @@ def build_rights_players(fit_season, contracts_now, next_ids, gp, ratings, shoot
         c for c in contracts_now
         if c.get("yearsLeft") == 0 and c.get("playerId") not in next_ids
     ]  # fmt: skip
-    rows = build_players(current, pending, gp, ratings, shoots, clauses_by_key, stamp)
+    rows = build_players(current, pending, gp, ratings, shoots, clauses, stamp)
     for r in rows:
         r.update(season=fit_season, phase="offseason", rights=True, cap_hit=None,
                  years_left=None, rental=False)  # fmt: skip
@@ -465,15 +505,19 @@ def shoots_and_clauses(client):
         p["id"]: p.get("shoots")
         for p in select_all(lambda: client.table("players").select("id,shoots"), "id")
     }
-    clauses_by_key = defaultdict(list)
-    for c in select_all(
+    clauses = select_all(
         lambda: client.table("nhl_contract_clauses").select(
             "contract_key,kind,season_from,season_to,list_size"
         ),
         "id",
-    ):
-        clauses_by_key[c["contract_key"]].append(c)
-    return shoots, clauses_by_key
+    )
+    contracts = select_all(
+        lambda: client.table("nhl_contracts").select(
+            "contract_key,player_id,start_season,end_season"
+        ),
+        "contract_key",
+    )
+    return shoots, ClauseIndex(clauses, contracts)
 
 
 def contract_routes(season):
@@ -504,7 +548,7 @@ def run(season=NHL_SEASON, dry_run=False, today=None):
     contracts, summary = contract_routes(fit_season)
     caps = {t["team"]: t for t in summary.get("teams") or []}
     used = retention_used(client, fit_season)
-    shoots, clauses_by_key = shoots_and_clauses(client)
+    shoots, clauses = shoots_and_clauses(client)
     rating_season = fit_season if phase == "in_season" else cal.prev_season(fit_season)
     ratings, gp = ratings_for(client, rating_season)
     contract_players = contracts.get("players") or []
@@ -513,9 +557,7 @@ def run(season=NHL_SEASON, dry_run=False, today=None):
     if phase == "in_season":
         rows_needs = needs
         odds = latest_odds(client, season)
-        players = build_players(
-            fit_season, contract_players, gp, ratings, shoots, clauses_by_key, stamp
-        )
+        players = build_players(fit_season, contract_players, gp, ratings, shoots, clauses, stamp)
     else:
         rows_needs = tn.next_season_needs(client, fit_season, contract_players, stamp)
         odds = latest_odds(client, fit_season)
@@ -526,7 +568,7 @@ def run(season=NHL_SEASON, dry_run=False, today=None):
         cap_season = fit_season
         ceiling_known = bool((summary.get("capLimits") or {}).get("ceiling"))
         players = build_players(fit_season, contract_players, gp, ratings, shoots,
-                                clauses_by_key, stamp, phase="offseason")  # fmt: skip
+                                clauses, stamp, phase="offseason")  # fmt: skip
         if cal.rights_open(today, fit_season):
             now = worker_json(f"/contracts/players?season={cal.season_label(rating_season)}")
             if now.get("unavailable"):
@@ -538,7 +580,7 @@ def run(season=NHL_SEASON, dry_run=False, today=None):
             players += [
                 r for r in build_rights_players(
                     fit_season, now.get("players") or [], next_ids, gp, ratings, shoots,
-                    clauses_by_key, stamp,
+                    clauses, stamp,
                 )
                 if r["player_id"] not in in_pop
             ]  # fmt: skip

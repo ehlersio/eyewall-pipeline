@@ -226,3 +226,54 @@ def test_window_is_jan_1_through_the_deadline():
     assert tc.in_window(date(2027, 3, 1), 2026)
     assert not tc.in_window(date(2027, 3, 2), 2026)
     assert not tc.in_window(date(2028, 1, 15), 2027)  # no deadline on record yet
+
+
+def test_clauses_for_reads_every_contract_covering_the_season():
+    # Real release rows (2026-11-08): Martinook's 2024 deal under two keys,
+    # the clause under the name-keyed one; find() picks by cap hit / sources.
+    contracts = [
+        contract("8476921|CAR|2021-07", start="2021-22", end="2023-24", cap=1_800_000,
+                 pid=8476921),
+        contract("8476921|CAR|2024-07", start="2024-25", end="2026-27", cap=3_050_000,
+                 pid=8476921),
+        contract("jordan martinook|CAR|2024-07", start="2024-25", end="2026-27", cap=None,
+                 pid=8476921),
+    ]  # fmt: skip
+    clauses = {
+        "jordan martinook|CAR|2024-07": [
+            {"kind": "M-NTC", "season_from": "2024-25", "season_to": "2026-27", "list_size": 10}
+        ]
+    }
+    index = tc.ContractIndex(contracts, set())
+    assert index.find(8476921, "Jordan Martinook", 2026)[0]["contract_key"] == "8476921|CAR|2024-07"
+    got = tc.clauses_for(index, clauses, 8476921, "Jordan Martinook", 2026)
+    assert [c["kind"] for c in got] == ["M-NTC"]
+    assert tc.clauses_for(index, clauses, 8476921, "Jordan Martinook", 2023) == []
+
+
+def test_clauses_for_skips_a_contract_not_covering_the_season():
+    # Luke Schenn: the 2026 VAN deal's NMC has no season range.
+    contracts = [
+        contract("8474568|NSH|2023-06", start="2023-24", end="2025-26", pid=8474568),
+        contract("8474568|VAN|2026-07", start="2026-27", end="2026-27", pid=8474568),
+    ]
+    clauses = {"8474568|VAN|2026-07": [{"kind": "NMC", "season_from": None, "season_to": None}]}
+    index = tc.ContractIndex(contracts, set())
+    assert tc.clauses_for(index, clauses, 8474568, "Luke Schenn", 2025) == []
+    assert [c["kind"] for c in tc.clauses_for(index, clauses, 8474568, "Luke Schenn", 2026)] == [
+        "NMC"
+    ]
+
+
+def test_clauses_for_includes_a_name_keyed_row_without_a_player_id():
+    contracts = [
+        contract("8476921|CAR|2024-07", pid=8476921),
+        {**contract("jordan martinook|CAR|2024-07", pid=None), "player_name": "Jordan Martinook"},
+    ]
+    clauses = {"jordan martinook|CAR|2024-07": [{"kind": "M-NTC", "season_from": "2024-25",
+                                                 "season_to": "2026-27"}]}  # fmt: skip
+    index = tc.ContractIndex(contracts, {tc.normalize_name("Jordan Martinook")})
+    got = tc.clauses_for(index, clauses, 8476921, "Jordan Martinook", 2026)
+    assert [c["kind"] for c in got] == ["M-NTC"]
+    other = tc.ContractIndex(contracts, set())  # a name two players share: not his
+    assert tc.clauses_for(other, clauses, 8476921, "Jordan Martinook", 2026) == []
