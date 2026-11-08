@@ -117,6 +117,11 @@ TEAM_ALIASES = {"UTAH": "UTA"}
 TIER_RANK = {t: i for i, t in enumerate("ABCDE")}
 
 UFA_AGE = 27  # 27 or older on June 30 of the expiry year -> Group 3 UFA
+# A no-trade/no-move clause only takes effect in a player's UFA years (CBA
+# 11.8): 27 by June 30, or 7 accrued seasons. Accrued seasons start at 18, so
+# a player under 25 on the June 30 before a season can't have 7 yet and can't
+# have a clause in effect that season.
+CLAUSE_MIN_AGE = 25
 
 CONTRACT_COLUMNS = (
     "contract_key",
@@ -189,6 +194,7 @@ GAP_COLUMNS = (
     "bsky_hint",
     "checked_season",
 )
+CLAUSE_STATUS_COLUMNS = ("contract_key", "season", "status", "basis", "source_ids")
 DEAD_CAP_COLUMNS = (
     "team",
     "kind",
@@ -231,6 +237,15 @@ def fetch_dataset() -> dict:
     except FetchError as e:
         log.warning(f"dead_cap.json not in the release yet ({e}); nhl_dead_cap left unchanged")
         out["dead_cap"] = None
+    # clause_status.json joined the release on 2026-11-07 (nhl-contracts #10).
+    try:
+        out["clause_status"] = fetch_file("clause_status.json")
+    except FetchError as e:
+        log.warning(
+            f"clause_status.json not in the release yet ({e}); "
+            "nhl_contract_clause_status left unchanged"
+        )
+        out["clause_status"] = None
     return out
 
 
@@ -320,6 +335,26 @@ def expiry_day(end_season) -> date | None:
 def age_on(birth_date: str, day: date) -> int:
     b = date.fromisoformat(birth_date[:10])
     return day.year - b.year - ((day.month, day.day) < (b.month, b.day))
+
+
+def clause_ineligible(birth_date, season) -> bool:
+    """True when the player is under CLAUSE_MIN_AGE on the June 30 before
+    `season` ('YYYY-YY'), so no clause can be in effect that season."""
+    y = season_start_year(season)
+    if not birth_date or y is None:
+        return False
+    return age_on(birth_date, date(y, 6, 30)) < CLAUSE_MIN_AGE
+
+
+def build_clause_status_row(r: dict, player_id: int, birth_date, stamp: str) -> dict:
+    """The dataset's row, with the CBA age rule applied to the seasons it
+    left unsettled ('unknown', 'none_likely'). A stated clause is kept even
+    if the rule says it can't be in effect: the source wins."""
+    row = {c: _clean(r.get(c)) for c in CLAUSE_STATUS_COLUMNS}
+    if row["status"] in ("unknown", "none_likely") and clause_ineligible(birth_date, row["season"]):
+        row.update({"status": "none", "basis": "ineligible", "source_ids": None})
+    row.update({"player_id": player_id, "dataset_updated_at": stamp})
+    return row
 
 
 def normalize_expiry_status(status) -> str | None:
@@ -498,6 +533,15 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
         row["dataset_updated_at"] = stamp
         dead_cap_rows[(row["team"], row["kind"], row["player_key"], row["season"])] = row
 
+    status_rows = {}
+    for r in dataset.get("clause_status") or []:
+        p = parent(r)
+        if p is None or not r.get("season") or not r.get("status"):
+            continue
+        pid = int(p["player_id"])
+        row = build_clause_status_row(r, pid, birth_dates.get(pid), stamp)
+        status_rows[(row["contract_key"], row["season"])] = row
+
     return {
         "nhl_contracts": contract_rows,
         "nhl_contract_seasons": list(season_rows.values()),
@@ -509,6 +553,11 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             if dataset.get("dead_cap") is not None
             else {}
         ),
+        **(
+            {"nhl_contract_clause_status": list(status_rows.values())}
+            if dataset.get("clause_status") is not None
+            else {}
+        ),
         "stats": {
             "n_raw_contracts": len(contracts),
             "n_dropped_no_player_id": len(contracts) - len(with_id),
@@ -516,6 +565,9 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             "n_duplicate_clause_keys": dup_clauses,
             "n_current": sum(1 for r in contract_rows if r["is_current"]),
             "n_bought_out": sum(1 for r in contract_rows if r["bought_out"]),
+            "n_clause_ineligible": sum(
+                1 for r in status_rows.values() if r["basis"] == "ineligible"
+            ),
             "n_expiry_derived": sum(1 for r in contract_rows if r["expiry_type_derived"]),
             "n_expiry_unknown": sum(1 for r in contract_rows if r["expiry_type"] is None),
         },
@@ -579,6 +631,7 @@ CONFLICT_KEYS = {
     "nhl_contract_gaps": "player_id",
     "nhl_cap_limits": "season",
     "nhl_dead_cap": "team,kind,player_key,season",
+    "nhl_contract_clause_status": "contract_key,season",
 }
 MIRRORED_TABLES = (
     "nhl_contracts",
@@ -586,6 +639,7 @@ MIRRORED_TABLES = (
     "nhl_contract_clauses",
     "nhl_contract_gaps",
     "nhl_dead_cap",
+    "nhl_contract_clause_status",
 )
 
 
@@ -643,8 +697,8 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
     for table, rows in built.items():
         upsert(sb, table, rows, CONFLICT_KEYS[table])
     for table in MIRRORED_TABLES:
-        if table == "nhl_dead_cap" and "nhl_dead_cap" not in built:
-            continue  # the release had no dead_cap.json: keep the last load's rows
+        if table in ("nhl_dead_cap", "nhl_contract_clause_status") and table not in built:
+            continue  # the release had no file for it: keep the last load's rows
         delete_stale(sb, table, updated_at)
 
     upsert(

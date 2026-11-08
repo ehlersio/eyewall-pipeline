@@ -30,6 +30,12 @@ counterparty), Campbell's EDM buyout seasons (tier E), Vlasic's SJS buyout
 (tier D, no player_id -> name key), Petry retained by MTL (tier E), one
 charge the dataset could not attribute to a team (skipped) and one
 without a player_id.
+
+clause_status.json (nhl-contracts #10, real rows from a local normalize of
+the 2026-11-07 raw store, cut to the contracts above): COL's clause seasons,
+Ehrhoff's blank CapFriendly cells (dropped with him, no player_id), NJD
+8481721's PuckPedia breakdown (none_likely; 25 on 2026-06-30), and CAR
+8482809's unknown seasons (born 2003-08-03: under 25 through 2028-29).
 """
 
 import json
@@ -380,6 +386,7 @@ class TestRun:
             "nhl_dead_cap",
             "nhl_contract_gaps",
             "nhl_cap_limits",
+            "nhl_contract_clause_status",
             "nhl_contracts_loads",
         }
 
@@ -414,6 +421,7 @@ class TestRun:
             "nhl_contract_gaps": "player_id",
             "nhl_cap_limits": "season",
             "nhl_dead_cap": "team,kind,player_key,season",
+            "nhl_contract_clause_status": "contract_key,season",
             "nhl_contracts_loads": "dataset_updated_at",
         }
         assert sb.deletes == [
@@ -422,6 +430,7 @@ class TestRun:
             ("nhl_contract_clauses", ("dataset_updated_at", STAMP)),
             ("nhl_contract_gaps", ("dataset_updated_at", STAMP)),
             ("nhl_dead_cap", ("dataset_updated_at", STAMP)),
+            ("nhl_contract_clause_status", ("dataset_updated_at", STAMP)),
         ]
         [load] = sb.upserts["nhl_contracts_loads"]
         assert load["dataset_updated_at"] == STAMP and load["season"] == "2026-27"
@@ -526,3 +535,80 @@ class TestDeadCap:
         stamp = _fixture("timestamp.json")["updated_at"]
         assert ("nhl_dead_cap", ("dataset_updated_at", stamp)) in sb.deletes
         assert sb.upserts["nhl_contracts_loads"][0]["n_dead_cap"] == out["nhl_dead_cap"]
+
+
+# ── clause status ─────────────────────────────────────────────────────────────
+
+
+class TestClauseStatus:
+    def _rows(self, birth_dates=None):
+        dataset = {
+            name: _fixture(f"{name}.json")
+            for name in ("timestamp", "contracts", "contract_seasons", "clauses", "gaps")
+        }
+        dataset["clause_status"] = _fixture("clause_status.json")
+        bd = {8482809: "2003-08-03", 8481721: "2001-03-15"} if birth_dates is None else birth_dates
+        rows = nc.build_rows(dataset, bd, "2026-27")["nhl_contract_clause_status"]
+        return {(r["contract_key"], r["season"]): r for r in rows}
+
+    def test_under_25_on_june_30_before_the_season_is_ineligible(self):
+        rows = self._rows()
+        young = "8482809|CAR|2025-07"
+        for season in ("2026-27", "2027-28", "2028-29"):  # 22, 23, 24 on June 30
+            assert (rows[(young, season)]["status"], rows[(young, season)]["basis"]) == (
+                "none",
+                "ineligible",
+            )
+            assert rows[(young, season)]["source_ids"] is None
+        assert rows[(young, "2029-30")]["status"] == "unknown"  # 25 on 2029-06-30
+        # 25 on 2026-06-30: the PuckPedia inference stands
+        assert rows[("8481721|NJD|2026-06", "2026-27")]["status"] == "none_likely"
+
+    def test_stated_rows_pass_through_and_dropped_contracts_take_their_rows(self):
+        rows = self._rows()
+        col = rows[("8478038|COL|2023-10", "2026-27")]
+        assert (col["status"], col["basis"], col["player_id"]) == ("clause", "source", 8478038)
+        assert col["dataset_updated_at"] == _fixture("timestamp.json")["updated_at"]
+        assert not any(k.startswith("christian ehrhoff") for k, _ in rows)  # no player_id
+
+    def test_no_birth_date_leaves_the_dataset_status(self):
+        rows = self._rows(birth_dates={})
+        assert rows[("8482809|CAR|2025-07", "2026-27")]["status"] == "unknown"
+
+    def test_a_stated_clause_is_kept_even_for_a_young_player(self):
+        row = nc.build_clause_status_row(
+            {"contract_key": "k", "season": "2026-27", "status": "clause", "basis": "source"},
+            1,
+            "2005-01-01",
+            "stamp",
+        )
+        assert row["status"] == "clause"
+
+    def test_clause_ineligible_boundary(self):
+        assert nc.clause_ineligible("2001-07-01", "2026-27")  # 24 on 2026-06-30
+        assert not nc.clause_ineligible("2001-06-30", "2026-27")  # 25 that day
+        assert not nc.clause_ineligible(None, "2026-27")
+
+    def test_run_upserts_and_prunes_clause_status(self, wired):
+        out = nc.run(today=TODAY)
+        sb = wired["sb"]
+        assert (
+            out["nhl_contract_clause_status"] == len(sb.upserts["nhl_contract_clause_status"]) > 0
+        )
+        assert sb.conflicts["nhl_contract_clause_status"] == "contract_key,season"
+        stamp = _fixture("timestamp.json")["updated_at"]
+        assert ("nhl_contract_clause_status", ("dataset_updated_at", stamp)) in sb.deletes
+
+    def test_a_release_without_clause_status_json_leaves_the_table_alone(self, wired, monkeypatch):
+        real = nc.fetch_file
+
+        def fetch_file(name):
+            if name == "clause_status.json":
+                raise FetchError("404")
+            return real(name)
+
+        monkeypatch.setattr(nc, "fetch_file", fetch_file)
+        nc.run(today=TODAY)
+        sb = wired["sb"]
+        assert "nhl_contract_clause_status" not in sb.upserts
+        assert all(t != "nhl_contract_clause_status" for t, _ in sb.deletes)
