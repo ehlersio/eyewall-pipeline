@@ -623,3 +623,27 @@ class TestPost:
         week, through = week_of(data)
         _, _, rec_facts = self.run(cp.league_facts(data, week, through), published=())
         assert not rec_facts.called
+
+
+class TestUnfinishedGames:
+    """HockeyTech freshness: only games that will still turn Final block."""
+
+    DAY = date(2026, 11, 7)
+
+    def row(self, gid, state, day="2026-11-07"):
+        return {"game_id": gid, "game_date": day, "game_state": state}
+
+    def test_postponed_and_cancelled_dont_block(self):
+        rows = [
+            self.row(1, "Final"),
+            self.row(2, "Postponed"),
+            self.row(3, "Cancelled"),
+            self.row(4, "canceled"),
+            self.row(5, "7:00PM"),
+            self.row(6, "Live"),
+            self.row(7, "3rd Period", day="2026-11-06"),
+        ]
+        assert cp.unfinished_games(rows, self.DAY) == [5, 6]
+
+    def test_empty_state_still_blocks(self):
+        assert cp.unfinished_games([self.row(8, None), self.row(9, "")], self.DAY) == [8, 9]

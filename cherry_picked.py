@@ -51,7 +51,8 @@ never filler. No qualifying fact at all exits 0.
 
 Freshness: Saturday's finished NHL games must be in game_log, every week
 game needs goal events and shots, and HockeyTech leagues need Saturday's
-games Final. Anything short of that exits 1 so the backup cron retries.
+games Final (postponed / cancelled ones aside). Anything short of that
+exits 1 so the backup cron retries.
 Goal events that don't add up to a final score (a data defect, which a
 retry won't fix) turn that league's goal-based generators off instead,
 logged; likewise shots missing for one side of a game.
@@ -1050,6 +1051,24 @@ def load_nhl(client, season, through):
     }
 
 
+# HockeyTech GameStatusString for a game that won't be played on its date.
+# It never turns Final, so waiting on it would block the post all week.
+NOT_PLAYED_STATES = ("postponed", "cancelled", "canceled")
+
+
+def unfinished_games(rows, through):
+    """Ids of `through`'s games that should be Final but aren't yet.
+    Postponed / cancelled games are left out: no retry will finish them."""
+    day = through.isoformat()
+    return [
+        r["game_id"]
+        for r in rows
+        if r["game_date"][:10] == day
+        and r["game_state"] != "Final"
+        and not (r["game_state"] or "").strip().lower().startswith(NOT_PLAYED_STATES)
+    ]
+
+
 def load_hockeytech(client, league, season_id, through, start_year, teams):
     """PWHL / AHL / ECHL -> (LeagueData, unfinished game ids on `through`).
     The league's teams are the ones on the season's whole schedule -- not
@@ -1071,11 +1090,7 @@ def load_hockeytech(client, league, season_id, through, start_year, teams):
     members = {code(league, r[s]) for r in season_rows for s in ("home_team_id", "away_team_id")}
     teams = {c: teams.get(c, (c, sp.TEXT)) for c in sorted(members)}
     rows = [r for r in season_rows if r["game_date"][:10] <= through.isoformat()]
-    unfinished = [
-        r["game_id"]
-        for r in rows
-        if r["game_date"][:10] == through.isoformat() and r["game_state"] != "Final"
-    ]
+    unfinished = unfinished_games(rows, through)
     games = {}
     for r in rows:
         if r["game_state"] != "Final":
