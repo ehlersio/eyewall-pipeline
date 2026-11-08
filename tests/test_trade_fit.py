@@ -83,7 +83,9 @@ def test_fits_ltir_when_the_most_relief_covers_it():
     assert state == "fits_ltir"
     assert reason == {"code": "cap_fits_ltir", "ltir_max": 7_000_000, "space": 1_000_000,
                       "known": 23, "roster": 24}  # fmt: skip
-    assert tf.cap_factor(8_000_001, team, 0)[0] == "needs_salary"  # beyond space + every LTIR cap hit
+    assert (
+        tf.cap_factor(8_000_001, team, 0)[0] == "needs_salary"
+    )  # beyond space + every LTIR cap hit
     # no LTIR, or LTIR unknown: unchanged
     for ltir in (None, {"capHitTotal": None}, {"players": [], "capHitTotal": None}):
         assert tf.cap_factor(6_000_000, {**team, "ltir": ltir}, 0)[0] == "needs_salary"
