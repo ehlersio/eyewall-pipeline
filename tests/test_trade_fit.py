@@ -150,7 +150,9 @@ def test_build_players_filters_population():
     sk_prev = {1: {"war": 0.4, "games_played": 82}, 4: {"war": 0.4, "games_played": 82}}
     g_cur = {6: {"gsax_per60": 0.1, "games_played": 5}}
     g_prev = {6: {"gsax_per60": 0.2, "games_played": 40}}
-    clauses = {"k7": [{"kind": "NMC", "season_from": "2025-26", "season_to": "2028-29"}]}
+    clauses = tf.ClauseIndex(
+        [{"contract_key": "k7", "kind": "NMC", "season_from": "2025-26", "season_to": "2028-29"}]
+    )
     out = tf.build_players(20262027, contracts, gp, (sk_cur, sk_prev, g_cur, g_prev),
                            {1: "L"}, clauses, "stamp")  # fmt: skip
     by = {p["player_id"]: p for p in out}
@@ -171,3 +173,64 @@ def test_season_gate():
         "in_season",
         20292030,
     )  # no deadline on file
+
+
+# Real nhl_contracts / nhl_contract_clauses rows (2026-11-08). Martinook's
+# 2024 deal is in the dataset twice; its clause is filed only under the
+# name-keyed CapFriendly row, while the Worker names the id-keyed one.
+MARTINOOK_CONTRACTS = [
+    {"contract_key": "8476921|CAR|2021-07", "player_id": 8476921,
+     "start_season": "2021-22", "end_season": "2023-24"},
+    {"contract_key": "8476921|CAR|2024-07", "player_id": 8476921,
+     "start_season": "2024-25", "end_season": "2026-27"},
+    {"contract_key": "jordan martinook|CAR|2024-07", "player_id": 8476921,
+     "start_season": "2024-25", "end_season": "2026-27"},
+]  # fmt: skip
+MARTINOOK_CLAUSES = [
+    {"contract_key": "jordan martinook|CAR|2024-07", "kind": "M-NTC",
+     "season_from": "2024-25", "season_to": "2026-27", "list_size": 10},
+]  # fmt: skip
+# Luke Schenn: one key per deal. The 2026 Vancouver deal's NMC has no
+# season range; the Nashville deal before it has no clause.
+SCHENN_CONTRACTS = [
+    {"contract_key": "8474568|NSH|2023-06", "player_id": 8474568,
+     "start_season": "2023-24", "end_season": "2025-26"},
+    {"contract_key": "8474568|VAN|2026-07", "player_id": 8474568,
+     "start_season": "2026-27", "end_season": "2026-27"},
+]  # fmt: skip
+SCHENN_CLAUSES = [
+    {"contract_key": "8474568|VAN|2026-07", "kind": "NMC", "season_from": None,
+     "season_to": None, "list_size": None},
+    {"contract_key": "8474568|TOR|2011-09", "kind": "M-NTC", "season_from": "2015-16",
+     "season_to": "2015-16", "list_size": None},
+]  # fmt: skip
+
+
+def test_clause_index_finds_a_clause_filed_under_the_other_contract_key():
+    idx = tf.ClauseIndex(MARTINOOK_CLAUSES, MARTINOOK_CONTRACTS)
+    hit = idx.clause(8476921, 2026, "8476921|CAR|2024-07")
+    assert (hit["kind"], hit["list_size"]) == ("M-NTC", 10)
+    assert idx.clause(8476921, 2026) == hit  # no picked key: by player id alone
+    assert idx.clause(8476921, 2023, "8476921|CAR|2021-07") is None  # earlier deal
+    assert idx.clause(8476921, 2027) is None  # past the deal
+
+
+def test_clause_index_skips_clauses_of_contracts_not_covering_the_season():
+    idx = tf.ClauseIndex(SCHENN_CLAUSES, SCHENN_CONTRACTS)
+    # the unranged VAN NMC would "cover every season" if pooled by player
+    assert idx.clause(8474568, 2025, "8474568|NSH|2023-06") is None
+    assert idx.clause(8474568, 2026, "8474568|VAN|2026-07")["kind"] == "NMC"
+    assert idx.clause(8474568, 2015) is None  # TOR 2011 isn't in nhl_contracts
+    assert idx.clause(8474568, 2015, "8474568|TOR|2011-09")["kind"] == "M-NTC"
+
+
+def test_build_players_reads_the_clause_under_martinooks_other_key():
+    contract = {"playerId": 8476921, "isCurrent": True, "onRoster": True, "currentTeam": "CAR",
+                "contractType": "standard", "position": "L", "capHit": 3_050_000,
+                "yearsLeft": 0, "expiresAfter": "2026-27",
+                "contractKey": "8476921|CAR|2024-07", "name": "Jordan Martinook"}  # fmt: skip
+    ratings = ({}, {8476921: {"war": 0.4, "games_played": 82}}, {}, {})
+    idx = tf.ClauseIndex(MARTINOOK_CLAUSES, MARTINOOK_CONTRACTS)
+    (row,) = tf.build_players(20262027, [contract], {8476921: (15, False)}, ratings, {}, idx,
+                              "stamp")  # fmt: skip
+    assert (row["clause_kind"], row["clause_list_size"]) == ("M-NTC", 10)

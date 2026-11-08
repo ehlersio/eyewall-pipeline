@@ -33,7 +33,7 @@ Features are computed exactly as in the backtest, from the same sources:
 the NHL stats API's per-game rows (team, TOI, points, saves) for the
 season so far, standings on the day, the nhl-contracts release
 (contracts.json / clauses.json, matched by player id, else by a name only
-one NHL player has), and NHL bios for birth dates. The backtest imports the
+one NHL player has; clauses from every contract of his covering the season), and NHL bios for birth dates. The backtest imports the
 feature code from this module so the two can't drift. One difference: a
 player whose contract ends this season but who has signed an extension
 (a contract starting next season) counts as not expiring here; the
@@ -142,6 +142,22 @@ class ContractIndex:
         if hit:
             return max(hit, key=_preference), "name"
         return None, None
+
+    def covering(self, player_id, name, year):
+        """Every contract of his covering the season: by player id, plus rows
+        without one under a name only he has."""
+        by_id = self.by_id.get(int(player_id), []) if player_id is not None else []
+        by_name = self.by_name.get(normalize_name(name), [])
+        return [c for c in by_id + by_name if covers(c, year)]
+
+
+def clauses_for(index, clauses_by_key, player_id, name, year):
+    """Clause rows of every contract of the player covering the season, not
+    only the one find() picks: the release often holds one deal twice (an
+    id-keyed row and a name-keyed CapFriendly row) with the clause filed
+    under one key. A contract not covering the season contributes nothing."""
+    keys = {c["contract_key"] for c in index.covering(player_id, name, year)}
+    return [cl for k in sorted(keys) for cl in clauses_by_key.get(k, [])]
 
 
 def unique_name_keys(bios_by_season) -> set[str]:
@@ -457,7 +473,7 @@ def build_rows(model, timelines, bios, standings, index, clauses_by_key, trades,
             nxt, _ = index.find(pid, info["name"], year + 1)
             if nxt is not None and nxt.get("contract_key") != contract.get("contract_key"):
                 extension = nxt
-        clauses = clauses_by_key.get(contract["contract_key"], []) if contract else []
+        clauses = clauses_for(index, clauses_by_key, pid, info["name"], year) if contract else []
         feats = feature_row(info, before, team, standings, contract, clauses, birth, year, as_of,
                             deadline, extension)  # fmt: skip
         if feats is None:
