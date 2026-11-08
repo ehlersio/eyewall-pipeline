@@ -42,6 +42,7 @@ Run: python -m scripts.backtest.trade_data_coverage [--out PATH]
 """
 
 import argparse
+import os
 from collections import Counter, defaultdict
 from datetime import date
 
@@ -50,6 +51,7 @@ import requests
 import nhl_contracts as nc
 from db import get_client
 from pipeline_common import get_logger, select_all
+from scripts.backtest import deadline_rosters
 from trade_candidacy import (  # shared with the candidacy backtest and nightly job
     ContractIndex,
     clause_covers,
@@ -98,15 +100,26 @@ def pct(n: int, d: int) -> str:
     return f"{100 * n / d:.0f}%" if d else "-"
 
 
-def match_counts(items, index: ContractIndex, year: int, archive_active: set[int]) -> dict:
-    """items: [(player_id, name)]. Contract coverage counts for one season."""
+def match_counts(
+    items, index: ContractIndex, year: int, archive_active: set[int], rosters=None
+) -> dict:
+    """items: [(player_id, name)]. Contract coverage counts for one season.
+    rosters: a deadline_rosters.RosterIndex; a player with no contract but a
+    roster row that season counts as `by_roster` (and not in `missing_rosters`)."""
     out = Counter()
     for pid, name in items:
         out["n"] += 1
         c, how = index.find(pid, name, year)
+        r = rosters.find(pid, year) if rosters is not None and pid is not None else None
+        if rosters is not None:
+            out["cap_hit_with_rosters"] += (c is not None and c.get("cap_hit_usd") is not None) or (
+                r is not None and r["cap_hit_usd"] is not None
+            )
         if c is None:
             out["missing"] += 1
             out["missing_archive_era" if pid in archive_active else "missing_older"] += 1
+            if rosters is not None:
+                out["by_roster" if r is not None else "missing_rosters"] += 1
             continue
         out[f"by_{how}"] += 1
         if c.get("cap_hit_usd") is not None:
@@ -117,7 +130,15 @@ def match_counts(items, index: ContractIndex, year: int, archive_active: set[int
 
 
 def season_report(
-    year, trades, assets, index, clauses_by_key, population, archive_active, multi_team=frozenset()
+    year,
+    trades,
+    assets,
+    index,
+    clauses_by_key,
+    population,
+    archive_active,
+    multi_team=frozenset(),
+    rosters=None,
 ):
     """One season's numbers. trades / assets: rows for that season only.
     multi_team: player ids the NHL lists with two or more teams that season."""
@@ -146,10 +167,14 @@ def season_report(
         ),
         "pairing_uncertain": sum(1 for a in window_players if a["trade_id"] in uncertain_trades),
         "traded": match_counts(
-            [(a["player_id"], a.get("player_name")) for a in usable], index, year, archive_active
+            [(a["player_id"], a.get("player_name")) for a in usable],
+            index,
+            year,
+            archive_active,
+            rosters,
         ),
         "population": match_counts(
-            [(p["player_id"], p["name"]) for p in population], index, year, archive_active
+            [(p["player_id"], p["name"]) for p in population], index, year, archive_active, rosters
         ),
     }
 
@@ -175,6 +200,13 @@ def season_report(
         (pop.get("n", 0) - pop.get("missing", 0)) / pop["n"] if pop.get("n") else 0
     )
     r["usable_for_training"] = deadline is not None and r["population_coverage"] >= COVERAGE_BAR
+    if rosters is not None:
+        r["population_coverage_with_rosters"] = (
+            (pop.get("n", 0) - pop.get("missing_rosters", 0)) / pop["n"] if pop.get("n") else 0
+        )
+        r["usable_with_rosters"] = (
+            deadline is not None and r["population_coverage_with_rosters"] >= COVERAGE_BAR
+        )
     return r
 
 
@@ -347,12 +379,56 @@ def render(results, expiry, meta) -> str:
             "",
         ]
     )
+    if meta.get("rosters"):
+        L.extend(render_rosters(results, meta["rosters"]))
     return "\n".join(L)
+
+
+def render_rosters(results, info) -> list[str]:
+    """Section 7: coverage with the deadline rosters added as a contract source."""
+    L = [
+        "## 7. With the deadline rosters (contract-gaps scope §3, Phase 3b)",
+        "",
+        f"`{info['path']}` from nhl-contracts' `run deadline`: {info['rows']:,} rows, CapFriendly team "
+        f"pages archived before each 2019-20..2023-24 deadline and as-of date (tier E, captured "
+        f"{info['first']} to {info['last']}). Rows matched to NHL ids: {info['how']}. A player with "
+        "no contract in the release but a roster row that season counts as covered.",
+        "",
+        "| Season | Players | Covered before | With rosters | Filled by rosters | Cap hit known "
+        "| Traded players covered before → with rosters | Passes the bar |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for r in results:
+        if "usable_with_rosters" not in r:
+            continue
+        p, t = r["population"], r["traded"]
+        n, tn = p.get("n", 0), t.get("n", 0)
+        before = n - p.get("missing", 0)
+        after = n - p.get("missing_rosters", 0)
+        t_before = tn - t.get("missing", 0)
+        t_after = tn - t.get("missing_rosters", 0)
+        L.append(
+            f"| {r['season']} | {n} | {pct(before, n)} | {pct(after, n)} | {p.get('by_roster', 0)} "
+            f"| {pct(p.get('cap_hit', 0), n)} → {pct(p.get('cap_hit_with_rosters', 0), n)} "
+            f"| {pct(t_before, tn)} → {pct(t_after, tn)} "
+            f"| {'yes' if r['usable_with_rosters'] else 'no'} |"
+        )
+    passing = [r["season"] for r in results if r.get("usable_with_rosters")]
+    L += [
+        "",
+        "Seasons at or above the bar with the rosters: " + (", ".join(passing) or "none") + ".",
+        "",
+    ]
+    return L
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--out", default=OUT)
+    ap.add_argument(
+        "--deadline-rosters",
+        help="deadline_rosters.csv from nhl-contracts' `run deadline` (adds section 7)",
+    )
     args = ap.parse_args()
 
     today = date.today()
@@ -383,6 +459,18 @@ def main():
     for cl in clauses:
         clauses_by_key[cl["contract_key"]].append(cl)
 
+    rosters, roster_info = None, None
+    if args.deadline_rosters:
+        roster_rows = deadline_rosters.load(args.deadline_rosters)
+        rosters = deadline_rosters.RosterIndex(roster_rows, bios)
+        roster_info = {
+            "path": os.path.basename(args.deadline_rosters),
+            "rows": len(roster_rows),
+            "first": min(r["as_of"] for r in roster_rows).isoformat(),
+            "last": max(r["as_of"] for r in roster_rows).isoformat(),
+            "how": ", ".join(f"{k} {v:,}" for k, v in sorted(rosters.how.items())),
+        }
+
     results = []
     for y in range(FIRST_SEASON, last + 1):
         population = [
@@ -398,6 +486,7 @@ def main():
                 population,
                 archive_active,
                 multi_team[y],
+                rosters,
             )
         )
 
@@ -406,6 +495,7 @@ def main():
         "dataset_updated_at": (stamp or {}).get("updated_at"),
         "n_contracts": len(contracts),
         "n_no_id": sum(1 for c in contracts if c.get("player_id") is None),
+        "rosters": roster_info,
     }
     with open(args.out, "w") as f:
         f.write(render(results, expiry_agreement(contracts, birth_dates), meta))
