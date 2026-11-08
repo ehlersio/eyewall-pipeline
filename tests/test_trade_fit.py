@@ -74,6 +74,26 @@ def test_cap_states():
     assert tf.cap_factor(1, None, 3)[0] == "unknown"
 
 
+def test_fits_ltir_when_the_most_relief_covers_it():
+    team = {"capSpaceEstimate": 1_000_000, "rosterWithFigure": 23, "rosterCount": 24,
+            "ltir": {"capHitTotal": 7_000_000, "statedRelief": 7_000_000}}  # fmt: skip
+    # retention first: 50% of 1.5M fits the space
+    assert tf.cap_factor(1_500_000, team, 1)[0] == "fits_retained"
+    state, reason = tf.cap_factor(6_000_000, team, 0)
+    assert state == "fits_ltir"
+    assert reason == {"code": "cap_fits_ltir", "ltir_max": 7_000_000, "space": 1_000_000,
+                      "known": 23, "roster": 24}  # fmt: skip
+    assert (
+        tf.cap_factor(8_000_001, team, 0)[0] == "needs_salary"
+    )  # beyond space + every LTIR cap hit
+    # no LTIR, or LTIR unknown: unchanged
+    for ltir in (None, {"capHitTotal": None}, {"players": [], "capHitTotal": None}):
+        assert tf.cap_factor(6_000_000, {**team, "ltir": ltir}, 0)[0] == "needs_salary"
+    # fitting through LTIR relief doesn't drop the tier, like retention
+    assert tf.tier_for(True, True, "fits_ltir") == "strong"
+    assert tf.tier_for(True, False, "fits_ltir") == "possible"
+
+
 def test_tiers_and_the_cap_step_down():
     assert tf.tier_for(True, True, "fits") == "strong"
     assert tf.tier_for(True, False, "fits") == "possible"

@@ -36,6 +36,14 @@ the 2026-11-07 raw store, cut to the contracts above): COL's clause seasons,
 Ehrhoff's blank CapFriendly cells (dropped with him, no player_id), NJD
 8481721's PuckPedia breakdown (none_likely; 25 on 2026-06-30), and CAR
 8482809's unknown seasons (born 2003-08-03: under 25 through 2028-29).
+
+ltir.json (nhl-contracts #12, real rows from a local normalize of the
+2026-11-08 raw store and ESPN injury snapshot): Sandin (WSH, stated relief),
+Domi and Joshua (TOR, one $7M figure for both), Krug (STL, a 2024-25 stint
+still active), Olofsson (VGK, an old closed stint and a current one ESPN
+doesn't list), Wotherspoon (espn_status:IR), Bjugstad's NJD and WPG stints
+(team conflict), and two rows without an NHL id (Zetterberg 2019-20, the
+ambiguous "Hughes" NJD 2024-25).
 """
 
 import json
@@ -387,6 +395,7 @@ class TestRun:
             "nhl_contract_gaps",
             "nhl_cap_limits",
             "nhl_contract_clause_status",
+            "nhl_ltir",
             "nhl_contracts_loads",
         }
 
@@ -422,6 +431,7 @@ class TestRun:
             "nhl_cap_limits": "season",
             "nhl_dead_cap": "team,kind,player_key,season",
             "nhl_contract_clause_status": "contract_key,season",
+            "nhl_ltir": "player_key,team,first_seen",
             "nhl_contracts_loads": "dataset_updated_at",
         }
         assert sb.deletes == [
@@ -431,6 +441,7 @@ class TestRun:
             ("nhl_contract_gaps", ("dataset_updated_at", STAMP)),
             ("nhl_dead_cap", ("dataset_updated_at", STAMP)),
             ("nhl_contract_clause_status", ("dataset_updated_at", STAMP)),
+            ("nhl_ltir", ("dataset_updated_at", STAMP)),
         ]
         [load] = sb.upserts["nhl_contracts_loads"]
         assert load["dataset_updated_at"] == STAMP and load["season"] == "2026-27"
@@ -612,3 +623,86 @@ class TestClauseStatus:
         sb = wired["sb"]
         assert "nhl_contract_clause_status" not in sb.upserts
         assert all(t != "nhl_contract_clause_status" for t, _ in sb.deletes)
+
+
+# ── LTIR ──────────────────────────────────────────────────────────────────────
+
+
+class TestLtir:
+    def _rows(self, ltir="fixture"):
+        dataset = {
+            name: _fixture(f"{name}.json")
+            for name in ("timestamp", "contracts", "contract_seasons", "clauses", "gaps")
+        }
+        dataset["ltir"] = _fixture("ltir.json") if ltir == "fixture" else ltir
+        return nc.build_rows(dataset, {}, "2026-27")
+
+    def test_every_stint_is_kept_with_history_and_stamped(self):
+        built = self._rows()
+        rows = built["nhl_ltir"]
+        assert len(rows) == len(_fixture("ltir.json")) == 11
+        stamp = _fixture("timestamp.json")["updated_at"]
+        assert all(r["dataset_updated_at"] == stamp for r in rows)
+        assert set(nc.LTIR_COLUMNS) | {"player_key", "dataset_updated_at"} == set(rows[0])
+        assert built["stats"]["n_ltir_active"] == 7
+
+    def test_active_stints_carry_relief_and_conflicts(self):
+        rows = {(r["player_key"], r["team"], r["season"]): r for r in self._rows()["nhl_ltir"]}
+        sandin = rows[("8480873", "WSH", "2026-27")]
+        assert sandin["active"] is True and sandin["since"] == "2026-10-12"
+        assert (sandin["stated_relief_usd"], sandin["stated_at"]) == (3_850_000, "2026-10-12")
+        assert sandin["conflicts"] is None  # "" in the release -> NULL
+        njd = rows[("8475760", "NJD", "2026-27")]
+        wpg = rows[("8475760", "WPG", "2026-27")]
+        assert njd["active"] is False and njd["until_basis"] == "later_team"
+        assert wpg["active"] is True and wpg["conflicts"] == "team:NJD|WPG"
+        assert rows[("8478450", "VGK", "2026-27")]["conflicts"] == "espn_status:IR"
+
+    def test_rows_without_an_nhl_id_are_kept_by_name(self):
+        rows = {(r["player_key"], r["team"]): r for r in self._rows()["nhl_ltir"]}
+        assert rows[("henrik zetterberg", "DET")]["player_id"] is None
+        assert rows[("hughes", "NJD")]["player_id"] is None
+
+    def test_team_codes_are_normalized_and_rows_without_a_team_skipped(self):
+        rows = self._rows(
+            [
+                {
+                    "player_id": 1,
+                    "player_name": "X Y",
+                    "team": "UTAH",
+                    "first_seen": "2026-10-01",
+                    "active": True,
+                },
+                {
+                    "player_id": 2,
+                    "player_name": "Z W",
+                    "team": None,
+                    "first_seen": "2026-10-01",
+                    "active": True,
+                },
+            ]
+        )["nhl_ltir"]
+        assert [(r["team"], r["player_key"]) for r in rows] == [("UTA", "1")]
+
+    def test_run_upserts_and_prunes_ltir(self, wired):
+        out = nc.run(today=TODAY)
+        sb = wired["sb"]
+        assert out["nhl_ltir"] == len(sb.upserts["nhl_ltir"]) == 11
+        assert sb.conflicts["nhl_ltir"] == "player_key,team,first_seen"
+        assert ("nhl_ltir", ("dataset_updated_at", STAMP)) in sb.deletes
+        assert sb.upserts["nhl_contracts_loads"][0]["n_ltir"] == 11
+
+    def test_a_release_without_ltir_json_leaves_the_table_alone(self, wired, monkeypatch):
+        real = nc.fetch_file
+
+        def fetch_file(name):
+            if name == "ltir.json":
+                raise FetchError("404")
+            return real(name)
+
+        monkeypatch.setattr(nc, "fetch_file", fetch_file)
+        out = nc.run(today=TODAY)
+        sb = wired["sb"]
+        assert "nhl_ltir" not in out and "nhl_ltir" not in sb.upserts
+        assert all(t != "nhl_ltir" for t, _ in sb.deletes)
+        assert sb.upserts["nhl_contracts_loads"][0]["n_ltir"] is None

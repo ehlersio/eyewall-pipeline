@@ -31,16 +31,19 @@ Per (player, other team), three factors:
           so. A contract with term left fits any team's timeline (matching
           the term to a team's core is not built).
   cap     the Worker's /contracts/summary?basis=roster estimate of the
-          team's space (ceiling - roster cap hit - dead cap; no LTIR, so
-          contenders near the cap look tighter than they are) against the
-          player's cap hit: fits / fits if the seller retains 50% (only when
-          the seller has used fewer than MAX_RETAINED retention slots this
-          season, nhl_dead_cap kind 'retained') / needs salary back.
+          team's space (ceiling - roster cap hit - dead cap, before LTIR)
+          against the player's cap hit: fits / fits if the seller retains 50%
+          (only when the seller has used fewer than MAX_RETAINED retention
+          slots this season, nhl_dead_cap kind 'retained') / fits if LTIR
+          relief covers it (the team's active LTIR cap hits, `ltir.capHitTotal`,
+          are the most relief it could have; real relief is the cap hit minus
+          the space at placement, so this is an estimate) / needs salary back.
           Full-season figures both sides; accrued deadline space isn't
           modeled. Unknown space or cap hit -> 'unknown', no effect.
 Tier: need and window met -> 'strong'; one -> 'possible'; neither ->
 'long_shot'. Needing salary back even with the most retention the seller
-can offer moves a team down one tier. A right-shot defenseman ranks ahead
+can offer, or the most LTIR relief the buyer could have, moves a team down
+one tier; fitting only with retention or LTIR relief doesn't. A right-shot defenseman ranks ahead
 within a tier for teams with fewer than two right shots in their top four.
 Clauses never reorder teams (no-trade lists aren't public); they're on the
 player row for the app to show.
@@ -181,6 +184,9 @@ def cap_factor(cap_hit, team_cap, retention_left):
         return "fits", {"code": "cap_fits", **base}
     if retention_left > 0 and cap_hit * RETAIN_SHARE <= space:
         return "fits_retained", {"code": "cap_fits_retained", **base}
+    relief = ((team_cap or {}).get("ltir") or {}).get("capHitTotal")
+    if relief and cap_hit <= space + relief:
+        return "fits_ltir", {"code": "cap_fits_ltir", "ltir_max": relief, **base}
     return "needs_salary", {"code": "cap_needs_salary", "retention_left": retention_left, **base}
 
 

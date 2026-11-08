@@ -335,6 +335,7 @@ def test_every_fit_reason_passes_the_wording_check():
         {"code": "window_rental_contender", "pct": 0.81},
         {"code": "window_rental_not", "pct": 0.12},
         {"code": "cap_fits_retained"},
+        {"code": "cap_fits_ltir", "ltir_max": 9_000_000},
         {"code": "cap_needs_salary", "retention_left": 1},
         {"code": "hand_right_shot", "right_shots": 1},
     ]
