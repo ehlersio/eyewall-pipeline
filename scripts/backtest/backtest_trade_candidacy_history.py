@@ -20,7 +20,8 @@ and the ship rule are the same; the functions are imported from it):
   clause    four-way, "none" now being knowable (`clause_full`,
             `clause_modified`, `clause_unknown`; "none" is the baseline):
               1. a roster row: its clause for the season, blank = none;
-              2. else a release clause row covering the season;
+              2. else a release clause row covering the season, from any of
+                 the player's contracts covering it (tc.clauses_for, #264);
               3. else the release's clause_status for the contract-season
                  says none ("stated" / "capfriendly_2024"), or the player was
                  under 25 on the June 30 before the season (the CBA rule,
@@ -83,16 +84,20 @@ def season_label(year):
 # ── Clause state ──────────────────────────────────────────────────────────────
 
 
-def release_clause_state(contract, clauses, status_by_key, birth, year):
-    """'full' | 'modified' | 'none' | 'unknown' from the release (steps 2-4)."""
+def release_clause_state(contract, clauses, status_by_key, birth, year, keys=None):
+    """'full' | 'modified' | 'none' | 'unknown' from the release (steps 2-4).
+    keys: every contract key of the player covering the season (#264: one deal
+    can be filed under two keys); defaults to the picked contract's."""
     kinds = {c.get("kind") for c in clauses if tc.clause_covers(c, year)}
     if kinds & {"NMC", "NTC", "M-NMC"}:
         return "full"
     if "M-NTC" in kinds:
         return "modified"
     label = season_label(year)
-    if contract is not None:
-        st = status_by_key.get((contract.get("contract_key"), label))
+    if keys is None:
+        keys = {contract.get("contract_key")} if contract is not None else set()
+    for key in sorted(k for k in keys if k):
+        st = status_by_key.get((key, label))
         if st and st[0] == "none" and st[1] in NONE_BASES:
             return "none"
     if nc.clause_ineligible(birth, label):
@@ -166,9 +171,14 @@ def build_rows(year, ctx, four_way=True, rosters_on=True):
             else:
                 contract = release
                 clauses = (
-                    ctx["clauses_by_key"].get(contract["contract_key"], []) if contract else []
+                    tc.clauses_for(ctx["index"], ctx["clauses_by_key"], pid, info["name"], year)
+                    if contract
+                    else []
                 )
-                state = release_clause_state(contract, clauses, ctx["status_by_key"], birth, year)
+                keys = {c["contract_key"] for c in ctx["index"].covering(pid, info["name"], year)}
+                state = release_clause_state(
+                    contract, clauses, ctx["status_by_key"], birth, year, keys
+                )
                 source = "release" if contract else "none"
             feats = tc.feature_row(info, before, team, standings, contract, clauses, birth, year,
                                    as_of, deadline)  # fmt: skip
