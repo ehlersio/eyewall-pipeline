@@ -1653,6 +1653,11 @@ def fit_reason_fact(reason: dict, team: str) -> str | None:
         return f"his cap hit fits {team}'s estimated cap space"
     if code == "cap_fits_retained":
         return f"his cap hit fits {team}'s estimated cap space only if his team retains salary"
+    if code == "cap_fits_ltir":
+        return (
+            f"his cap hit fits {team}'s estimated cap space only if its long-term injured "
+            "reserve relief covers it, and that relief is an estimate"
+        )
     if code == "cap_needs_salary":
         return f"{team} would need to send salary back to fit his cap hit under its estimated cap"
     if code == "hand_right_shot":

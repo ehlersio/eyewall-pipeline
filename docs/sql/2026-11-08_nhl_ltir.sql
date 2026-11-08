@@ -68,3 +68,11 @@ create policy "anon can read nhl_ltir" on public.nhl_ltir
   for select to anon using (true);
 
 alter table public.nhl_contracts_loads add column if not exists n_ltir integer;
+
+-- trade_fit.py's new cap state (same PR): 'fits_ltir', a team the player fits
+-- only if its LTIR relief covers him (at most its active LTIR cap hits). Like
+-- 'fits_retained' it doesn't drop the tier. Until this runs, a trade_fit
+-- write with a fits_ltir row fails the old check.
+alter table public.trade_fit drop constraint if exists trade_fit_cap_state_check;
+alter table public.trade_fit add constraint trade_fit_cap_state_check
+  check (cap_state in ('fits', 'fits_retained', 'fits_ltir', 'needs_salary', 'unknown'));
