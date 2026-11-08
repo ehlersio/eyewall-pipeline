@@ -32,6 +32,13 @@ Tables written (docs/sql/2026-10-23_nhl_contracts.sql, run by hand):
                          contract -- 'retained' salary on a traded player or a
                          'buyout' charge -- so a reader can subtract them from
                          a roster cap hit (docs/sql/2026-10-25_nhl_dead_cap.sql)
+  nhl_ltir               ltir.json (2026-11-08, nhl-contracts #12): one row per
+                         long-term injured reserve stint (player, team, from
+                         placement to activation) joined from ESPN's injury
+                         list and transaction wire and PuckPedia's posts, with
+                         `active`, the placement date, the relief PuckPedia
+                         stated and the sources' `conflicts`; history kept
+                         (docs/sql/2026-11-08_nhl_ltir.sql)
   nhl_contracts_loads    one row per successful load; its latest row is the
                          "last loaded" state the skip check reads
 
@@ -70,10 +77,13 @@ release.
 
 Still not computable exactly: cap space. nhl_dead_cap carries retained
 salary and buyouts (from PuckPedia posts and the archived CapFriendly team
-pages, so not every charge), but LTIR, bonus overages and recapture are not
-in the dataset, and roster coverage is partial (gaps.json says who is
-missing). A reader can show ceiling - roster cap hit - dead cap as an
-estimate before LTIR, and should say so.
+pages, so not every charge), bonus overages and recapture are not in the
+dataset, and roster coverage is partial (gaps.json says who is missing).
+nhl_ltir says who is on LTIR, but the relief a team gets is the player's cap
+hit minus the team's cap space when he was placed, which nothing here can
+compute; the sum of LTIR cap hits is only an upper bound. A reader can show
+ceiling - roster cap hit - dead cap as an estimate before LTIR, with LTIR
+relief beside it as a range, and should say so.
 
 Usage:
   python nhl_contracts.py            # load if updated_at changed since the last load
@@ -195,6 +205,24 @@ GAP_COLUMNS = (
     "checked_season",
 )
 CLAUSE_STATUS_COLUMNS = ("contract_key", "season", "status", "basis", "source_ids")
+LTIR_COLUMNS = (
+    "player_id",
+    "player_name",
+    "team",
+    "season",
+    "since",
+    "since_basis",
+    "first_seen",
+    "until",
+    "until_basis",
+    "active",
+    "stated_relief_usd",
+    "stated_at",
+    "stated_source",
+    "sources",
+    "conflicts",
+    "flags",
+)
 DEAD_CAP_COLUMNS = (
     "team",
     "kind",
@@ -246,6 +274,12 @@ def fetch_dataset() -> dict:
             "nhl_contract_clause_status left unchanged"
         )
         out["clause_status"] = None
+    # ltir.json joined the release on 2026-11-08 (nhl-contracts #12).
+    try:
+        out["ltir"] = fetch_file("ltir.json")
+    except FetchError as e:
+        log.warning(f"ltir.json not in the release yet ({e}); nhl_ltir left unchanged")
+        out["ltir"] = None
     return out
 
 
@@ -542,6 +576,13 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
         row = build_clause_status_row(r, pid, birth_dates.get(pid), stamp)
         status_rows[(row["contract_key"], row["season"])] = row
 
+    ltir_rows = {}
+    for r in dataset.get("ltir") or []:
+        if not (r.get("team") and r.get("player_name") and r.get("first_seen")):
+            continue
+        row = build_ltir_row(r, stamp)
+        ltir_rows[(row["player_key"], row["team"], row["first_seen"])] = row
+
     return {
         "nhl_contracts": contract_rows,
         "nhl_contract_seasons": list(season_rows.values()),
@@ -558,6 +599,7 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             if dataset.get("clause_status") is not None
             else {}
         ),
+        **({"nhl_ltir": list(ltir_rows.values())} if dataset.get("ltir") is not None else {}),
         "stats": {
             "n_raw_contracts": len(contracts),
             "n_dropped_no_player_id": len(contracts) - len(with_id),
@@ -568,10 +610,28 @@ def build_rows(dataset: dict, birth_dates: dict, current: str) -> dict:
             "n_clause_ineligible": sum(
                 1 for r in status_rows.values() if r["basis"] == "ineligible"
             ),
+            "n_ltir_active": sum(1 for r in ltir_rows.values() if r["active"]),
             "n_expiry_derived": sum(1 for r in contract_rows if r["expiry_type_derived"]),
             "n_expiry_unknown": sum(1 for r in contract_rows if r["expiry_type"] is None),
         },
     }
+
+
+def build_ltir_row(r: dict, stamp: str) -> dict:
+    """One nhl_ltir row. Stints without an NHL id (older players, or a surname
+    PuckPedia wrote that matched two players) are kept, keyed by name like
+    nhl_dead_cap, so a team's history stays whole."""
+    row = {c: _clean(r.get(c)) for c in LTIR_COLUMNS}
+    row["team"] = normalize_team(r.get("team"))
+    row["player_id"] = int(r["player_id"]) if r.get("player_id") is not None else None
+    row["player_key"] = (
+        str(row["player_id"]) if row["player_id"] is not None else _name_key(r["player_name"])
+    )
+    row["active"] = bool(r.get("active"))
+    relief = r.get("stated_relief_usd")
+    row["stated_relief_usd"] = int(relief) if relief is not None else None
+    row["dataset_updated_at"] = stamp
+    return row
 
 
 def cap_limit_rows() -> list[dict]:
@@ -632,6 +692,7 @@ CONFLICT_KEYS = {
     "nhl_cap_limits": "season",
     "nhl_dead_cap": "team,kind,player_key,season",
     "nhl_contract_clause_status": "contract_key,season",
+    "nhl_ltir": "player_key,team,first_seen",
 }
 MIRRORED_TABLES = (
     "nhl_contracts",
@@ -640,7 +701,13 @@ MIRRORED_TABLES = (
     "nhl_contract_gaps",
     "nhl_dead_cap",
     "nhl_contract_clause_status",
+    "nhl_ltir",
 )
+
+
+# Tables whose release file arrived after the first release: a release without
+# the file leaves the table as the last load wrote it.
+OPTIONAL_TABLES = ("nhl_dead_cap", "nhl_contract_clause_status", "nhl_ltir")
 
 
 def run(dry_run: bool = False, force: bool = False, today: date | None = None) -> dict:
@@ -697,7 +764,7 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
     for table, rows in built.items():
         upsert(sb, table, rows, CONFLICT_KEYS[table])
     for table in MIRRORED_TABLES:
-        if table in ("nhl_dead_cap", "nhl_contract_clause_status") and table not in built:
+        if table in OPTIONAL_TABLES and table not in built:
             continue  # the release had no file for it: keep the last load's rows
         delete_stale(sb, table, updated_at)
 
@@ -715,6 +782,7 @@ def run(dry_run: bool = False, force: bool = False, today: date | None = None) -
                 "n_clauses": counts["nhl_contract_clauses"],
                 "n_gaps": counts["nhl_contract_gaps"],
                 "n_dead_cap": counts.get("nhl_dead_cap"),
+                "n_ltir": counts.get("nhl_ltir"),
                 "n_dropped_no_player_id": stats["n_dropped_no_player_id"],
                 "n_duplicate_keys": stats["n_duplicate_keys"],
             }
