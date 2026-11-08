@@ -193,13 +193,15 @@ def test_offseason_population_counts_extensions_and_minor_leaguers():
         c(3, boughtOut=True),
         c(4, contractType="ELC"),
     ]
-    out = tf.build_players(20272028, contracts, GP, RATINGS, {}, {}, "s", phase="offseason")
+    out = tf.build_players(
+        20272028, contracts, GP, RATINGS, {}, tf.ClauseIndex(), "s", phase="offseason"
+    )
     by = {p["player_id"]: p for p in out}
     assert sorted(by) == [1, 2]
     assert (by[1]["phase"], by[1]["season"], by[1]["rental"]) == ("offseason", 20272028, False)
     assert by[2]["team"] == "BBB"
     # in season, a contract that isn't the current one or a player off the roster isn't in
-    in_season = tf.build_players(20272028, contracts[:2], GP, RATINGS, {}, {}, "s")
+    in_season = tf.build_players(20272028, contracts[:2], GP, RATINGS, {}, tf.ClauseIndex(), "s")
     assert in_season == []
 
 
@@ -209,7 +211,7 @@ def test_rights_players_are_pending_free_agents_without_a_next_contract():
         c(6, yearsLeft=0, expiresAfter="2026-27", expiryType="RFA"),  # re-signed: has next contract
         c(7, yearsLeft=2),  # term left: not a rights player
     ]
-    rows = tf.build_rights_players(20272028, now, {6}, GP, RATINGS, {}, {}, "s")
+    rows = tf.build_rights_players(20272028, now, {6}, GP, RATINGS, {}, tf.ClauseIndex(), "s")
     assert [r["player_id"] for r in rows] == [5]
     r = rows[0]
     assert (r["rights"], r["phase"], r["season"], r["cap_hit"], r["years_left"], r["rental"]) == (
@@ -238,7 +240,7 @@ def test_run_offseason_after_the_deadline():
         patch.object(tf, "contract_routes", return_value=({"players": next_players}, summary)),
         patch.object(tf, "worker_json", return_value={"players": now_players}),
         patch.object(tf, "retention_used", return_value=defaultdict(set)),
-        patch.object(tf, "shoots_and_clauses", return_value=({}, {})),
+        patch.object(tf, "shoots_and_clauses", return_value=({}, tf.ClauseIndex())),
         patch.object(tf, "ratings_for", return_value=(RATINGS, GP)) as ratings_for,
         patch.object(tf, "latest_odds", return_value={}),
         patch.object(tn, "next_season_needs", return_value=needs) as next_needs,
