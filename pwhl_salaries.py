@@ -71,6 +71,7 @@ TEAM_NAME_MAP = {
     "Detroit": 10,
     "Hamilton": 11,
     "Las Vegas": 12,
+    "Vegas": 12,  # the Vegas Vanguards (named 2026-11-10)
     "San Jose": 13,
 }
 
@@ -180,7 +181,7 @@ def _parse_text_page(text: str, page_num: int) -> list[dict]:
         r"([A-ZÀ-Ž][a-zà-ž'\-]+(?:\s[A-ZÀ-Ž][a-zà-ž'\-]+)?)\s+"  # first name(s)
         r"([A-ZÀ-Ž][a-zà-ž'\-]+(?:\s[A-ZÀ-Ž][a-zà-ž'\-]+)?)\s+"  # last name(s)
         r"(Boston|Minnesota|Montreal|New York|Ottawa|Seattle|Toronto|Vancouver|"
-        r"Detroit|Hamilton|Las Vegas|San Jose)\s+"
+        r"Detroit|Hamilton|Las Vegas|(?<!Las )Vegas|San Jose)\s+"
         r"\$?\s*([\d,]+\.?\d*)"
     )
     for m in pattern.finditer(text):

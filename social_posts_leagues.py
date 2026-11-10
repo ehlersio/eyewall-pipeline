@@ -76,10 +76,11 @@ PWHL_TEAMS = {
     "TOR": ("Toronto Sceptres", "#3579FF"),
     "SEA": ("Seattle Torrent", "#5DB8B8"),
     "VAN": ("Vancouver Goldeneyes", "#4A90D9"),
-    "DET": ("PWHL Detroit", "#E3475E"),
-    "HAM": ("PWHL Hamilton", "#E14C62"),
-    "LV": ("PWHL Las Vegas", "#818916"),
-    "SJS": ("PWHL San Jose", "#0083ED"),
+    # Permanent names since 2026-11-10 (were "PWHL <City>"); same colors.
+    "DET": ("Detroit Clutch", "#E3475E"),
+    "HAM": ("Hamilton Havoc", "#E14C62"),
+    "LV": ("Vegas Vanguards", "#818916"),
+    "SJS": ("San Jose Sea Lions", "#0083ED"),
 }
 # AHL/ECHL on-dark display colors, from eyewall-poller's LA_TEAM_COLORS
 # (src/liveActivity.js, itself a copy of eyewall-analytics' ahlConfig.js /
