@@ -262,7 +262,8 @@ def name(data, team):
 
 def subject(data, team):
     """A team as a sentence's subject: "the Carolina Hurricanes", but a bare
-    code (AHL/ECHL, no stored names) or "PWHL Detroit" without "the"."""
+    code (AHL/ECHL, no stored names) or a "PWHL <City>" placeholder name
+    (the 2026-27 expansion teams until 2026-11-10) without "the"."""
     n = name(data, team)
     return n if n == team or n.startswith("PWHL ") else f"the {n}"
 

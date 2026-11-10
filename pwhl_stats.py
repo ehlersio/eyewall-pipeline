@@ -176,6 +176,7 @@ CITY_TEAM_MAP = {
     "Detroit": "10",
     "Hamilton": "11",
     "Las Vegas": "12",
+    "Vegas": "12",  # the Vegas Vanguards (named 2026-11-10), in case the feed drops "Las"
     "San Jose": "13",
 }
 

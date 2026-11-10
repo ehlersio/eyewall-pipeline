@@ -547,6 +547,13 @@ PWHL = League(
         "toronto sceptres",
         "seattle torrent",
         "vancouver goldeneyes",
+        "detroit clutch",
+        "hamilton havoc",
+        "vegas vanguards",
+        "san jose sea lions",
+        # The expansion teams' placeholder names until 2026-11-10 (older
+        # stories). Their nicknames alone (clutch, havoc, ...) are too common
+        # as words to use as shorthand below.
         "pwhl detroit",
         "pwhl hamilton",
         "pwhl las vegas",
