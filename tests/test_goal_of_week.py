@@ -54,7 +54,7 @@ def replay(puck_path_ft, high=True, n_players=2):
     feet) and a couple of skaters, converted back to raw inches."""
     frames = []
     for t, (a, b) in enumerate(puck_path_ft):
-        x_ft, y_ft = (a, gw.RINK_W - b) if high else (gw.RINK_L - a, b)
+        x_ft, y_ft = (a, b) if high else (gw.RINK_L - a, gw.RINK_W - b)
         objs = {"1": {"id": 1, "playerId": "", "x": x_ft * 12, "y": y_ft * 12, "teamAbbrev": ""}}
         for k in range(n_players):
             objs[str(100 + k)] = {
@@ -325,10 +325,36 @@ class TestPresentation:
                 return Res()
 
         # Attacking the high-x end: tracking y ft = 42.5 - 10 = 32.5, which
-        # to_attack() turns to b = 85 - 32.5 = 52.5.
-        assert gw.shot_location(goal(), Http()) == (180.0, 52.5)
+        # to_attack() keeps as b = 32.5.
+        assert gw.shot_location(goal(), Http()) == (180.0, 32.5)
         tracked = {"x": (100 + 80) * 12, "y": (42.5 - 10) * 12}
-        assert gw.to_attack(tracked, True) == pytest.approx((180.0, 52.5))
+        assert gw.to_attack(tracked, True) == pytest.approx((180.0, 32.5))
+
+    @pytest.mark.parametrize("x, y", [(80, 20), (-80, -20)])
+    def test_shooters_left_is_drawn_on_the_left(self, x, y):
+        """Play-by-play +y is the shooter's left attacking +x (and -y attacking
+        -x): react-hockey-rink's shot areas, fitted to the NHL's L/R counts.
+        With the attacked net at the top, that's b < 42.5 -- the left of the
+        picture, in the still and in the replay. Both used to be mirrored (a
+        right-circle goal drawn in the left circle)."""
+
+        class Res:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"plays": [{"eventId": 700, "details": {"xCoord": x, "yCoord": y}}]}
+
+        class Http:
+            def get(self, url, timeout=None):
+                return Res()
+
+        a, b = gw.shot_location(goal(), Http())
+        assert (a, b) == (180.0, 22.5)
+        tracked = {"x": (100 + x) * 12, "y": (42.5 - y) * 12}
+        assert gw.to_attack(tracked, x > 0) == pytest.approx((180.0, 22.5))
+        # Drawn: the still card's dot and the clip's dot sit left of centre.
+        assert gw.Portrait().screen(a, b, 0)[0] < gw.VW / 2
 
     def test_still_card_renders(self):
         img = gw.render_still(goal(), (180.0, 40.0))
