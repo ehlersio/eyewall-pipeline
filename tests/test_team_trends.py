@@ -16,7 +16,7 @@ import pytest
 
 import social_posts as sp
 import team_trends as tt
-from hockeytech_leagues import AHL
+from hockeytech_leagues import AHL, ECHL
 from hockeytech_shot_xg import shot_xg
 
 FRIDAY = date(2026, 1, 16)
@@ -169,6 +169,19 @@ class TestNaming:
         assert names
         for c in names:
             assert sp.team_name(c, names) == c
+
+    def test_minor_league_teams_get_their_colors(self):
+        # Every team in the minor-league posts' color map gets that color,
+        # not the text color (the AHL trends slides were all gray).
+        from social_posts_leagues import MINOR_TEAMS
+
+        for league in (AHL, ECHL):
+            names = tt.code_names(league)
+            colors = MINOR_TEAMS[league.key]
+            assert colors
+            for c, (_, color) in colors.items():
+                assert sp.team_color(c, names) == color
+            assert set(names) == set(league.team_id_map.values())
 
     def test_empty_map_would_fall_back_to_nhl(self):
         # Why code_names() exists: social_posts treats {} as "use NHL".

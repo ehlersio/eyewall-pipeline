@@ -112,6 +112,17 @@ MINOR_TEAM_COLORS = {
 MINOR_TEAMS = {
     key: {c: (c, color) for c, color in colors.items()} for key, colors in MINOR_TEAM_COLORS.items()
 }
+
+
+def minor_teams(league):
+    """{code: (code, color)} for every code in an AHL/ECHL league's
+    team_id_map: MINOR_TEAMS' color where it has one, the text color for a
+    former team it doesn't list. Never empty (social_posts falls back to NHL
+    names and colors for {}, and AHL/ECHL share codes with NHL teams)."""
+    colors = MINOR_TEAMS[league.key]
+    return {c: colors.get(c, (c, sp.TEXT)) for c in league.team_id_map.values()}
+
+
 HASHTAGS = {
     "pwhl-winners": "#PWHL #WomensHockey #HockeyAnalytics #Hockey",
     "pwhl-recap": "#PWHL #WomensHockey #HockeyAnalytics #Hockey",

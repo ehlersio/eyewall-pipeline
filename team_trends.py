@@ -62,7 +62,7 @@ from hockeytech_stats import resolve_current_season
 from pipeline_common import select_all
 from scratches import fetch_keyset
 from season_lookup import get_pwhl_season
-from social_posts_leagues import PWHL_TEAMS, code
+from social_posts_leagues import PWHL_TEAMS, code, minor_teams
 
 # hockeytech_shot_xg configures INFO logging on import; keep httpx's
 # per-request lines out of this script's output.
@@ -823,11 +823,12 @@ def post_pwhl_trends(client, today, dry_run, season_id=None):
 
 
 def code_names(league):
-    """{code: (code, text color)} for a league whose team names and colors
-    aren't stored (AHL, ECHL). Never left empty: social_posts falls back
-    to NHL names for an empty map, and AHL/ECHL share codes with NHL teams
-    (AHL's CGY is the Wranglers, not the Flames)."""
-    return {c: (c, sp.TEXT) for c in league.team_id_map.values()}
+    """{code: (code, color)} for AHL/ECHL, whose team names aren't stored:
+    social_posts_leagues.minor_teams(), the colors the minor-league posts use.
+    Never left empty: social_posts falls back to NHL names for an empty map,
+    and AHL/ECHL share codes with NHL teams (AHL's CGY is the Wranglers, not
+    the Flames). Was every team in the text color (gray) until 2026-11."""
+    return minor_teams(league)
 
 
 def minor_league_slides(client, league, through, season_id=None):

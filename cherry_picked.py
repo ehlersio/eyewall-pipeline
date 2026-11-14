@@ -78,7 +78,7 @@ from hockeytech_stats import resolve_current_season
 from pipeline_common import select_all
 from scratches import fetch_keyset
 from season_lookup import get_pwhl_season
-from social_posts_leagues import PWHL_TEAMS, code, player_names
+from social_posts_leagues import PWHL_TEAMS, code, minor_teams, player_names
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -1281,7 +1281,7 @@ def gather(client, today, nhl_season, pwhl_season=None, minor_seasons=None):
         )
         if season.get("season_type") != "regular":
             continue
-        teams = {c: (c, sp.TEXT) for c in league.team_id_map.values()}
+        teams = minor_teams(league)
         data, unfinished = load_hockeytech(
             client, league, season["season_id"], through, through.year - (through.month < 8), teams
         )
@@ -1326,7 +1326,12 @@ def post_cherry_picked(client, today, dry_run, nhl_season, pwhl_season=None, min
         return 0
     through = today - timedelta(days=1)
     span = sp.fmt_span(through - timedelta(days=5), through)
-    teams_for = {"NHL": sp.TEAMS, "PWHL": PWHL_TEAMS}
+    teams_for = {
+        "NHL": sp.TEAMS,
+        "PWHL": PWHL_TEAMS,
+        AHL.label: minor_teams(AHL),
+        ECHL.label: minor_teams(ECHL),
+    }
     images = [
         render_fact(
             f, i, len(picked), span, teams_for.get(f["league"], {f["team"]: (f["team"], sp.TEXT)})
