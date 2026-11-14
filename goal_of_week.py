@@ -256,9 +256,18 @@ def attack_side_high(frames):
 def to_attack(obj, high):
     """Raw tracking position (inches) -> attack coordinates in feet:
     a = 0 at the defended end boards .. 200 at the attacked ones,
-    b = 0..85 across."""
+    b = 0..85 across, from the attacking side's left to its right as it faces
+    the attacked net. Drawn with that net at the top, b = 0 is the left edge,
+    so a goal from the shooter's left circle is on the left of the picture.
+
+    Tracking y runs the opposite way to play-by-play y (see shot_location()),
+    and play-by-play +y is the shooter's left when attacking +x (the NHL's
+    own L/R shot-area counts settle it: react-hockey-rink's shotAreas.js,
+    fitted to them, scores clearly worse mirrored). So attacking +x the
+    shooter's left is low tracking y, and attacking -x it's high tracking y.
+    This used to be the other way round, which drew every goal mirrored."""
     x, y = obj["x"] / 12, obj["y"] / 12
-    return (x, RINK_W - y) if high else (RINK_L - x, y)
+    return (x, y) if high else (RINK_L - x, RINK_W - y)
 
 
 def goal_frame(frames, high):
@@ -888,7 +897,8 @@ def shot_location(goal, http):
     play-by-play share the x axis and mirror y (tracking y ft = 42.5 - pbp y,
     checked against 2025-26 goals: the tracked puck passes within ~2 ft of
     the play-by-play shot spot), so across the ice it's turned the same way
-    as the replay, attacked net at the top."""
+    as the replay, attacked net at the top: +y is the shooter's left when
+    attacking +x, and b runs from the shooter's left (0) to right (85)."""
     try:
         res = http.get(f"{NHL_WEB}/gamecenter/{goal['game_id']}/play-by-play", timeout=30)
         res.raise_for_status()
@@ -902,7 +912,7 @@ def shot_location(goal, http):
         return None
     # Tracking y in feet is 42.5 - play-by-play y; see to_attack() for the
     # turn that puts the attacked net at the top.
-    return RINK_L / 2 + abs(det["xCoord"]), RINK_W / 2 + det["yCoord"] * (
+    return RINK_L / 2 + abs(det["xCoord"]), RINK_W / 2 - det["yCoord"] * (
         1 if det["xCoord"] >= 0 else -1
     )
 
