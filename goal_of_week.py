@@ -917,15 +917,26 @@ def shot_location(goal, http):
     )
 
 
+# The still card's text under the rink: the score (display 84, glyphs down
+# to ~85 px below its y) and, STILL_LINE_DY below, the period line (body 32,
+# ~38 px), STILL_GAP under the rink.
+STILL_GAP = 30
+STILL_LINE_DY = 100
+STILL_TEXT_H = STILL_LINE_DY + 40
+
+
 def render_still(goal, location):
     """A 4:5 feed card for weeks without a usable replay."""
-    img, d, top, _ = sp.new_card(
+    img, d, top, bottom = sp.new_card(
         "Goal of the Week",
         f"{goal['first']} {goal['last']}",
         f"{headline(goal)}  ·  {goal['team']} vs {goal['opp']}  ·  {game_day(goal)}",
         note="Shot location: NHL play-by-play",
     )
-    scale = 8.0
+    # The rink takes whatever the score and period lines below it leave of
+    # the card's content area. A fixed 8 px/ft (832 px of rink) ran those
+    # lines ~75 px into the footer.
+    scale = (bottom - top - 10 - STILL_GAP - STILL_TEXT_H) / (RINK_L / 2 + 4)
     half = attacking_half(scale)
     x0 = (sp.W - half.width) // 2
     img.paste(half, (x0, top + 10))
@@ -938,7 +949,7 @@ def render_still(goal, location):
             outline=sp.TEXT,
             width=4,
         )
-    y = top + 10 + half.height + 30
+    y = top + 10 + half.height + STILL_GAP
     score = f"{goal['away']} {goal['away_score']} \u2013 {goal['home_score']} {goal['home']}"
     d.text((64, y), score, font=sp.display(84), fill=sp.TEXT)
     line = (
@@ -946,7 +957,7 @@ def render_still(goal, location):
             " ·"
         )
     )
-    d.text((64, y + 110), line, font=sp.body(32), fill=sp.MUTED)
+    d.text((64, y + STILL_LINE_DY), line, font=sp.body(32), fill=sp.MUTED)
     return img
 
 

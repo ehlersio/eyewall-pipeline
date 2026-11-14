@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageColor
 
 import goal_of_week as gw
 import social_posts as sp
@@ -359,6 +359,15 @@ class TestPresentation:
     def test_still_card_renders(self):
         img = gw.render_still(goal(), (180.0, 40.0))
         assert img.size == (sp.W, sp.H)
+
+    def test_still_card_text_stays_above_the_footer(self):
+        """The score and period lines end inside new_card()'s content area:
+        the band between its bottom and the footer rule is bare background.
+        A fixed 8 px/ft rink pushed them into the footer."""
+        img = gw.render_still(goal(), (180.0, 40.0))
+        _, _, _, bottom = sp.new_card("k", "t", "s")
+        band = img.crop((0, bottom, sp.W, sp.H - 98))
+        assert {c for _, c in band.getcolors()} == {ImageColor.getrgb(sp.BG0)}
 
 
 # ── Encoding ────────────────────────────────────────────────────────────
