@@ -1,0 +1,38 @@
+{
+  "generated": "2026-11-18",
+  "source": "scripts/backtest/fit_nhl_xg.py",
+  "trained_on": [
+    "2023-24",
+    "2024-25",
+    "2025-26"
+  ],
+  "attempts": 338901,
+  "goals": 24037,
+  "intercept": 1.730364,
+  "coefficients": {
+    "log_dist": -1.488872,
+    "dist_10": 0.3183,
+    "dist_over_10": 0.686938,
+    "dist_over_20": -1.044081,
+    "dist_over_35": -0.287535,
+    "dist_over_60": 0.361527,
+    "angle_45": 0.449927,
+    "angle_45_sq": -0.546295,
+    "dist_x_angle": -0.214967,
+    "behind_net": 0.735502,
+    "type_slap": 0.384565,
+    "type_backhand": -0.507402,
+    "type_tip-in": -0.921334,
+    "type_deflected": -0.662021,
+    "type_wrap-around": -1.168097,
+    "type_poke": -0.572598,
+    "type_bat": -0.432901,
+    "type_other": 0.589851,
+    "power_play": 0.240258,
+    "short_handed": 0.206923,
+    "even_not_5v5": 0.266116,
+    "empty_net": 4.892795,
+    "rebound": -0.428908,
+    "rebound_x_angle": 0.252092
+  }
+}
