@@ -39,8 +39,8 @@ other team's (a quick-transition proxy; 0.2305 vs 0.2309 without it on
 pipeline doesn't store.
 
 Left out entirely, with no xG: blocked attempts (where a block happened says
-little about the shot, and none can score), shootout attempts (regular-
-season period 5 and later) and penalty shots (a side with 0 or 1 skaters in
+little about the shot, and none can score), shootout attempts (period 5
+and later outside the playoffs) and penalty shots (a side with 0 or 1 skaters in
 `situation_code`). shot_events holds about 2,900 shootout attempts and a
 few hundred penalty shots over 2022-23..2025-26.
 
@@ -118,7 +118,7 @@ def _skaters(situation_code, is_home):
 def is_excluded(row, home_team, game_type) -> bool:
     """A shootout attempt or penalty shot: never scored, never part of a
     sequence."""
-    if game_type == 2 and int(row["period"]) >= 5:
+    if game_type != 3 and int(row["period"]) >= 5:  # preseason has shootouts too
         return True
     state = _skaters(row.get("situation_code"), row.get("team") == home_team)
     if state is None:

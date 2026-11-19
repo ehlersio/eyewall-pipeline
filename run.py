@@ -7,6 +7,7 @@ Nightly run order (important — modules depend on each other):
       docs/elo_prediction_model_results.md -- backs nhl.js's /prediction/analyze)
   3. playoff_race — magic/tragic numbers + clinched/eliminated (needs nhl_stats' fresh standings)
   4. shot_events  — league-wide shot coordinates from PBP (incremental)
+     then game_shot_xg — per-game xG from nhl_xg_model.py for the public API (unscored games only)
   5. shift_data   — league-wide shift charts (incremental)
   6. zone_starts  — per-player zone start counts from PBP (incremental)
   7. rapm         — 3-year rolling ridge regression RAPM -> player_seasons.rapm
@@ -217,6 +218,7 @@ def run_all():
 
     import draft_history
     import elo_ratings
+    import game_shot_xg
     import goalie_starts
     import injuries
     import injury_impact
@@ -269,6 +271,7 @@ def run_all():
     # needs game_log results, goalie_starts, win_probs, playoff_odds (live rows only)
     stage("prediction_scorecard", prediction_scorecard.run)
     stage("shot_events", shot_events.run)
+    stage("game_shot_xg", game_shot_xg.run)  # per-game xG for the public API; needs shot_events
     stage("shift_data", shift_data.run)
     stage("zone_starts", zone_starts.run)
     rapm_status = stage("rapm", rapm.run)
