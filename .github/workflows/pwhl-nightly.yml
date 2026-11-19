@@ -244,6 +244,19 @@ jobs:
         # module docstring. This step degrades gracefully (logs a warning,
         # upserts nothing) rather than failing for that season/type.
 
+      - name: PWHL per-game xG for the public API (game_shot_xg.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PWHL_SEASON: ${{ secrets.PWHL_SEASON }}
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python game_shot_xg.py --league pwhl "$SEASON_ID"
+        # pwhl_game_shot_xg from pwhl_shot_events + pwhl_game_log, so
+        # after the shot-events step. Rewrites the whole season (band rates
+        # are the season's own). Table: docs/sql/2026-11-19_game_shot_xg.sql
+        # (logs one error and skips until that's been run).
+
       - name: Compute PWHL skater percentiles (percentile parity piece 3)
         if: steps.guard.outputs.skip != 'true'
         env:

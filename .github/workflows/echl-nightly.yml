@@ -131,6 +131,18 @@ jobs:
         # Tables: docs/sql/2026-10-07_hockeytech_percentiles.sql (logs one error
         # and skips until that's been run).
 
+      - name: ECHL per-game xG for the public API (game_shot_xg.py)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SEASON_ID: ${{ inputs.season_id }}
+        run: python game_shot_xg.py --league echl "$SEASON_ID"
+        # echl_game_shot_xg from echl_shot_events + echl_game_log, so
+        # after the shot-events step. Rewrites the whole season (band rates
+        # are the season's own). Table: docs/sql/2026-11-19_game_shot_xg.sql
+        # (logs one error and skips until that's been run).
+
       - name: ECHL skater percentiles, per game played (hockeytech_percentiles.py)
         if: steps.guard.outputs.skip != 'true'
         env:
