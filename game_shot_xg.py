@@ -37,6 +37,7 @@ Usage:
 
 import argparse
 import logging
+import time
 from collections import defaultdict
 from datetime import UTC, datetime
 
@@ -53,6 +54,12 @@ HT_ATTEMPT_TYPES = ("goal", "shot")
 HT_SHOOTOUT_PERIOD = 7  # hockeytech_shot_events.PERIOD_MAP["SO"]
 FIVE_ON_FIVE = "1551"
 MIGRATION = "docs/sql/2026-11-19_game_shot_xg.sql"
+# Supabase drops a connection now and then ("Server disconnected without
+# sending a response"); the 2026-11-19 backfill lost two seasons' runs to it.
+# Each read and write is tried this many times, RETRY_WAIT seconds apart
+# (doubling), before it counts as failed.
+TRIES = 4
+RETRY_WAIT = 2.0
 NHL_SHOT_COLUMNS = (
     "id,game_id,event_id,period,time_in_period,x,y,shot_type,event_type,situation_code,team"
 )
@@ -62,9 +69,26 @@ def nhl_model_id(model: dict) -> str:
     return f"logistic-{model['generated']}"
 
 
+def with_retries(fn, what: str, tries: int = TRIES, wait: float = RETRY_WAIT):
+    """fn(), retried on any exception; the last one is raised."""
+    for attempt in range(1, tries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == tries:
+                raise
+            log.warning(
+                f"  {what} failed ({type(e).__name__}: {e}); retry {attempt} of {tries - 1}"
+            )
+            time.sleep(wait * 2 ** (attempt - 1))
+    return None
+
+
 class Writer:
-    """Upserts to a table the owner may not have created yet: the first
-    failure is logged once and later writes are skipped for the run."""
+    """Upserts to a table the owner may not have created yet. Each chunk is
+    retried (with_retries); one that still fails is logged and later writes
+    are skipped for the run -- a missing table fails every try, and a
+    connection that stays down would fail the rest anyway."""
 
     def __init__(self, sb, table: str, conflict: str):
         self.sb, self.table, self.conflict = sb, table, conflict
@@ -76,13 +100,18 @@ class Writer:
             return 0
         try:
             for i in range(0, len(rows), 500):
-                self.sb.table(self.table).upsert(
-                    rows[i : i + 500], on_conflict=self.conflict
-                ).execute()
+                chunk = rows[i : i + 500]
+                with_retries(
+                    lambda chunk=chunk: (
+                        self.sb.table(self.table).upsert(chunk, on_conflict=self.conflict).execute()
+                    ),
+                    f"upsert to {self.table}",
+                )
         except Exception as e:
             self.failed = True
             log.error(
-                f"  Upsert to {self.table} FAILED -- has {MIGRATION} been run? Skipping it: {type(e).__name__}: {e}"
+                f"  Upsert to {self.table} FAILED after {TRIES} tries -- has {MIGRATION} been run? "
+                f"Skipping it for this run: {type(e).__name__}: {e}"
             )
             return 0
         self.written += len(rows)
@@ -175,10 +204,17 @@ def nhl_scored_games(sb, season: int, model_id: str) -> set:
 
 
 def nhl_game_shots(sb, game_id: int) -> list:
-    return select_all(
-        lambda: sb.table("shot_events").select(NHL_SHOT_COLUMNS).eq("game_id", game_id),
-        order="id",
-    )
+    """One game's shot_events rows. A game has ~100-200, so one request
+    usually does; select_all only when a page comes back full."""
+
+    def query():
+        return sb.table("shot_events").select(NHL_SHOT_COLUMNS).eq("game_id", game_id)
+
+    def read():
+        first = query().order("id").range(0, 999).execute().data or []
+        return first if len(first) < 1000 else select_all(query, order="id")
+
+    return with_retries(read, f"shot_events read for game {game_id}")
 
 
 def run_nhl(
@@ -188,9 +224,15 @@ def run_nhl(
     now = now or datetime.now(UTC)
     model_id = nhl_model_id(model)
     log.info(f"=== NHL game xG ({model_id}), season {season} ===")
-    games = nhl_finished_games(sb, season, now.date().isoformat())
+    games = with_retries(
+        lambda: nhl_finished_games(sb, season, now.date().isoformat()), "game_log read"
+    )
     try:
-        done = set() if force else nhl_scored_games(sb, season, model_id)
+        done = (
+            set()
+            if force
+            else with_retries(lambda: nhl_scored_games(sb, season, model_id), f"{NHL_TABLE} read")
+        )
     except Exception as e:
         log.error(
             f"  Reading {NHL_TABLE} FAILED -- has {MIGRATION} been run? {type(e).__name__}: {e}"
@@ -198,15 +240,25 @@ def run_nhl(
         return 0
     todo = [g for g in games if g["game_id"] not in done]
     log.info(f"  {len(games)} finished games, {len(todo)} to score")
-    writer, batch, no_shots = Writer(sb, NHL_TABLE, NHL_CONFLICT), [], 0
+    writer, batch, no_shots, unread = Writer(sb, NHL_TABLE, NHL_CONFLICT), [], 0, 0
     stamp = now.isoformat()
     for i, g in enumerate(todo, 1):
-        shots = nhl_game_shots(sb, g["game_id"])
+        try:
+            shots = nhl_game_shots(sb, g["game_id"])
+        except Exception as e:
+            unread += 1  # left unscored: the next run tries it again
+            log.error(
+                f"  game {g['game_id']}: shot_events unreadable after {TRIES} tries: {type(e).__name__}: {e}"
+            )
+            shots = None
+        if i % 100 == 0:
+            log.info(f"  {i} of {len(todo)} games read, {writer.written} rows written")
         if not shots:
-            no_shots += 1  # shot_events.py hasn't ingested it (yet)
+            if shots is not None:
+                no_shots += 1  # shot_events.py hasn't ingested it (yet)
             continue
         batch.extend(nhl_game_rows(g, shots, model, stamp))
-        if len(batch) >= 400 or i == len(todo):
+        if len(batch) >= 400:
             writer.write(batch)
             batch = []
             if writer.failed:
@@ -214,6 +266,8 @@ def run_nhl(
     writer.write(batch)
     if no_shots:
         log.info(f"  {no_shots} games had no shot_events rows yet")
+    if unread:
+        log.warning(f"  {unread} games couldn't be read; the next run retries them")
     log.info(f"  OK {NHL_TABLE}: {writer.written} rows")
     return writer.written
 

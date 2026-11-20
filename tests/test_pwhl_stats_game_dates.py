@@ -87,6 +87,10 @@ def test_worker_start_date_dates_a_season_the_map_does_not_list(
     monkeypatch, season_id, printed, expected
 ):
     _worker_start_dates(monkeypatch, {"10": "2026-10-01", "11": "2026-12-04"})
+    # pwhl_stats adds the live current season to the map at import
+    # (SEASON_YEAR_MAP.setdefault(PWHL_SEASON, ...)); once that was season 11
+    # (2026-11-20) these cases stopped testing a season the map doesn't list.
+    monkeypatch.delitem(pwhl_stats.SEASON_YEAR_MAP, "11", raising=False)
     assert "11" not in pwhl_stats.SEASON_YEAR_MAP
     assert _parse_game_date(printed, season_id) == expected
 
