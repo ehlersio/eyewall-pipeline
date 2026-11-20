@@ -259,20 +259,34 @@ def write_rapm(
     )
     season_map = {r["player_id"]: r["team"] for r in season_rows}
 
+    def update(pid, payload):
+        client.table("player_seasons").update(payload).eq("player_id", pid).eq("season", season).eq(
+            "game_type", game_type
+        ).execute()
+
     for pid, rapm_val in rapm_by_pid.items():
         if not season_map.get(pid):
             continue  # player not on current season roster
+        base = {"rapm": rapm_val, "rapm_toi_min": minutes_by_pid.get(pid)}
         try:
-            client.table("player_seasons").update(
-                {
-                    "rapm": rapm_val,
-                    "rapm_toi_min": minutes_by_pid.get(pid),
-                    **extra_by_pid.get(pid, {}),
-                }
-            ).eq("player_id", pid).eq("season", season).eq("game_type", game_type).execute()
+            update(pid, {**base, **extra_by_pid.get(pid, {})})
             updates += 1
-        except Exception:
-            errors += 1
+        except Exception as e:
+            if not extra_cols:
+                errors += 1
+                continue
+            # The extra columns' migration hasn't run: write rapm alone from
+            # here on rather than lose every player's update.
+            print(
+                f"  !! {', '.join(extra_cols)} not written ({type(e).__name__}): run "
+                "docs/sql/2026-11-20_rapm_off_def.sql. Writing rapm without them."
+            )
+            extra_by_pid, extra_cols = {}, []
+            try:
+                update(pid, base)
+                updates += 1
+            except Exception:
+                errors += 1
 
     print(f"  OK Updated {updates} players, {errors} errors")
 
@@ -649,11 +663,13 @@ def per_60(info: dict | None, scale: str | None = None) -> float:
 
 # How the regression is built (rapm-rework-scope-2026-11-20.md):
 #   "attempts" one row per 5v5 attempt, signed xG target, SHOTS_PER_60 or a
-#              measured scale -- production through 2026-11
+#              measured scale -- production until 2026-11-20
 #   "stints"   rapm_stints.py: 5v5 stints, offence and defence columns, xG/60
-#              target weighted by seconds; writes rapm_off/rapm_def too
+#              target weighted by seconds; writes rapm_off/rapm_def too.
+#              The default since 2026-11-20: it met the ship rule set before
+#              scripts/backtest/backtest_rapm_design.py ran (#280).
 RAPM_DESIGNS = ("attempts", "stints")
-RAPM_DESIGN = "attempts"
+RAPM_DESIGN = "stints"
 
 
 def run(
@@ -846,6 +862,20 @@ def stint_fit(pool, target, min_secs, prior=None):
     return rapm_stints.fit(X, y, w, idx, prior=prior), secs
 
 
+def centred(fitted: dict) -> dict:
+    """Offence and defence each shifted so the rated players average 0, as
+    the per-attempt design centred its RAPM (validate_rapm.py checks the
+    mean). Net stays offence - defence."""
+    if not fitted:
+        return fitted
+    off_mean = sum(v[0] for v in fitted.values()) / len(fitted)
+    def_mean = sum(v[1] for v in fitted.values()) / len(fitted)
+    return {
+        p: (v[0] - off_mean, v[1] - def_mean, (v[0] - off_mean) - (v[1] - def_mean))
+        for p, v in fitted.items()
+    }
+
+
 def _write_stints(client, season, fitted, secs, game_type=NHL_REGULAR_SEASON):
     rapm_by_pid = {p: round(v[2], 3) for p, v in fitted.items()}
     extra = {p: {"rapm_off": round(v[0], 3), "rapm_def": round(v[1], 3)} for p, v in fitted.items()}
@@ -865,6 +895,7 @@ def run_stints(client, season: int, pool_seasons: list, target: str = "model") -
     fitted, secs = stint_fit(pool, target, MIN_SECS)
     if fitted is None:
         return "aborted_insufficient_data"
+    fitted = centred(fitted)
     nets = sorted(v[2] for v in fitted.values())
     print(f"  {len(fitted)} players; net RAPM range [{nets[0]:+.3f}, {nets[-1]:+.3f}] xG/60")
     _write_stints(client, season, fitted, secs)
