@@ -120,5 +120,77 @@ class TestFit:
 
 class TestRunStintsWiring:
     def test_design_switch(self):
-        assert rapm.RAPM_DESIGN == "attempts"
-        assert "stints" in rapm.RAPM_DESIGNS
+        assert set(rapm.RAPM_DESIGNS) == {"attempts", "stints"}
+
+
+class TestDefaultAndWrites:
+    def test_stints_is_the_default(self):
+        assert rapm.RAPM_DESIGN == "stints"
+
+    def test_centred_offence_and_defence_average_zero(self):
+        out = rapm.centred({1: (0.3, 0.1, 0.2), 2: (0.1, 0.3, -0.2), 3: (0.2, 0.2, 0.0)})
+        assert sum(v[0] for v in out.values()) == pytest.approx(0)
+        assert sum(v[1] for v in out.values()) == pytest.approx(0)
+        assert all(v[2] == pytest.approx(v[0] - v[1]) for v in out.values())
+
+    def test_missing_off_def_columns_still_write_rapm(self):
+        class Q:
+            def __init__(self, db, payload=None):
+                self.db, self.payload = db, payload
+
+            def select(self, *_a):
+                return self
+
+            def update(self, payload):
+                return Q(self.db, payload)
+
+            def eq(self, *_a):
+                return self
+
+            def order(self, *_a):
+                return self
+
+            def range(self, lo, hi):
+                self.lo = lo
+                return self
+
+            def execute(self):
+                if self.payload is None:  # the season read
+
+                    class R:
+                        pass
+
+                    R.data = (
+                        [
+                            {"player_id": 1, "team": "CAR", "rapm": 0.1},
+                            {"player_id": 2, "team": "CAR", "rapm": 0.2},
+                        ]
+                        if self.lo == 0
+                        else []
+                    )
+                    return R()
+                if "rapm_off" in self.payload:
+                    raise RuntimeError("column player_seasons.rapm_off does not exist")
+                self.db.writes.append(self.payload)
+                return self
+
+        class DB:
+            def __init__(self):
+                self.writes = []
+
+            def table(self, _name):
+                return Q(self)
+
+        db = DB()
+        rapm.write_rapm(
+            db,
+            20252026,
+            {1: 0.5, 2: -0.5},
+            {1: 100.0, 2: 90.0},
+            extra_by_pid={
+                1: {"rapm_off": 0.3, "rapm_def": -0.2},
+                2: {"rapm_off": 0.0, "rapm_def": 0.5},
+            },
+        )
+        assert [w["rapm"] for w in db.writes] == [0.5, -0.5]
+        assert all("rapm_off" not in w for w in db.writes)
