@@ -139,6 +139,12 @@ def game_log_rows(game_id, home, away, date="2026-11-17", game_type=2, score=3):
     ]
 
 
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    """Retries back off with time.sleep; tests don't wait."""
+    monkeypatch.setattr(gx.time, "sleep", lambda _s: None)
+
+
 @pytest.fixture(scope="module")
 def model():
     return xm.load_model()
@@ -336,3 +342,64 @@ class TestHockeyTech:
     def test_no_shots_writes_nothing(self):
         db = FakeDB(ahl_shot_events=[], ahl_game_log=[], ahl_game_shot_xg=[])
         assert gx.run_hockeytech(db, "ahl", 90, "regular", now=NOW) == 0
+
+
+class Flaky(FakeDB):
+    """FakeDB whose first `fail` executes on `table` raise, like a dropped
+    Supabase connection."""
+
+    def __init__(self, table, fail, **tables):
+        super().__init__(**tables)
+        self.flaky_table, self.fail = table, fail
+
+    def table(self, name):
+        q = Query(self, name)
+        if name == self.flaky_table:
+            db, real = self, q.execute
+
+            def execute():
+                if db.fail > 0:
+                    db.fail -= 1
+                    raise ConnectionError("Server disconnected without sending a response.")
+                return real()
+
+            q.execute = execute
+        return q
+
+
+class TestRetries:
+    def tables(self):
+        return {
+            "game_log": [*game_log_rows(10, "CAR", "BOS"), *game_log_rows(11, "NYR", "PIT")],
+            "shot_events": [nhl_shot(10, 1, "CAR", 80), nhl_shot(11, 1, "NYR", 75)],
+            "game_shot_xg": [],
+        }
+
+    def test_dropped_reads_and_writes_are_retried(self, model):
+        for table in ("shot_events", "game_shot_xg", "game_log"):
+            db = Flaky(table, 2, **self.tables())
+            assert gx.run_nhl(db, 20262027, model=model, now=NOW) == 8, table
+
+    def test_a_game_that_stays_unreadable_is_skipped_not_fatal(self, model):
+        db = Flaky("shot_events", gx.TRIES, **self.tables())  # the first game's reads all fail
+        assert gx.run_nhl(db, 20262027, model=model, now=NOW) == 4
+        assert {r["game_id"] for r in db.tables["game_shot_xg"]} == {11}
+        assert gx.run_nhl(db, 20262027, model=model, now=NOW) == 4  # picked up next run
+
+    def test_a_write_that_keeps_failing_stops_the_run(self, model):
+        db = Flaky("game_shot_xg", 100, **self.tables())
+        assert gx.run_nhl(db, 20262027, model=model, now=NOW) == 0
+
+    def test_one_request_per_game(self, model):
+        db = FakeDB(**self.tables())
+        calls = []
+        real = db.table
+
+        def counting(name):
+            if name == "shot_events":
+                calls.append(name)
+            return real(name)
+
+        db.table = counting
+        gx.run_nhl(db, 20262027, model=model, now=NOW)
+        assert len(calls) == 2
