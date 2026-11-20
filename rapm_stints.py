@@ -27,9 +27,10 @@ Result
 
 Prototype on 2023-24..2025-26 (single seasons, alpha 3e5): next-season
 on-ice GD/60 prediction 0.317 vs 0.299 for the per-attempt design, 0.201 vs
-0.188 for players who changed teams. STINT_ALPHA is that prototype's best
-grid value; step 2 (scripts/backtest/backtest_rapm_design.py) chooses it by
-cross-validation over games.
+0.188 for players who changed teams. STINT_ALPHA: cross-validation over
+games in scripts/backtest/backtest_rapm_design.py (2026-11-20) chose 3e5 for
+2023-24 and 2025-26 and 1e6 for 2024-25 (inner skill at the two within
+1%); docs/rapm_design_backtest_results.md.
 """
 
 from collections import defaultdict
@@ -184,10 +185,12 @@ def stint_matrix(stints, min_secs):
     return X, y, w, idx, secs
 
 
-def fit(X, y, w, idx, alpha=STINT_ALPHA, prior=None):
+def fit(X, y, w, idx, alpha=STINT_ALPHA, prior=None, out=None):
     """Ridge on the stint rows. prior: {player: (offence, defence)} to shrink
     toward instead of 0 (playoff RAPM shrinks toward the regular season).
-    Returns {player: (offence, defence, net)} in xG/60."""
+    Returns {player: (offence, defence, net)} in xG/60. `out`, when given,
+    gets the intercept and the covariates' coefficients (home, leading,
+    trailing), for predicting held-out stints."""
     from sklearn.linear_model import Ridge
 
     n = len(idx)
@@ -198,6 +201,9 @@ def fit(X, y, w, idx, alpha=STINT_ALPHA, prior=None):
             beta0[i], beta0[n + i] = off, dfn
     model = Ridge(alpha=alpha, fit_intercept=True).fit(X, y - X @ beta0, sample_weight=w)
     coef = beta0 + model.coef_
+    if out is not None:
+        out["intercept"] = float(model.intercept_)
+        out["covariates"] = [float(c) for c in coef[2 * n :]]
     return {
         p: (float(coef[i]), float(coef[n + i]), float(coef[i] - coef[n + i]))
         for p, i in idx.items()
