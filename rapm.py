@@ -230,12 +230,17 @@ def write_rapm(
     rapm_by_pid: dict,
     minutes_by_pid: dict | None = None,
     game_type: int = NHL_REGULAR_SEASON,
+    extra_by_pid: dict | None = None,
 ) -> dict:
     """Write this run's RAPM (and each player's ice time in the pool,
     rapm_toi_min) to the season's `game_type` player_seasons rows, and clear
     both on any row this run didn't rate. Returns player_id -> team for the
     season's rows."""
     minutes_by_pid = minutes_by_pid or {}
+    # Columns some designs add (the stint design's rapm_off/rapm_def, from
+    # docs/sql/2026-11-20_rapm_off_def.sql). Cleared with rapm on stale rows.
+    extra_by_pid = extra_by_pid or {}
+    extra_cols = sorted({c for v in extra_by_pid.values() for c in v})
     print(f"\n  Upserting RAPM to player_seasons (season {season}, game_type {game_type})...")
     updates = 0
     errors = 0
@@ -259,7 +264,11 @@ def write_rapm(
             continue  # player not on current season roster
         try:
             client.table("player_seasons").update(
-                {"rapm": rapm_val, "rapm_toi_min": minutes_by_pid.get(pid)}
+                {
+                    "rapm": rapm_val,
+                    "rapm_toi_min": minutes_by_pid.get(pid),
+                    **extra_by_pid.get(pid, {}),
+                }
             ).eq("player_id", pid).eq("season", season).eq("game_type", game_type).execute()
             updates += 1
         except Exception:
@@ -278,9 +287,9 @@ def write_rapm(
         if r.get("rapm") is not None and r["player_id"] not in rapm_by_pid
     ]
     for pid in stale:
-        client.table("player_seasons").update({"rapm": None, "rapm_toi_min": None}).eq(
-            "player_id", pid
-        ).eq("season", season).eq("game_type", game_type).execute()
+        client.table("player_seasons").update(
+            {"rapm": None, "rapm_toi_min": None, **dict.fromkeys(extra_cols)}
+        ).eq("player_id", pid).eq("season", season).eq("game_type", game_type).execute()
     print(f"  Cleared stale RAPM on {len(stale)} players not rated this run")
     return season_map
 
@@ -638,7 +647,21 @@ def per_60(info: dict | None, scale: str | None = None) -> float:
     return SHOTS_PER_60
 
 
-def run(season: int = NHL_SEASON, target: str | None = None, scale: str | None = None):
+# How the regression is built (rapm-rework-scope-2026-11-20.md):
+#   "attempts" one row per 5v5 attempt, signed xG target, SHOTS_PER_60 or a
+#              measured scale -- production through 2026-11
+#   "stints"   rapm_stints.py: 5v5 stints, offence and defence columns, xG/60
+#              target weighted by seconds; writes rapm_off/rapm_def too
+RAPM_DESIGNS = ("attempts", "stints")
+RAPM_DESIGN = "attempts"
+
+
+def run(
+    season: int = NHL_SEASON,
+    target: str | None = None,
+    scale: str | None = None,
+    design: str | None = None,
+):
     """Returns an explicit status string: "ok" on success, or one of the
     "aborted_*" sentinels below on early exit. player_seasons.rapm is
     updated in place per-player (never cleared first), so a mid-run abort
@@ -662,6 +685,12 @@ def run(season: int = NHL_SEASON, target: str | None = None, scale: str | None =
     s2 = prior_season(season)  # 1 year ago
     POOL_SEASONS = [s for s in [s1, s2, season] if s >= 20222023]
     print(f"  Pool seasons: {POOL_SEASONS}")
+
+    design = design or RAPM_DESIGN
+    if design not in RAPM_DESIGNS:
+        raise ValueError(f"unknown RAPM design {design!r}")
+    if design == "stints":
+        return run_stints(client, season, POOL_SEASONS, target or "model")
 
     target = target or RAPM_TARGET
     scale = scale or RAPM_SCALE
@@ -794,6 +823,65 @@ def run_playoffs(
     return "ok"
 
 
+def stint_fit(pool, target, min_secs, prior=None):
+    """rapm_stints over a loaded pool: {player: (offence, defence, net)} and
+    {player: 5v5 seconds}, or (None, None) with too few stints to fit."""
+    import rapm_stints
+
+    shots_by_game = defaultdict(list)
+    for r in pool["shots"]:
+        shots_by_game[r["game_id"]].append(r)
+    xg_of = score_shots(shots_by_game, pool["game_home"], target)
+    stints = rapm_stints.pool_stints(pool, xg_of, shot_abs_secs)
+    print(
+        f"  {len(stints):,} 5v5 stints, {sum(s[2] for s in stints) / 3600:,.0f} hours ({target} target)"
+    )
+    if len(stints) < 1000:
+        print("  ERROR Too few stints for regression -- aborting")
+        return None, None
+    X, y, w, idx, secs = rapm_stints.stint_matrix(stints, min_secs)
+    print(f"  Matrix {X.shape}, {len(idx)} players with >= {min_secs // 60} min of 5v5")
+    if not idx:
+        return {}, secs
+    return rapm_stints.fit(X, y, w, idx, prior=prior), secs
+
+
+def _write_stints(client, season, fitted, secs, game_type=NHL_REGULAR_SEASON):
+    rapm_by_pid = {p: round(v[2], 3) for p, v in fitted.items()}
+    extra = {p: {"rapm_off": round(v[0], 3), "rapm_def": round(v[1], 3)} for p, v in fitted.items()}
+    minutes = {p: round(secs[p] / 60, 1) for p in fitted}
+    return write_rapm(client, season, rapm_by_pid, minutes, game_type=game_type, extra_by_pid=extra)
+
+
+def run_stints(client, season: int, pool_seasons: list, target: str = "model") -> str:
+    """The stint design (rapm_stints.py) for `season`: the regular-season
+    fit over the pool, then playoff RAPM over the pool's playoffs, shrunk
+    toward each player's regular-season offence and defence. Writes rapm
+    (net), rapm_off, rapm_def and rapm_toi_min (here: 5v5 minutes)."""
+    import rapm_stints
+
+    print(f"  Design: stints, target: {target}, alpha {rapm_stints.STINT_ALPHA:g}")
+    pool = load_pool(client, pool_seasons, RAPM_GAME_TYPES)
+    fitted, secs = stint_fit(pool, target, MIN_SECS)
+    if fitted is None:
+        return "aborted_insufficient_data"
+    nets = sorted(v[2] for v in fitted.values())
+    print(f"  {len(fitted)} players; net RAPM range [{nets[0]:+.3f}, {nets[-1]:+.3f}] xG/60")
+    _write_stints(client, season, fitted, secs)
+
+    print(f"\n=== Playoff RAPM (stints) -- Season {season} (playoffs of {pool_seasons}) ===")
+    playoff_pool = load_pool(client, pool_seasons, (NHL_PLAYOFFS,))
+    prior = {p: (v[0], v[1]) for p, v in fitted.items()}
+    p_fitted, p_secs = stint_fit(playoff_pool, target, PLAYOFF_MIN_SECS, prior=prior)
+    if p_fitted is None:
+        print("\n!! Playoff RAPM: aborted_insufficient_data")
+        return "playoffs_aborted_insufficient_data"
+    if p_fitted:
+        _write_stints(client, season, p_fitted, p_secs, game_type=NHL_PLAYOFFS)
+    print("\nDONE RAPM pipeline complete (stints)")
+    return "ok"
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -801,5 +889,6 @@ if __name__ == "__main__":
     ap.add_argument("season", nargs="?", type=int, default=NHL_SEASON)
     ap.add_argument("--target", choices=RAPM_TARGETS, default=None, help=f"default {RAPM_TARGET}")
     ap.add_argument("--scale", choices=RAPM_SCALES, default=None, help=f"default {RAPM_SCALE}")
+    ap.add_argument("--design", choices=RAPM_DESIGNS, default=None, help=f"default {RAPM_DESIGN}")
     args = ap.parse_args()
-    run(args.season, target=args.target, scale=args.scale)
+    run(args.season, target=args.target, scale=args.scale, design=args.design)
