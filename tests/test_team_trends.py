@@ -240,3 +240,54 @@ class TestPostGates:
         code, ship = self.run((logs, xg_rows, events))
         assert code == 0
         assert "through Wed, Jan 14" in ship.call_args.args[4]
+
+
+class TestMinorFreshness:
+    """minor_league_slides' stale-data gate: only games that will still turn
+    Final hold the post back (2026-11-20: ECHL's one game on 11-19 was
+    postponed, and every retry failed)."""
+
+    THROUGH = date(2026, 11, 19)
+
+    def run(self, last_state):
+        games = [
+            {
+                "game_id": 1,
+                "game_date": "2026-11-18",
+                "home_team_id": 1,
+                "away_team_id": 2,
+                "home_score": 3,
+                "away_score": 2,
+                "game_state": "Final",
+            },
+            {
+                "game_id": 2,
+                "game_date": "2026-11-19",
+                "home_team_id": 3,
+                "away_team_id": 4,
+                "home_score": 0,
+                "away_score": 0,
+                "game_state": last_state,
+            },
+        ]
+        with (
+            patch.object(
+                tt,
+                "resolve_current_season",
+                return_value={"season_id": 78, "season_type": "regular"},
+            ),
+            patch.object(tt, "final_games", return_value=games),
+            patch.object(tt, "season_totals", return_value=([], "later")) as totals,
+        ):
+            out = tt.minor_league_slides(MagicMock(), AHL, self.THROUGH)
+        return out, totals
+
+    @pytest.mark.parametrize("state", ["Postponed", "Cancelled"])
+    def test_not_played_game_doesnt_block(self, state):
+        (_, status), totals = self.run(state)
+        assert status == 0 and totals.called
+
+    @pytest.mark.parametrize("state", ["Live", "7:10PM", ""])
+    def test_unfinished_game_is_stale(self, state):
+        (slides, status), totals = self.run(state)
+        assert slides == [] and status == 1 and not totals.called

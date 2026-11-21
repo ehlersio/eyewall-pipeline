@@ -59,7 +59,7 @@ from db import NHL_SEASON, get_client
 from hockeytech_leagues import AHL, ECHL, PWHL
 from hockeytech_shot_xg import REAL_SHOT_TYPES, shot_xg
 from hockeytech_stats import resolve_current_season
-from pipeline_common import select_all
+from pipeline_common import select_all, unfinished_games
 from scratches import fetch_keyset
 from season_lookup import get_pwhl_season
 from social_posts_leagues import PWHL_TEAMS, code
@@ -641,7 +641,7 @@ def ht_special_rows(season_rows, league):
 
 def final_games(client, key, season_id, through, extra=""):
     """Every {key}_game_log row of the season dated through `through`, Final
-    or not (unfinished_on() looks at the rest). extra: more columns."""
+    or not (unfinished_games() looks at the rest). extra: more columns."""
     cols = "game_id,game_date,home_team_id,away_team_id,home_score,away_score,game_state"
     return select_all(
         lambda: (
@@ -651,16 +651,6 @@ def final_games(client, key, season_id, through, extra=""):
             .lte("game_date", through.isoformat())
         )
     )
-
-
-def unfinished_on(games, day):
-    """Games dated `day` not marked Final: the nightly hasn't caught up (a
-    postponement shows up here too, but only on its own date)."""
-    return [
-        g["game_id"]
-        for g in games
-        if g["game_date"][:10] == day.isoformat() and g["game_state"] != "Final"
-    ]
 
 
 def gp_matches(season_rows, games, league):
@@ -732,7 +722,7 @@ def post_pwhl_trends(client, today, dry_run, season_id=None):
     post_key = f"pwhl-trends-{today.isoformat()}"
     season_id = season_id or get_pwhl_season()["season_id"]
     all_games = final_games(client, "pwhl", season_id, through, ",shootout")
-    if unfinished_on(all_games, through):
+    if unfinished_games(all_games, through):
         print(f"  PWHL games on {through} not Final yet -- nightly not done?")
         return 1
     games = [g for g in all_games if g["game_state"] == "Final"]
@@ -844,7 +834,7 @@ def minor_league_slides(client, league, through, season_id=None):
         return [], 0
     season_id = season["season_id"]
     games = final_games(client, league.key, season_id, through)
-    if unfinished_on(games, through):
+    if unfinished_games(games, through):
         print(f"  {league.label} games on {through} not Final yet -- nightly not done?")
         return [], 1
     week_start = (through - timedelta(days=7)).isoformat()
