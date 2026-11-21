@@ -225,6 +225,26 @@ def select_all(
     )
 
 
+# HockeyTech GameStatusString for a game that won't be played on its date.
+# It never turns Final, so waiting on it would block a post all week.
+NOT_PLAYED_STATES = ("postponed", "cancelled", "canceled")
+
+
+def unfinished_games(rows, through) -> list:
+    """Ids of `through`'s games that should be Final but aren't yet: the
+    nightly hasn't caught up. Postponed / cancelled games are left out: no
+    retry will finish them (a postponed ECHL game blocked minor-trends all
+    of 2026-11-20)."""
+    day = through.isoformat()
+    return [
+        r["game_id"]
+        for r in rows
+        if r["game_date"][:10] == day
+        and r["game_state"] != "Final"
+        and not (r["game_state"] or "").strip().lower().startswith(NOT_PLAYED_STATES)
+    ]
+
+
 # NHL gameType values, as the NHL API and game_log.game_type use them.
 NHL_PRESEASON = 1
 NHL_REGULAR_SEASON = 2

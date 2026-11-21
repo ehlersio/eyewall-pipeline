@@ -75,7 +75,7 @@ import social_posts as sp
 from db import NHL_SEASON, get_client
 from hockeytech_leagues import AHL, ECHL, PWHL
 from hockeytech_stats import resolve_current_season
-from pipeline_common import select_all
+from pipeline_common import select_all, unfinished_games
 from scratches import fetch_keyset
 from season_lookup import get_pwhl_season
 from social_posts_leagues import PWHL_TEAMS, code, player_names
@@ -1050,24 +1050,6 @@ def load_nhl(client, season, through):
         "history_from": season_label(NHL_HISTORY_FROM // 10000),
         "season_label": season_label(season // 10000),
     }
-
-
-# HockeyTech GameStatusString for a game that won't be played on its date.
-# It never turns Final, so waiting on it would block the post all week.
-NOT_PLAYED_STATES = ("postponed", "cancelled", "canceled")
-
-
-def unfinished_games(rows, through):
-    """Ids of `through`'s games that should be Final but aren't yet.
-    Postponed / cancelled games are left out: no retry will finish them."""
-    day = through.isoformat()
-    return [
-        r["game_id"]
-        for r in rows
-        if r["game_date"][:10] == day
-        and r["game_state"] != "Final"
-        and not (r["game_state"] or "").strip().lower().startswith(NOT_PLAYED_STATES)
-    ]
 
 
 def load_hockeytech(client, league, season_id, through, start_year, teams):
