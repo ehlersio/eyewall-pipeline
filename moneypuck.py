@@ -7,7 +7,9 @@ Runs after nhl_stats.py (player_seasons rows must exist first).
 
 import csv
 import io
+import json
 import math
+import os
 import time
 import traceback
 
@@ -50,8 +52,19 @@ HEADERS = {
 }
 
 MIN_GP = 10  # minimum games for percentile pool
-GOALS_PER_WIN = 5.4  # NHL goals per win approximation
-PEN_MIN_VALUE = 0.11  # goals per penalty minute (TopDownHockey methodology)
+# WAR's constants, measured from the data by
+# scripts/backtest/measure_war_weights.py into war_weights.json (see
+# docs/war_weights_results.md). Until 2026-11-21 they were hand-typed:
+# 5.4 goals per win (measured: 6.21), 0.11 goals per penalty minute then x0.3
+# (measured: 0.157 per penalty, x0.578 repeatability), finishing x0.3 for
+# everyone (measured: attempts / (attempts + 566)).
+_WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "war_weights.json")
+with open(_WEIGHTS_PATH) as _fh:
+    WAR_WEIGHTS = json.load(_fh)
+GOALS_PER_WIN = WAR_WEIGHTS["goals_per_win"]
+PENALTY_GOALS_EACH = WAR_WEIGHTS["penalty_goals_each"]
+PENALTY_WEIGHT = WAR_WEIGHTS["penalty_weight"]
+FINISHING_K = WAR_WEIGHTS["finishing_k"]
 
 # Season TOI (minutes) floor for DISPLAYING an individual player's own
 # percentiles -- derived from p10 of the GP-qualified pool (season 20252026,
@@ -1022,14 +1035,28 @@ def season_games(season: int) -> int | None:
 
 
 def penalty_goals(row) -> float:
-    """Goals from one MoneyPuck "all" row's penalties: minutes drawn minus
-    minutes taken, at PEN_MIN_VALUE. Until 2026-11 WAR charged the minutes
-    taken and never credited the minutes drawn, so a player who draws a lot
-    of penalties (McDavid early in 2026-27: 18 drawn, 2 taken) was scored on
-    the 2 alone."""
-    drawn = n(row.get("penalityMinutesDrawn", 0))
-    taken = n(row.get("I_F_penalityMinutes", 0))
-    return (drawn - taken) * PEN_MIN_VALUE
+    """WAR's penalty term for one MoneyPuck "all" row, in goals: penalties
+    drawn minus penalties taken (counts, not minutes -- a misconduct's ten
+    minutes give no power play), at PENALTY_GOALS_EACH net goals each,
+    weighted by PENALTY_WEIGHT, how much of a season's differential repeats.
+    Until 2026-11 WAR charged the minutes taken and never credited those
+    drawn (McDavid early in 2026-27: 18 drawn, 2 taken, scored on the 2)."""
+    drawn = n(row.get("penaltiesDrawn", 0))
+    taken = n(row.get("penalties", 0))
+    return (drawn - taken) * PENALTY_GOALS_EACH * PENALTY_WEIGHT
+
+
+def finishing_goals(row) -> float:
+    """WAR's finishing term: goals minus MoneyPuck's xG, shrunk by how
+    much shooting a season holds -- attempts / (attempts + FINISHING_K).
+    Over a typical season (133 unblocked attempts) that keeps about a fifth;
+    the flat 0.3 it replaced gave a 40-attempt depth player the same credit
+    per goal as a 400-attempt sniper."""
+    attempts = n(row.get("I_F_unblockedShotAttempts", 0))
+    if attempts <= 0:
+        return 0.0
+    fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
+    return fin * attempts / (attempts + FINISHING_K)
 
 
 def war_from_rapm(row, ev_row, rapm, replacement: float = REPLACEMENT_WAR) -> float | None:
@@ -1043,10 +1070,8 @@ def war_from_rapm(row, ev_row, rapm, replacement: float = REPLACEMENT_WAR) -> fl
     it = n(ev_row.get("icetime", 0)) / 3600 if ev_row else 0.0  # hours of EV ice
     if it < 0.1:
         return None
-    pen = penalty_goals(row)
-    fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
     ev_gaa = float(rapm) * it  # xG above average from EV RAPM
-    gaa = ev_gaa + pen * 0.3 + fin * 0.3
+    gaa = ev_gaa + penalty_goals(row) + finishing_goals(row)
     return round(gaa / GOALS_PER_WIN + replacement, 3)
 
 
@@ -1516,15 +1541,13 @@ def run(season: int = NHL_SEASON) -> list[str]:
             return war_from_rapm(row, ev, rapm, replacement)
 
         # Fallback: xGoals-above-average method (original approach)
-        pen = penalty_goals(row)
-        fin = n(row.get("I_F_goals", 0)) - n(row.get("I_F_xGoals", 0))
         avg_xgf = fwd_avg_xgf60 if is_fwd else def_avg_xgf60
         avg_xga = fwd_avg_xga60 if is_fwd else def_avg_xga60
         xgf60 = per60(ev.get("OnIce_F_xGoals", 0), n(ev["icetime"]))
         xga60 = per60(ev.get("OnIce_A_xGoals", 0), n(ev["icetime"]))
         ev_gaa = (xgf60 - avg_xgf) * it + (avg_xga - xga60) * it
 
-        gaa = ev_gaa + pen * 0.3 + fin * 0.3
+        gaa = ev_gaa + penalty_goals(row) + finishing_goals(row)
         war = gaa / GOALS_PER_WIN + replacement
         return round(war, 3)
 

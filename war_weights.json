@@ -1,0 +1,14 @@
+{
+  "generated": "2026-11-21",
+  "source": "scripts/backtest/measure_war_weights.py",
+  "seasons": [
+    "2022-23",
+    "2023-24",
+    "2024-25",
+    "2025-26"
+  ],
+  "goals_per_win": 6.208,
+  "penalty_goals_each": 0.1573,
+  "penalty_weight": 0.578,
+  "finishing_k": 566.4
+}
