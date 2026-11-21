@@ -42,7 +42,7 @@ import rapm
 import score_state
 from db import get_client
 
-GOALS_PER_WIN = 5.4  # kept in sync with moneypuck.py:37
+GOALS_PER_WIN = 5.4  # frozen for this historical backtest; moneypuck.py now reads war_weights.json
 
 FULL_POOL_SEASONS = [20242025, 20252026]
 DEGRADED_POOL_SEASONS = [20222023, 20232024]

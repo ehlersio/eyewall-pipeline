@@ -354,6 +354,9 @@ def mp_skater(pid, situation, **cols):
         "I_F_xGoals": "3.5",
         "I_F_primaryAssists": "2",
         "I_F_penalityMinutes": "4",
+        "penalties": "2",
+        "penaltiesDrawn": "0",
+        "I_F_unblockedShotAttempts": "40",
         "onIce_xGoalsPercentage": "0.55",
         "offIce_xGoalsPercentage": "0.5",
         "OnIce_F_xGoals": "6",
@@ -427,7 +430,10 @@ class TestPlayoffPlayerAnalytics:
 
         (row,) = client.tables["player_seasons"].upserts
         hours = 12000 / 3600
-        gaa = 0.05 * hours + (4 * moneypuck.PEN_MIN_VALUE * -1) * 0.3 + (5 - 3.5) * 0.3
+        # 2 penalties taken, none drawn; +1.5 goals over xG on 40 attempts
+        pen = -2 * moneypuck.PENALTY_GOALS_EACH * moneypuck.PENALTY_WEIGHT
+        fin = 1.5 * 40 / (40 + moneypuck.FINISHING_K)
+        gaa = 0.05 * hours + pen + fin
         assert row["war"] == round(gaa / moneypuck.GOALS_PER_WIN + 0.5 * 0.2, 3)
 
     def test_no_full_season_reference_leaves_playoff_war_null(self, monkeypatch):
