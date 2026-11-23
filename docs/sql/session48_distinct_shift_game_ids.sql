@@ -1,3 +1,8 @@
+-- UNUSED since 2026-11-23: shift_data.get_processed_games() now checks each
+-- candidate game by game_id instead. This DISTINCT over a whole season of
+-- shift rows ran past the 8 s statement_timeout (57014) once the season had
+-- ~234k rows. Safe to drop from Supabase once a nightly has run clean.
+--
 -- Session 48 — backfilling distinct_shift_game_ids into the repo. This
 -- function already existed live in Supabase (predates this repo's session
 -- history; its search_path was already hardened via ALTER FUNCTION back in

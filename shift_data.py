@@ -115,30 +115,49 @@ def get_all_completed_games(season):
     return sorted(games, key=lambda g: g["id"])
 
 
-def get_processed_games(client, season):
-    """Get distinct game IDs already in shift_events via RPC.
-    Avoids paginating through ~1M rows by using a DB-side distinct query.
-    Requires the distinct_shift_game_ids function to be created in Supabase.
+PROCESSED_CHECK_WORKERS = 8
+PROCESSED_CHECK_TRIES = 3
+
+
+def get_processed_games(client, game_ids):
+    """The ones among game_ids that already have rows in shift_events.
+
+    One `game_id = X limit 1` lookup per game, which the game_id index
+    answers in ~0.07 s cold or warm, run PROCESSED_CHECK_WORKERS at a time.
+    The cost grows with the games asked about, not the season's shift rows.
+
+    This was the distinct_shift_game_ids RPC, a DISTINCT over every shift
+    row of the season. By 2026-11 (~234k rows for 2026-27) it ran past
+    PostgREST's 8 s statement_timeout whenever the season's pages weren't
+    cached, and failed the nightly's shift_data stage (57014) from 11-22 on.
+    The function is still in Supabase (docs/sql/session48_...) but unused.
+
+    A lookup is retried; one that still fails raises, failing the stage as
+    before rather than guessing either way.
     """
-    all_ids = set()
-    offset = 0
-    while True:
-        result = client.rpc(
-            "distinct_shift_game_ids",
-            {
-                "p_season": season,
-                "p_offset": offset,
-                "p_limit": 1000,
-            },
-        ).execute()
-        rows = result.data
-        if not rows:
-            break
-        all_ids.update(r["game_id"] for r in rows)
-        if len(rows) < 1000:
-            break
-        offset += 1000
-    return all_ids
+
+    def has_rows(game_id):
+        for attempt in range(1, PROCESSED_CHECK_TRIES + 1):
+            try:
+                rows = (
+                    client.table("shift_events")
+                    .select("game_id")
+                    .eq("game_id", game_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                )
+                return bool(rows)
+            except Exception:
+                if attempt == PROCESSED_CHECK_TRIES:
+                    raise
+                time.sleep(attempt)
+        return False
+
+    ids = list(game_ids)
+    with ThreadPoolExecutor(max_workers=PROCESSED_CHECK_WORKERS) as executor:
+        found = executor.map(has_rows, ids)
+        return {gid for gid, present in zip(ids, found) if present}
 
 
 def get_skipped_games(client, season):
@@ -431,8 +450,8 @@ def run(season=NHL_SEASON):
     games = get_all_completed_games(season)
     print(f"  Found {len(games):,} completed games")
 
-    already_done = get_processed_games(client, season)
     skipped = get_skipped_games(client, season)
+    already_done = get_processed_games(client, [g["id"] for g in games if g["id"] not in skipped])
     excluded = already_done | skipped
     pending = [g for g in games if g["id"] not in excluded]
     print(
