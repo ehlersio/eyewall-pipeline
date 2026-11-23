@@ -24,36 +24,52 @@ import csv
 import json
 import math
 import sys
+import unicodedata
 from datetime import UTC, datetime
 
 from db import NHL_SEASON, get_client
 
-# Known elite players used for sanity checks (player_id -> name)
+# Known elite players used for sanity checks (NHL player_id -> name).
 # All players now have league-wide shift/shot data — same reliability regardless of team.
 # Expected top 40% (60th percentile) for all.
 #
-# Known RAPM limitation: heavily co-deployed linemates (e.g. McDavid + Draisaitl,
-# Makar + his regular partner) can produce inflated estimates for one player and
-# deflated estimates for the other due to collinearity in the design matrix.
-# The ridge penalty helps but does not fully resolve this for dominant top lines.
-# Players with low game counts (e.g. Makar missing ~30 games in 20252026) may also
-# show high-variance estimates due to small sample size.
-# These are accepted model limitations — WARNs for known linemate pairs or
-# injury-shortened seasons should be reviewed manually rather than treated as
-# data or pipeline errors.
+# Until 2026-11-23, 9 of these 11 ids belonged to other players (Josh Anderson
+# as "Aho", JJ Peterka as "Slavin", Neal Pionk as "Makar", Mitch Marner as
+# "Draisaitl", a goalie as "Kucherov", ...), so every run since 2026-05-30
+# warned about the wrong people. The ids below are checked against the NHL
+# API's player landing pages; the run also checks each one's name in
+# `players` (elite_id_mismatches) so a wrong id is reported as such.
 KNOWN_ELITE = {
-    8476981: "Sebastian Aho",
-    8480801: "Andrei Svechnikov",
-    8481600: "Shayne Gostisbehere",
-    8482175: "Jaccob Slavin",
+    8478427: "Sebastian Aho",
+    8480830: "Andrei Svechnikov",
+    8476906: "Shayne Gostisbehere",
+    8476958: "Jaccob Slavin",
     8478402: "Connor McDavid",
     8477492: "Nathan MacKinnon",
-    8478483: "Leon Draisaitl",
-    8476899: "Nikita Kucherov",
-    8478550: "David Pastrnak",
-    8481559: "Auston Matthews",
-    8480145: "Cale Makar",
+    8477934: "Leon Draisaitl",
+    8476453: "Nikita Kucherov",
+    8477956: "David Pastrnak",
+    8479318: "Auston Matthews",
+    8480069: "Cale Makar",
 }
+
+
+def _name_key(name):
+    """Casefolded, accents stripped: 'Pastrňák' and 'Pastrnak' match."""
+    decomposed = unicodedata.normalize("NFKD", name or "")
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold().strip()
+
+
+def elite_id_mismatches(name_by_id):
+    """{player_id: name in `players`} for KNOWN_ELITE ids whose `players`
+    name isn't the one KNOWN_ELITE gives. An id missing from `players`
+    isn't a mismatch (nothing to compare)."""
+    return {
+        pid: name_by_id[pid]
+        for pid, label in KNOWN_ELITE.items()
+        if name_by_id.get(pid) and _name_key(name_by_id[pid]) != _name_key(label)
+    }
+
 
 # Thresholds
 R_PASS = 0.85
@@ -113,8 +129,9 @@ def run_internal_checks(client, season, our_rapm):
         issues.append(f"Mean RAPM {mean_val:.4f} outside tolerance +/-{MEAN_TOLERANCE}")
 
     # Position balance — forwards and defensemen should both appear in top/bottom quartile
-    pos_rows = fetch_all(client, "players", "id,position", {})
+    pos_rows = fetch_all(client, "players", "id,position,name", {})
     pos_map = {r["id"]: r["position"] for r in pos_rows}
+    name_map = {r["id"]: r.get("name") for r in pos_rows}
 
     sorted_ids = sorted(our_rapm, key=our_rapm.get, reverse=True)
     top_q = sorted_ids[: n // 4]
@@ -135,8 +152,14 @@ def run_internal_checks(client, season, our_rapm):
 
     # Known elite player check — all players have league-wide data, uniform 60th pct threshold
     print("\n  Known elite player rankings:")
+    mismatched = elite_id_mismatches(name_map)
     for pid, name in KNOWN_ELITE.items():
-        if pid in our_rapm:
+        if pid in mismatched:
+            print(f"    [WARN] {name}: id {pid} is {mismatched[pid]} in players -- fix KNOWN_ELITE")
+            issues.append(f"KNOWN_ELITE id {pid} is {mismatched[pid]}, not {name}")
+        elif pid not in our_rapm:
+            print(f"    [--] {name}: no RAPM this season")
+        else:
             rank = sorted_ids.index(pid) + 1
             pct = round((1 - rank / n) * 100)
             flag = "OK" if pct >= 60 else "WARN"
