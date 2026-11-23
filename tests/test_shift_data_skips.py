@@ -155,7 +155,7 @@ def run_with(monkeypatch, outcomes):
     monkeypatch.setattr(
         shift_data, "get_all_completed_games", lambda season: [{"id": g} for g in outcomes]
     )
-    monkeypatch.setattr(shift_data, "get_processed_games", lambda c, s: set())
+    monkeypatch.setattr(shift_data, "get_processed_games", lambda c, ids: set())
     monkeypatch.setattr(shift_data, "get_skipped_games", lambda c, s: set())
 
     def fake_shifts(game_id, season):
